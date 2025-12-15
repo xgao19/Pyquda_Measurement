@@ -1,0 +1,171 @@
+#!/bin/bash
+
+LARGE_REGS=1
+
+CMAKE=cmake
+
+rm -f CMakeCache.txt
+rm -rf include
+
+export QUDA_TARGET=SYCL
+export CC=mpicc
+export CXX=mpicxx
+
+#export QUDA_SYCL_TARGETS="spir64_gen"
+#export QUDA_SYCL_TARGETS="spir64_gen:-g0"
+#export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -Xs \"-device pvc\""
+export QUDA_SYCL_TARGETS="intel_gpu_pvc"
+
+#export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -Xs \"-options -g0\""
+#export SYCL_FLAGS="-g -O0"
+#export CXXFLAGS="-g -O0"
+
+#export SYCL_FLAGS="-fno-strict-aliasing"
+#export CXXFLAGS="-fno-strict-aliasing"
+
+#export QUDA_SYCL_TARGETS="spir64_x86_64"
+#export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -Xs -march=avx512"
+#LARGE_REGS=0
+
+#export QUDA_SYCL_TARGETS="native_cpu"
+#CXXFLAGS="-D __SYCL_NATIVE_CPU__"
+
+export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -fsycl-device-code-split=per_kernel"
+export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -fsycl-max-parallel-link-jobs=32"
+export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -flink-huge-device-code"
+
+#export CC="$HOME/intel/build/llvm-git/bin/clang"
+#export CXX="$HOME/intel/build/llvm-git/bin/clang++"
+#export CXX="icpx"
+#export CXX="icpx --gcc-toolchain=/opt/cray/pe/gcc/8.1.0/snos"
+#export CXX="mpicxx --gcc-toolchain=/opt/cray/pe/gcc/8.1.0/snos"
+#export CXX="mpicxx --gcc-toolchain=/opt/cray/pe/gcc/10.3.0/snos"
+#export CXX="icpx --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos"
+#export CXXFLAGS="-fsycl"
+#export CXXFLAGS="$CXXFLAGS --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos"
+#export CXXFLAGS="$CXXFLAGS -fsycl-targets=spir64_gen -Xs \"-device 0x0bd6\""
+#export CXXFLAGS="$CXXFLAGS -fsycl-max-parallel-link-jobs=32 -fPIC"
+#export CXXFLAGS="-fsycl -fsycl-targets=spir64_gen"
+#export CXXFLAGS="-fsycl -fsycl-targets=spir64_gen -Xs \"-device xehpc\""
+#export CXXFLAGS="-fsycl -fsycl-targets=spir64_gen -Xs \"-device pvc\""
+#export CXXFLAGS="$CXXFLAGS -Xs \"-internal_options -ze-intel-enable-auto-large-GRF-mode\""
+#export LDFLAGS="-fsycl -fsycl-device-code-split=per_kernel -fsycl-targets=spir64_gen -Xs \"-device xehpc\""
+#export LDFLAGS="-fsycl -fsycl-device-code-split=per_kernel -fsycl-targets=spir64_gen -Xs \"-device pvc\""
+#export LDFLAGS="-fsycl -fsycl-device-code-split=per_kernel -fPIC"
+#export LDFLAGS="-fsycl -fsycl-device-code-split=per_kernel -fsycl-targets=spir64-unknown-unknown -Xs \"-device xehpc\""
+#export LDFLAGS="$LDFLAGS -fsycl-max-parallel-link-jobs=32"
+#export LDFLAGS="$LDFLAGS -fsycl-link-huge-device-code"
+
+#export SYCL_FLAGS="-fsycl-targets=spir64_gen -Xs \"-device pvc\""
+#export SYCL_FLAGS="-fsycl-targets=spir64_gen"
+#export SYCL_FLAGS="$SYCL_FLAGS -ffast-math"
+#export SYCL_LINK_FLAGS="-fsycl-device-code-split=per_kernel -fsycl-targets=spir64_gen -Xs \"-device pvc\""
+#export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -fsycl-max-parallel-link-jobs=32"
+#export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -flink-huge-device-code"
+
+#export SYCL_FLAGS="$SYCL_FLAGS -Wno-deprecated-declarations"
+
+export QUDA_WARP_SIZE=16
+#export QUDA_WARP_SIZE=32
+export QUDA_MAX_BLOCK_SIZE=1024
+#export QUDA_MAX_ARGUMENT_SIZE=2048
+export QUDA_TEST_NUMPROCS=1
+
+prefix="/home/jinchen/software/quda_build"
+if [ "X$LARGE_REGS" = "X0" ]; then
+  echo "Using small register file"
+  export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -ftarget-register-alloc-mode=pvc:small"
+  prefix="/home/jinchen/software/quda_build"
+fi
+if [ "X$LARGE_REGS" = "X1" ]; then
+  echo "Using large register file"
+  #export CXXFLAGS="$CXXFLAGS -Xs \"-options -ze-opt-large-register-file\""
+  #export LDFLAGS="$LDFLAGS -Xs \"-options -ze-opt-large-register-file\""
+  #export SYCL_FLAGS="$SYCL_FLAGS -Xs \"-options -ze-opt-large-register-file\""
+  #export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -Xs \"-options -ze-opt-large-register-file\""
+  export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -ftarget-register-alloc-mode=pvc:large"
+  #export QUDA_MAX_BLOCK_SIZE=512
+  prefix="$HOME/lqcd/install/quda-git-sycl-256"
+fi
+if [ "X$LARGE_REGS" = "X2" ]; then
+  echo "Using auto register file"
+  export SYCL_LINK_FLAGS="$SYCL_LINK_FLAGS -ftarget-register-alloc-mode=pvc:auto"
+  #export QUDA_MAX_BLOCK_SIZE=512
+  prefix="$HOME/lqcd/install/quda-git-sycl-auto"
+fi
+#export CXXFLAGS="$CXXFLAGS -DQUDA_COMM_CHECKHANG"
+#export CXXFLAGS="$CXXFLAGS -DQUDA_COMM_CHECKSUM"
+#export CXXFLAGS="$CXXFLAGS -gline-tables-only"
+#export SYCL_FLAGS="$SYCL_FLAGS -gline-tables-only"
+export CXXFLAGS="$CXXFLAGS -Xarch_host -g"
+export SYCL_FLAGS="$SYCL_FLAGS -Xarch_host -g"
+#export CXXFLAGS="$CXXFLAGS -Xs -g0"
+#export SYCL_FLAGS="$SYCL_FLAGS -Xs -g0"
+#export SYCL_FLAGS="$SYCL_FLAGS -fno-sycl-rdc"
+export SYCL_FLAGS="$SYCL_FLAGS -Wno-explicit-specialization-storage-class"
+#export SYCL_FLAGS="$CXXFLAGS"
+#CXXFLAGS=""
+#export CXXFLAGS="-fsycl $SYCL_FLAGS"
+#SYCL_FLAGS=""
+#export LDFLAGS="-fsycl $SYCL_LINK_FLAGS"
+#SYCL_LINK_FLAGS=""
+
+o="$o -DCMAKE_INSTALL_PREFIX=$prefix"
+
+#o="$o -DCMAKE_BUILD_TYPE=DEVEL"
+o="$o -DCMAKE_BUILD_TYPE=RELEASE"
+#o="$o -DCMAKE_BUILD_TYPE=STRICT"
+#o="$o -DCMAKE_BUILD_TYPE=DEBUG"
+#o="$o -DCMAKE_BUILD_TYPE=HOSTDEBUG"
+
+##o="$o -DQUDA_BLOCKSOLVER=ON"
+##o="$o -DQUDA_CONTRACT=ON"
+##o="$o -DQUDA_SMEAR_GAUSS_TWOLINK=ON"
+o="$o -DQUDA_DIRAC_COVDEV=ON"
+o="$o -DQUDA_DIRAC_DISTANCE_PRECONDITIONING=ON"
+o="$o -DQUDA_MULTIGRID=ON"
+
+#o="$o -DQUDA_DIRAC_DEFAULT_OFF=ON"
+#o="$o -DQUDA_DIRAC_STAGGERED=ON"
+#o="$o -DQUDA_DIRAC_LAPLACE=ON"
+#o="$o -DQUDA_DIRAC_WILSON=ON"
+#o="$o -DQUDA_DIRAC_CLOVER=ON"
+#o="$o -DQUDA_DIRAC_CLOVER_HASENBUSCH=ON"
+#o="$o -DQUDA_DIRAC_TWISTED_MASS=OFF"
+#o="$o -DQUDA_DIRAC_TWISTED_CLOVER=OFF"
+#o="$o -DQUDA_DIRAC_NDEG_TWISTED_MASS=OFF"
+#o="$o -DQUDA_DIRAC_NDEG_TWISTED_CLOVER=OFF"
+#o="$o -DQUDA_DIRAC_DOMAIN_WALL=ON"
+o="$o -DQUDA_INTERFACE_QDPJIT=ON"
+
+o="$o -DQUDA_CTEST_DISABLE_BENCHMARKS=OFF"
+o="$o -DQUDA_BUILD_ALL_TESTS=OFF"
+o="$o -DQUDA_INSTALL_ALL_TESTS=OFF"
+
+#o="$o -DQUDA_BUILD_NATIVE_LAPACK=OFF"
+#o="$o -DQUDA_BUILD_NATIVE_FFT=OFF"
+#o="$o -DQUDA_PRECISION=12"
+#o="$o -DQUDA_RECONSTRUCT=4"
+
+o="$o -DQUDA_FAST_COMPILE_REDUCE=ON"
+o="$o -DQUDA_FAST_COMPILE_DSLASH=ON"
+#o="$o -DQUDA_BUILD_SHAREDLIB=OFF"
+o="$o -DQUDA_MPI=ON"
+o="$o -DMPIEXEC_EXECUTABLE=`which mpiexec`"
+o="$o -GNinja"
+
+echo "QUDA_TARGET:"
+echo $QUDA_TARGET
+echo "QUDA_SYCL_TARGETS:"
+echo $QUDA_SYCL_TARGETS
+echo "SYCL_FLAGS:"
+echo $SYCL_FLAGS
+echo "SYCL_LINK_FLAGS:"
+echo $SYCL_LINK_FLAGS
+echo "CXXFLAGS:"
+echo $CXXFLAGS
+echo "LDFLAGS:"
+echo $LDFLAGS
+
+echo $CMAKE --fresh $o /home/jinchen/software/quda
+$CMAKE --fresh $o /home/jinchen/software/quda
