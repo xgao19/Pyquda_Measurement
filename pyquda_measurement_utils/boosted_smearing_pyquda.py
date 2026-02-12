@@ -25,7 +25,7 @@ except ImportError:
     raise ImportError("Could not import 'fft' from 'pyquda_utils'. Please ensure PyQUDA is installed correctly.")
 
 from pyquda_comm import getMPIRank, getCoordFromRank
-from utils.tools import _get_xp_from_array, _ensure_backend
+from pyquda_measurement_utils.tools import _get_xp_from_array, _ensure_backend
 
 def _exp_complex(xp, real, imag):
     if xp.__name__ == "torch":

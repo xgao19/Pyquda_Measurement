@@ -10,8 +10,8 @@ from pyquda_utils import core, gamma
 from pyquda_utils.phase import MomentumPhase
 
 from pyquda_utils.source import sequential12 
-from utils.boosted_smearing_pyquda import boosted_smearing
-from utils.tools import _get_xp_from_array, _asarray_on_queue
+from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
+from pyquda_measurement_utils.tools import _get_xp_from_array, _asarray_on_queue
 
 # ---------- Precompute Constant Spin Matrices ----------
 Cg5 = (1j * gamma.gamma(2) @ gamma.gamma(8)) @ gamma.gamma(15)

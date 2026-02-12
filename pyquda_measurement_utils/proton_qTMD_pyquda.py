@@ -1,7 +1,7 @@
 from pyquda_utils import core, gamma
-from utils.boosted_smearing_pyquda import boosted_smearing
-from utils.io_corr import save_proton_c2pt_hdf5
-from utils.tools import _get_xp_from_array, mpi_print, _asarray_on_queue
+from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
+from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
+from pyquda_measurement_utils.tools import _get_xp_from_array, mpi_print, _asarray_on_queue
 
 
 my_gammas = ["5", "T", "T5", "X", "X5", "Y", "Y5", "Z", "Z5", "I", "SXT", "SXY", "SXZ", "SYT", "SYZ", "SZT"]

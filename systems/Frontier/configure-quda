@@ -1,0 +1,121 @@
+#!/bin/bash
+#
+# Frontier (ROCm/HIP) QUDA configure script, written in the same style as the Aurora script
+#
+
+CMAKE=cmake
+
+# Clean previous CMake state (same pattern as the Aurora script)
+rm -f CMakeCache.txt
+rm -rf include
+
+# ----------------------------
+# Target / compilers (Frontier)
+# ----------------------------
+
+# Build QUDA with the HIP backend on Frontier (MI250X)
+export QUDA_TARGET=HIP
+
+# Use hipcc as both C and C++ compiler (matches your Frontier one-liner)
+export CC=hipcc
+export CXX=hipcc
+
+# ROCm installation prefix (usually provided by the environment on Frontier)
+export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
+
+# MI250X GPU architecture
+export QUDA_GPU_ARCH=gfx90a
+
+# Keep the same knob as the Aurora script (used by some QUDA tests)
+export QUDA_TEST_NUMPROCS=1
+
+# ----------------------------
+# Install prefix
+# ----------------------------
+
+# Adjust this to your preferred install location
+prefix="your_quda_build"
+
+# ----------------------------
+# CMake options (Aurora-style "o=...")
+# ----------------------------
+
+o=""
+
+# Install location
+o="$o -DCMAKE_INSTALL_PREFIX=$prefix"
+
+# Build type
+o="$o -DCMAKE_BUILD_TYPE=RELEASE"
+#o="$o -DCMAKE_BUILD_TYPE=DEBUG"
+#o="$o -DCMAKE_BUILD_TYPE=STRICT"
+
+# Export compile_commands.json for tooling
+o="$o -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+
+# QUDA target and ROCm/HIP toolchain
+o="$o -DQUDA_TARGET_TYPE=HIP"
+o="$o -DQUDA_GPU_ARCH=$QUDA_GPU_ARCH"
+o="$o -DROCM_PATH=$ROCM_PATH"
+o="$o -DCMAKE_C_COMPILER=$CC"
+o="$o -DCMAKE_CXX_COMPILER=$CXX"
+
+# MPI support
+o="$o -DQUDA_MPI=ON"
+o="$o -DMPIEXEC_EXECUTABLE=$(which mpiexec)"
+
+# Enable core solver/features (as in your Frontier one-liner)
+o="$o -DQUDA_MULTIGRID=ON"
+
+# CovDev option naming can differ across branches; keep both to be safe
+o="$o -DQUDA_DIRAC_COVDEV=ON"
+o="$o -DQUDA_COVDEV=ON"
+
+# Dirac operator selection (as in your Frontier one-liner)
+o="$o -DQUDA_DIRAC_DEFAULT_OFF=ON"
+o="$o -DQUDA_DIRAC_WILSON=ON"
+o="$o -DQUDA_DIRAC_CLOVER=ON"
+o="$o -DQUDA_DIRAC_STAGGERED=ON"
+o="$o -DQUDA_DIRAC_LAPLACE=ON"
+
+# Clover controls (as in your Frontier one-liner)
+o="$o -DQUDA_CLOVER_DYNAMIC=OFF"
+o="$o -DQUDA_CLOVER_RECONSTRUCT=OFF"
+
+# Test/benchmark controls (same structure as the Aurora script)
+o="$o -DQUDA_CTEST_DISABLE_BENCHMARKS=OFF"
+o="$o -DQUDA_BUILD_ALL_TESTS=OFF"
+o="$o -DQUDA_INSTALL_ALL_TESTS=OFF"
+
+# Fast compile knobs (same as the Aurora script)
+o="$o -DQUDA_FAST_COMPILE_REDUCE=ON"
+o="$o -DQUDA_FAST_COMPILE_DSLASH=ON"
+
+# Generator
+o="$o -GNinja"
+
+# ----------------------------
+# Source directory and configure
+# ----------------------------
+
+# Set this to your QUDA source path
+quda_src="your_quda_source"
+
+# Print key variables for reproducibility (same style as Aurora)
+echo "QUDA_TARGET:"
+echo "$QUDA_TARGET"
+echo "ROCM_PATH:"
+echo "$ROCM_PATH"
+echo "QUDA_GPU_ARCH:"
+echo "$QUDA_GPU_ARCH"
+echo "CC:"
+echo "$CC"
+echo "CXX:"
+echo "$CXX"
+echo "CMake options:"
+echo "$o"
+
+echo
+echo "$CMAKE --fresh $o $quda_src"
+$CMAKE --fresh $o "$quda_src"
+
