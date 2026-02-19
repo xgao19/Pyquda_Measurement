@@ -43,10 +43,18 @@ class pion_TMDWF_measurement():
         # use the first gamma's dtype and device to allocate the container
         first_gamma = my_pyquda_gammas[0]
         n_gamma = len(my_pyquda_gammas)
-        pyquda_gamma_ls = xp.empty(
-            (n_gamma,) + first_gamma.shape,
-            dtype=first_gamma.dtype,
-        )       
+
+        if xp.__name__ == 'dpnp':
+            pyquda_gamma_ls = xp.empty(
+                (n_gamma,) + first_gamma.shape,
+                dtype=first_gamma.dtype,
+                device=first_gamma.device,
+            )
+        else:
+            pyquda_gamma_ls = xp.empty(
+                (n_gamma,) + first_gamma.shape,
+                dtype=first_gamma.dtype,
+            )    
         for gamma_idx, gamma_pyq in enumerate(my_pyquda_gammas):
             pyquda_gamma_ls[gamma_idx] = gamma_pyq
 
@@ -56,7 +64,8 @@ class pion_TMDWF_measurement():
         bw_prop = xp.einsum("ij, wtzyxilab, kl -> wtzyxkjba", G5, prop_b.data.conj(), G5)
         bw_prop = xp.einsum("wtzyxjicf, gim -> gwtzyxjmcf", bw_prop, pyquda_gamma_ls)
         temp1 = xp.einsum("gwtzyxjiab, wtzyxilba, lj -> gwtzyx", bw_prop, prop_f.data, Gsrc)
-        corr = core.gatherLattice(xp.einsum("qwtzyx, gwtzyx -> gqt", phases, temp1).get(), [2, -1, -1, -1])
+        #corr = core.gatherLattice(xp.einsum("qwtzyx, gwtzyx -> gqt", phases, temp1).get(), [2, -1, -1, -1])
+        corr = core.gatherLattice(xp.asnumpy(xp.einsum("qwtzyx, gwtzyx -> gqt", phases, temp1)), [2, -1, -1, -1])
         
         if latt_info.mpi_rank == 0:
             save_proton_c2pt_hdf5(corr, tag, my_gammas, self.plist)
