@@ -1,8 +1,8 @@
 #!/bin/bash
 #PBS -q debug-scaling
 #PBS -N qTMD
-#PBS -l select=8:ngpus=4
-#PBS -l walltime=00:30:00
+#PBS -l select=6:ngpus=6
+#PBS -l walltime=01:00:00
 #PBS -l filesystems=flare
 #PBS -k doe
 #PBS -l place=scatter
@@ -50,10 +50,11 @@ export QUDA_ENABLE_P2P=0
 export QUDA_ENABLE_MPS=1
 
 
-echo ">>> Running pyquda_nucleon_TMD_einsum2.py"
+echo ">>> Running pyquda_nucleon_TMD_einsum.py"
+/opt/cray/pals/1.8/bin/mpiexec -n 32 -ppn 6 python3 pyquda_nucleon_TMD_einsum.py --config_num 1050 --mpi_geometry 2.2.2.4 >log/nucleon_TMD_node6_n32_1050_old.o 2>log/nucleon_TMD_node6_n32_1050_old.e
 # /opt/cray/pals/1.8/bin/mpiexec -n 128 -ppn 4 python3 pyquda_nucleon_TMD_einsum2.py --config_num 1050 --mpi_geometry 2.4.4.4 >log/nucleon_TMD_node32_n128_1050.o 2>log/nucleon_TMD_node32_n128_1050.e
 # /opt/cray/pals/1.8/bin/mpiexec -n 64 -ppn 4 python3 pyquda_nucleon_TMD_einsum3.py --config_num 1050 --mpi_geometry 2.2.4.4 >log/nucleon_TMD_node16_n64_1050.o 2>log/nucleon_TMD_node16_n64_1050.e
-/opt/cray/pals/1.8/bin/mpiexec -n 32 -ppn 4 python3 pyquda_nucleon_TMD_einsum2.py --config_num 1050 --mpi_geometry 2.2.2.4 >log/nucleon_TMD_node8_n32_1050.o 2>log/nucleon_TMD_node8_n32_1050.e
-# /opt/cray/pals/1.8/bin/mpiexec -n 32 -ppn 6 python3 pyquda_nucleon_TMD_einsum2.py --config_num 1050 --mpi_geometry 2.2.2.4 >log/nucleon_TMD_node6_n32_1050.o 2>log/nucleon_TMD_node6_n32_1050.e
+# /opt/cray/pals/1.8/bin/mpiexec -n 32 -ppn 4 python3 pyquda_nucleon_TMD_einsum2.py --config_num 1050 --mpi_geometry 2.2.2.4 >log/nucleon_TMD_node8_n32_1050.o 2>log/nucleon_TMD_node8_n32_1050.e
+#/opt/cray/pals/1.8/bin/mpiexec -n 32 -ppn 6 python3 pyquda_nucleon_TMD_einsum2.py --config_num 1050 --mpi_geometry 2.2.2.4 >log/nucleon_TMD_node6_n32_1050.o 2>log/nucleon_TMD_node6_n32_1050.e
 # /opt/cray/pals/1.8/bin/mpiexec -n 64 -ppn 6 python3 pyquda_nucleon_TMD_einsum.py --config_num 1050 --mpi_geometry 2.2.4.4 >log/nucleon_TMD_node11_n64_1050.o 2>log/nucleon_TMD_node11_n64_1050.e
 wait
