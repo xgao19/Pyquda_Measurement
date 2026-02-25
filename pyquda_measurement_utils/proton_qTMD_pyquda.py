@@ -86,81 +86,190 @@ class proton_TMD():
         phases = _asarray_on_queue(phases, xp, prop_f.data)
         gamma_insert = _asarray_on_queue(gamma_insert, xp, prop_f.data)
         
-        
-        #! Optimized version of the 2pt TMD contraction
-        # --- Term 1 ---
-        # original equation: -1 * [epsilon(abc)*epsilon(def)*G(ij)*G(kl)*P2pt(gtmn)*P1(ikad)*P2(jlbe)*P3(mncf)*Phases]
-        # structure: Prop1 and Prop2 are directly connected to Sink(ij) and Src(kl); Prop3 is self-closed(mn)
+        #! Optimized version of the 2pt TMD contraction (memory-friendly)
+        #! Strategy: split large einsum into small 2-tensor / 3-tensor contractions
 
-        # 1. [Sink Block] contract Sink color(abc), spin(ij) and Prop1, Prop2
-        #    Indices: P1(i,k,a,d), P2(j,l,b,e), E(a,b,c), G(i,j) -> Result(k,l,d,e,c)
-        #    Note: c is the sink color of Prop3
-        term1_sink = xp.einsum(
-            "abc, ij, wtzyxikad, wtzyxjlbe -> wtzyxklcde",
-            epsilon, gamma_insert, prop_f.data, prop_f.data,
+        # ============================================================
+        # --- Term 1 ---
+        # original:
+        # - epsilon(abc)*epsilon(def)*G(ij)*G(kl)*P2pt(gtmn)*P1(ikad)*P2(jlbe)*P3(mncf)*Phases
+        # ============================================================
+
+        # -----------------------------
+        # 1) Sink block (split)
+        # term1_sink = einsum("abc, ij, ...ikad, ...jlbe -> ...klcde")
+        # -----------------------------
+
+        # (a) contract epsilon(abc) with first propagator P1(i,k,a,d)
+        #     "abc, ...ikad -> ...ikbcd"
+        t1_s1 = xp.einsum(
+            "abc, wtzyxikad -> wtzyxikbcd",
+            epsilon, prop_f.data,
             optimize=True
         )
 
-        # 2. [P3 Block] Prop3 is self-closed with P_2pt
-        #    Indices: P3(m,n,c,f), P2pt(g,t,m,n) -> Result(g,c,f)
-        #    Note: here m,n are contracted
+        # (b) contract gamma_insert(ij) with second propagator P2(j,l,b,e)
+        #     "ij, ...jlbe -> ...ilbe"
+        t1_s2 = xp.einsum(
+            "ij, wtzyxjlbe -> wtzyxilbe",
+            gamma_insert, prop_f.data,
+            optimize=True
+        )
+
+        # (c) combine the two partial sink blocks, contract i and b
+        #     "...ikbcd, ...ilbe -> ...klcde"
+        term1_sink = xp.einsum(
+            "wtzyxikbcd, wtzyxilbe -> wtzyxklcde",
+            t1_s1, t1_s2,
+            optimize=True
+        )
+
+        del t1_s1, t1_s2
+
+
+        # -----------------------------
+        # 2) P3 block (already 2 tensors)
+        # term1_p3 = einsum("gtmn, ...mncf -> g...cf")
+        # -----------------------------
         term1_p3 = xp.einsum(
             "gtmn, wtzyxmncf -> gwtzyxcf",
             P_2pt_gamma, prop_f.data,
             optimize=True
         )
 
-        # 3. [Final Assembly] combine two parts
-        #    Indices: Sink(k,l,d,e,c), P3(g,c,f), E(d,e,f), G(k,l), Phases
-        #    Remaining: g, p, t
+
+        # -----------------------------
+        # 3) Final assembly (split)
+        # original:
+        # term1 = einsum("def, pwtzyx, kl, ...klcde, g...cf -> gpt")
+        # -----------------------------
+
+        # (a) contract epsilon(def) with term1_sink on d,e
+        #     "def, ...klcde -> ...klcf"
+        t1_f1 = xp.einsum(
+            "def, wtzyxklcde -> wtzyxklcf",
+            epsilon, term1_sink,
+            optimize=True
+        )
+        del term1_sink
+
+        # (b) contract gamma_insert(k,l)
+        #     "kl, ...klcf -> ...cf"
+        t1_f2 = xp.einsum(
+            "kl, wtzyxklcf -> wtzyxcf",
+            gamma_insert, t1_f1,
+            optimize=True
+        )
+        del t1_f1
+
+        # (c) contract with P3 block on c,f
+        #     "...cf, g...cf -> g..."
+        t1_f3 = xp.einsum(
+            "wtzyxcf, gwtzyxcf -> gwtzyx",
+            t1_f2, term1_p3,
+            optimize=True
+        )
+        del t1_f2, term1_p3
+
+        # (d) contract phases
+        #     "p..., g... -> gpt"
         term1 = xp.einsum(
-            "def, pwtzyx, kl, wtzyxklcde, gwtzyxcf -> gpt",
-            epsilon, phases, gamma_insert, term1_sink, term1_p3,
+            "pwtzyx, gwtzyx -> gpt",
+            phases, t1_f3,
             optimize=True
         )
-
-        # clean up memory
-        del term1_sink, term1_p3
+        del t1_f3
 
 
+        # ============================================================
         # --- Term 2 ---
-        # original equation: -1 * [epsilon(abc)*epsilon(def)*G(ij)*G(kl)*P2pt(gtmn)*P1(ikad)*P2(jnbe)*P3(mlcf)*Phases]
-        # structure: Prop1(k) is connected to Prop3(l) in Src; Prop2(n) is connected to Prop3(m) through P2pt... This is a big loop.
+        # original:
+        # - epsilon(abc)*epsilon(def)*G(ij)*G(kl)*P2pt(gtmn)*P1(ikad)*P2(jnbe)*P3(mlcf)*Phases
+        # ============================================================
 
-        # 1. [Sink Block] contract Sink color(abc), spin(ij) and Prop1, Prop2
-        #    Indices: P1(i,k,a,d), P2(j,n,b,e), E(a,b,c), G(i,j) -> Result(k,n,d,e,c)
-        #    Note: l is changed to n
-        term2_sink = xp.einsum(
-            "abc, ij, wtzyxikad, wtzyxjnbe -> wtzyxkncde",
-            epsilon, gamma_insert, prop_f.data, prop_f.data,
+        # -----------------------------
+        # 1) Sink block (split)
+        # term2_sink = einsum("abc, ij, ...ikad, ...jnbe -> ...kncde")
+        # -----------------------------
+
+        # (a) epsilon with P1
+        #     "abc, ...ikad -> ...ikbcd"
+        t2_s1 = xp.einsum(
+            "abc, wtzyxikad -> wtzyxikbcd",
+            epsilon, prop_f.data,
             optimize=True
         )
 
-        # 2. [P3 Block] Prop3 is connected to P2pt
-        #    Indices: P3(m,l,c,f), P2pt(g,t,m,n) -> Result(g,n,l,c,f)
-        #    Note: m is contracted, but n (connected to Prop2) and l (connected to Gamma) are kept
+        # (b) gamma_insert with P2(j,n,b,e)
+        #     "ij, ...jnbe -> ...inbe"
+        t2_s2 = xp.einsum(
+            "ij, wtzyxjnbe -> wtzyxinbe",
+            gamma_insert, prop_f.data,
+            optimize=True
+        )
+
+        # (c) combine, contract i and b
+        #     "...ikbcd, ...inbe -> ...kncde"
+        term2_sink = xp.einsum(
+            "wtzyxikbcd, wtzyxinbe -> wtzyxkncde",
+            t2_s1, t2_s2,
+            optimize=True
+        )
+
+        del t2_s1, t2_s2
+
+
+        # -----------------------------
+        # 2) P3 block (already 2 tensors)
+        # term2_p3 = einsum("gtmn, ...mlcf -> g...nlcf")
+        # -----------------------------
         term2_p3 = xp.einsum(
             "gtmn, wtzyxmlcf -> gwtzyxnlcf",
             P_2pt_gamma, prop_f.data,
             optimize=True
         )
 
-        # 3. [Final Assembly]
-        #    Indices: 
-        #      Sink: k, n, d, e, c
-        #      P3:   g, n, l, c, f
-        #      Gamma: k, l
-        #      Eps:   d, e, f
-        #    contracted path: 
-        #      k (Sink-Gamma), l (P3-Gamma), n (Sink-P3), c (Sink-P3), def (Eps-Sink-P3)
-        term2 = xp.einsum(
-            "def, pwtzyx, kl, wtzyxkncde, gwtzyxnlcf -> gpt",
-            epsilon, phases, gamma_insert, term2_sink, term2_p3,
+
+        # -----------------------------
+        # 3) Final assembly (split)
+        # original:
+        # term2 = einsum("def, pwtzyx, kl, ...kncde, g...nlcf -> gpt")
+        # -----------------------------
+
+        # (a) contract epsilon(def) with term2_sink on d,e
+        #     "def, ...kncde -> ...kncf"
+        t2_f1 = xp.einsum(
+            "def, wtzyxkncde -> wtzyxkncf",
+            epsilon, term2_sink,
             optimize=True
         )
+        del term2_sink
 
-        # clean up memory
-        del term2_sink, term2_p3
+        # (b) contract sink-part and P3-part on (n,c,f), keep (g,k,l,w,t,z,y,x)
+        #     "...kncf, g...nlcf -> g...kl"
+        t2_f2 = xp.einsum(
+            "wtzyxkncf, gwtzyxnlcf -> gwtzyxkl",
+            t2_f1, term2_p3,
+            optimize=True
+        )
+        del t2_f1, term2_p3
+
+        # (c) contract gamma_insert(k,l)
+        #     "kl, g...kl -> g..."
+        t2_f3 = xp.einsum(
+            "kl, gwtzyxkl -> gwtzyx",
+            gamma_insert, t2_f2,
+            optimize=True
+        )
+        del t2_f2
+
+        # (d) contract phases
+        term2 = xp.einsum(
+            "pwtzyx, gwtzyx -> gpt",
+            phases, t2_f3,
+            optimize=True
+        )
+        del t2_f3
 
         # --- Final Result ---
         # original code is (- Einsum1 - Einsum2)
