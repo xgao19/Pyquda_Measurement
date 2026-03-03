@@ -108,6 +108,34 @@ Install PyQUDA and PyQUDA-Utils into the same Python environment:
 python3 -m pip install PyQUDA==0.10.32 PyQUDA-Utils==0.10.30.post0
 ```
 
+### 3. Install Pycontract
+
+First ensure CMake is new enough, for example:
+
+```bash
+module load cmake/3.27.9
+cmake --version
+```
+
+Install Cython:
+
+```bash
+python3 -m pip install Cython
+```
+
+Build and install Pycontract:
+
+```bash
+git clone https://github.com/CLQCD/contract.git
+cd contract
+mkdir -p build
+cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMAND=ON -DGPU_TARGET=hip -DGPU_ARCH=gfx90a
+cmake --build . -j8 && cmake --install .
+python3 -m pyquda_plugins -i contract.h -l contract -I $(pwd)/install/include -L $(pwd)/install/lib
+cd ../..
+```
+
 ## Configure PyQUDA Backend (CuPy Only)
 
 CPU-only backends are **not supported** in this README. Use CuPy (HIP):
