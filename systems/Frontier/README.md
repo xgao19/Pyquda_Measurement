@@ -136,6 +136,8 @@ python3 -m pyquda_plugins -i contract.h -l contract -I $(pwd)/install/include -L
 cd ../..
 ```
 
+**Note:** On Frontier (AMD GPUs), `pycontract.baryonSequentialTwoPoint` currently encounters issues. For now, use only `pycontract.mesonAllSinkTwoPoint` to accelerate contractions.
+
 ## Configure PyQUDA Backend (CuPy Only)
 
 CPU-only backends are **not supported** in this README. Use CuPy (HIP):
