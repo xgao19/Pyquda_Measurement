@@ -124,6 +124,7 @@ time.sleep(2)
 #! Measurement
 ###################### loop over sources ######################
 for ipos, pos in enumerate(src_production):
+    t0_pos = time.time()
     
     sample_log_tag = get_sample_log_tag("ex", pos, sm_tag)
     mpi_print(latt_info, f"Contraction START: {sample_log_tag}")
@@ -272,5 +273,5 @@ for ipos, pos in enumerate(src_production):
         if latt_info.mpi_rank == 0:
             f.write(sample_log_tag+"\n")
 
-    mpi_print(latt_info, f"DONE: {sample_log_tag}")
+    mpi_print(latt_info, f"DONE: {sample_log_tag} {time.time() - t0_pos}s")
 
