@@ -30,7 +30,7 @@ class pion_TMDWF_measurement():
         self.neg_boost = parameters["neg_boost"]
         
     #! PyQUDA: contract 2pt TMD
-    def contract_2pt_pion(self, latt_info, prop_f, prop_b, phases, tag, interpolator = "5"): 
+    def contract_2pt_pion(self, latt_info, prop_f, prop_b, phases, tag, src_mode="fixed_g5"): 
         
         mpi_print(latt_info, "Begin sink smearing")
         prop_f = boosted_smearing(prop_f, w=self.width, boost=self.pos_boost)
@@ -58,12 +58,39 @@ class pion_TMDWF_measurement():
         for gamma_idx, gamma_pyq in enumerate(my_pyquda_gammas):
             pyquda_gamma_ls[gamma_idx] = gamma_pyq
 
-        # interpolator = gamma(15) # gamma5 for pion
-        Gsrc = gamma.gamma(15)
+        # Source Dirac structure:
+        # - fixed_g5: preserve the original pion definition
+        # - same_as_sink: use the same Gamma_g on source and sink
+        # - dagger_of_sink: use gamma5 * Gamma_g^\dagger * gamma5 on source
+        if src_mode == "fixed_g5":
+            src_gamma_ls = xp.empty(
+                (n_gamma,) + first_gamma.shape,
+                dtype=first_gamma.dtype,
+                device=first_gamma.device,
+            ) if xp.__name__ == 'dpnp' else xp.empty(
+                (n_gamma,) + first_gamma.shape,
+                dtype=first_gamma.dtype,
+            )
+            src_gamma_ls[:] = G5
+        elif src_mode == "same_as_sink":
+            src_gamma_ls = pyquda_gamma_ls.copy()
+        elif src_mode == "dagger_of_sink":
+            src_gamma_ls = xp.einsum(
+                "ab, gbc, cd -> gad",
+                G5,
+                xp.swapaxes(pyquda_gamma_ls.conj(), 1, 2),
+                G5,
+            )
+        else:
+            raise ValueError(
+                f"Invalid src_mode: {src_mode}. "
+                "Expected one of ['fixed_g5', 'same_as_sink', 'dagger_of_sink']."
+            )
+
         phases = _asarray_on_queue(phases, xp, prop_f.data)
         bw_prop = xp.einsum("ij, wtzyxilab, kl -> wtzyxkjba", G5, prop_b.data.conj(), G5)
         bw_prop = xp.einsum("wtzyxjicf, gim -> gwtzyxjmcf", bw_prop, pyquda_gamma_ls)
-        temp1 = xp.einsum("gwtzyxjiab, wtzyxilba, lj -> gwtzyx", bw_prop, prop_f.data, Gsrc)
+        temp1 = xp.einsum("gwtzyxjiab, wtzyxilba, glj -> gwtzyx", bw_prop, prop_f.data, src_gamma_ls)
         #corr = core.gatherLattice(xp.einsum("qwtzyx, gwtzyx -> gqt", phases, temp1).get(), [2, -1, -1, -1])
         corr = core.gatherLattice(xp.asnumpy(xp.einsum("qwtzyx, gwtzyx -> gqt", phases, temp1)), [2, -1, -1, -1])
         

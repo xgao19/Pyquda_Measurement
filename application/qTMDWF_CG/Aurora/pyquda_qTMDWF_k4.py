@@ -156,7 +156,7 @@ for ipos, pos in enumerate(src_production):
     tag = get_c2pt_file_tag(data_dir, lat_tag, conf, "ex", pos, sm_tag)
     p_2pt_xyz = [[0, 0, -v] for v in range(parameters["pzmin"], parameters["pzmax"])]
     phases_2pt = MomentumPhase(latt_info).getPhases(p_2pt_xyz, x0=pos)
-    Measurement.contract_2pt_pion(latt_info, propag_f, propag_b, phases_2pt, tag+f"_src{interpolation}", interpolation)
+    Measurement.contract_2pt_pion(latt_info, propag_f, propag_b, phases_2pt, tag+f"_src{interpolation}")
 
     mpi_print(latt_info, f"TIME Pyquda: Contraction 2pt (includes sink smearing) {time.time() - t0}")
     
@@ -273,4 +273,3 @@ for ipos, pos in enumerate(src_production):
             f.write(sample_log_tag+"\n")
 
     mpi_print(latt_info, f"DONE: {sample_log_tag} {time.time() - t0_pos}s")
-
