@@ -170,15 +170,22 @@ The original measurement logic lives in:
 
 - `/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/pyquda_measurement_utils/EMT_meson.py`
 
-The active development copy is:
+The active pion/meson EMT development copy is:
 
-- `/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/pyquda_measurement_utils/EMT_meson_vibe_develop.py`
+- `/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/pyquda_measurement_utils/pion_EMT_vibe_develop.py`
+
+Rename note:
+
+- `EMT_meson_vibe_develop.py` was renamed to `pion_EMT_vibe_develop.py`.
+- Perlmutter EMT meson entry scripts now import `pyquda_measurement_utils.pion_EMT_vibe_develop`.
+- `proton_EMT_vibe_develop.py` inherits shared quark/gluon 1pt utilities from `pion_EMT_vibe_develop.py`.
 
 Current EMT code organization:
 
-- `EMT_meson_vibe_develop.py`
+- `pion_EMT_vibe_develop.py`
   - holds the active `QuarkEMT` and `GluonEMT` implementations
-  - has a file-level English formula/convention docstring for inversion, 2pt, 3pt, quark 1pt, gluon 1pt, and gradient flow
+  - has a file-level English formula/convention docstring starting from correlation-function definitions
+  - documents meson 2pt, pre-sequential 3pt, fixed-sink sequential source, sink-summed 3pt, quark EMT insertion, scalar diagnostic insertion, quark 1pt, gluon 1pt, ringed fermion normalization, and gradient flow
   - uses `flow_epsilon` consistently
   - uses direct `__init__(self, parameters)` parameter handling
   - no longer uses `EMTParameters`, `emt_default_config`, `emt_momentum_grid`, `EMTIOConfig`, or `emt_io_config`
@@ -197,6 +204,7 @@ Current EMT code organization:
   - are thin entry scripts that define run parameters directly, initialize QUDA, load the gauge, and call the measurement
   - old commented-out prototype calls and unused imports were removed
   - current copies are also under `application/EMT_meson/perlmutter`
+  - now import `QuarkEMT` / `GluonEMT` from `pyquda_measurement_utils.pion_EMT_vibe_develop`
 
 Current EMT physics / IO conventions:
 
@@ -215,6 +223,7 @@ Current EMT physics / IO conventions:
   - `step = 0` is unflowed
   - the first interval is subdivided into 10 small steps immediately after measuring `step == 0`
   - output index `step` is intended to correspond to `step * flow_epsilon`
+- The file-level comments explicitly state that gradient flow smooths UV fluctuations at flow radius approximately `sqrt(8 t)` and that the renormalized EMT combination is assembled in later analysis.
 
 Current meson 2pt and quark 3pt conventions:
 
@@ -245,6 +254,23 @@ Current meson 2pt and quark 3pt conventions:
   - `src_interpolator`
   - `sink_interpolator`
   - `n_qext`
+
+Current quark/gluon 1pt and ringed fermion conventions:
+
+- Quark 1pt measures stochastic trace estimators with Z_n noise:
+  - `eta = D^{-1} xi`
+  - `CHI[0] ~ xi^dagger eta`
+  - `CHI[1] ~ xi^dagger xi`
+  - `T_{nu,mu}^q ~ -1/2 xi^dagger gamma_nu [D_{+mu} - D_{-mu}] eta`
+- The saved quark 1pt `Tmunu` diagonal trace contains the flowed-fermion kinetic bilinear used for ringed fermion normalization:
+  - `sum_mu T_{mu mu}^q(0,t) = -1/2 <bar_chi overleftrightarrow{not D} chi>`
+  - reconstruct it at q=0 from `avg/Tmunu/T11`, `T22`, `T33`, and `T44`
+  - `CHI` is saved as scalar trace/noise diagnostic and is not the standard ringed-fermion normalization by itself
+- Gluon 1pt measures the flowed gluonic EMT building block:
+  - `T_{mu nu}^g(q,t) = 2/V3 sum_x Phi_q(x) sum_{rho != mu,nu} Tr[F_{mu rho} F_{nu rho}]`
+  - the final EMT tensor is not traceless-projected in the contraction code
+  - `_F_clover_traceless` only projects each clover field-strength matrix onto the su(3) gauge algebra
+- Analysis should combine connected 3pt, quark 1pt, and gluon 1pt data with the appropriate gradient-flow coefficients, mixing/trace terms, and vacuum subtractions outside the contraction kernel.
 
 Current EMT baseline data generated on 2026-05-04:
 

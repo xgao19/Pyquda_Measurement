@@ -2,7 +2,7 @@ import os
 
 from pyquda import init
 from pyquda_utils import io
-from pyquda_measurement_utils.EMT_meson_vibe_develop import QuarkEMT
+from pyquda_measurement_utils.pion_EMT_vibe_develop import QuarkEMT
 from pyquda_measurement_utils.io_corr import get_emt_meson_2pt_file_tag, get_emt_quark_3pt_file_tag
 
 # ============================================================

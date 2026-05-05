@@ -404,7 +404,9 @@ class proton_TMD():
         
         if latt_info.mpi_rank == 0:
             save_proton_c2pt_hdf5(corr_collect, tag, my_gammas, self.pilist)
-        del corr, corr_collect
+        result = corr_collect
+        del corr
+        return result
     
         
     def create_TMD_Wilsonline_index_list_CG(self):

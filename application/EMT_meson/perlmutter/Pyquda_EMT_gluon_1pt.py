@@ -2,7 +2,7 @@ import os
 
 from pyquda import init
 from pyquda_utils import io
-from pyquda_measurement_utils.EMT_meson_vibe_develop import GluonEMT
+from pyquda_measurement_utils.pion_EMT_vibe_develop import GluonEMT
 from pyquda_measurement_utils.io_corr import get_emt_gluon_1pt_file_tag
 from pyquda_measurement_utils.tools import mpi_print
 

@@ -11,7 +11,7 @@ measurement workflows.
 ## Perlmutter Workflow
 
 The Perlmutter scripts are thin application entry points around
-`pyquda_measurement_utils.EMT_meson_vibe_develop`.
+`pyquda_measurement_utils.pion_EMT_vibe_develop`.
 
 Current measurements:
 

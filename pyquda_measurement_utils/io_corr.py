@@ -80,6 +80,14 @@ def get_emt_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, spin):
 
 def get_emt_meson_2pt_file_tag(data_dir, lat, cfg, ama, src, sm):
     return str(Path(data_dir) / "EMT2pt" / (str(lat) + ".EMT2pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+
+
+def get_emt_proton_2pt_file_tag(data_dir, lat, cfg, ama, src, sm):
+    return str(Path(data_dir) / "EMTproton2pt" / (str(lat) + ".EMTproton2pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+
+
+def get_emt_proton_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, spin):
+    return str(Path(data_dir) / "EMTproton3pt" / (str(lat) + ".EMTproton3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm) + ".spin" + str(spin)))
 # -----------------------------------------------------------------------------
 # EMT HDF5 writers
 # -----------------------------------------------------------------------------
@@ -159,6 +167,7 @@ def save_proton_c2pt_hdf5(corr, tag, gammalist, plist):
     roll = -int(src_match.group(1))
 
     save_h5 = tag + ".h5"
+    ensure_parent_dir(save_h5)
     f = h5py.File(save_h5, 'w')
     sm = f.create_group("SS")
     for ig, gm in enumerate(gammalist):
