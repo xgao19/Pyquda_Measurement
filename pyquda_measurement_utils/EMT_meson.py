@@ -327,8 +327,8 @@ class QuarkEMT:
                 mpi_print(U_f.latt_info, f"calc Tmunu, step = {step}")
                 U_f.gauge_dirac.loadGauge(U_f)
                 tmpt, tmps = self._get_Tmunu_symmetrized_P_Breit_slice(U_f, xi, eta, self.qlist)
-                Tmunu[vec_picked, :, :, :, :, :, step, :] += tmpt
-                CHI[vec_picked, :, :, :, :, step, :] += tmps
+                Tmunu[vec_picked, :, :, :, step, :] += tmpt
+                CHI[vec_picked, :, :, step, :] += tmps
 
                 if Nsteps > 0 and step == 1:
                     # First step is subdivided into 10 smaller flow steps to better preserve the initial condition.

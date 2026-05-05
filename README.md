@@ -33,14 +33,20 @@ How to use:
 - For Frontier/Aurora, see the corresponding subfolders:
   - `systems/Frontier/`
   - `systems/Aurora/`
-- For NVIDIA/CUDA systems (e.g., Perlmutter), refer to the official PyQUDA instructions:
-  - https://github.com/CLQCD/PyQUDA
+- For NVIDIA/CUDA systems (e.g., Perlmutter), see:
+  - `systems/perlmutter/`
+  - official PyQUDA instructions: https://github.com/CLQCD/PyQUDA
 
 Typical contents include:
 - recommended module loads and environment variables
 - build & install notes for PyQUDA (and related dependencies)
 - job script examples and run instructions
 - sanity checks, known issues, and performance notes
+
+For Perlmutter specifically, the helper scripts default to the following shared paths:
+- QUDA install: `/global/cfs/cdirs/m3760/xgao/software/quda/install`
+- Python venv: `/global/cfs/cdirs/m3760/xgao/software/venv`
+- PyQUDA repo root: `/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement`
 
 > If you are running on a new machine/partition, please add a new subfolder under `systems/`
 > and document the environment following the same style as the existing Frontier/Aurora setups.

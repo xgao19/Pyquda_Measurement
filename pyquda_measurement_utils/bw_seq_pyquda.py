@@ -122,6 +122,45 @@ def create_bw_seq_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_bo
     return dst_seq
 
 
+def create_meson_bw_seq_pyquda(
+    dirac,
+    prop: LatticePropagator,
+    origin,
+    momentum,
+    t_insert,
+    sink_gamma,
+):
+    """
+    Build and invert the meson fixed-sink backward sequential source.
+
+    ``prop`` is expected to be the source-to-sink propagator with whatever sink
+    smearing the caller wants to use for the sequential source.
+    """
+    xp = _get_xp_from_array(prop.data)
+    latt_info = prop.latt_info
+    t_sink = (origin[3] + t_insert) % latt_info.GLt
+
+    src_seq_sliced = sequential12(prop, t_sink)
+    seq_data = _asarray_on_queue(src_seq_sliced.data, xp, prop.data)
+
+    mom_phase = MomentumPhase(latt_info).getPhases(
+        [[momentum[0], momentum[1], momentum[2]]],
+        origin,
+    )[0]
+    mom_phase = _asarray_on_queue(mom_phase, xp, prop.data)
+
+    G5 = _asarray_on_queue(gamma.gamma(15), xp, prop.data)
+    sink_gamma = _asarray_on_queue(sink_gamma, xp, prop.data)
+    gamma_seq = xp.einsum("ab,cb,cd->ad", G5, sink_gamma.conj(), G5)
+
+    seq_data = xp.einsum("wtzyx,wtzyxilab->wtzyxilab", mom_phase, seq_data)
+    seq_data = xp.einsum("ij,wtzyxjlab->wtzyxilab", gamma_seq, seq_data)
+
+    src_seq = core.LatticePropagator(latt_info)
+    src_seq.data = seq_data
+    return core.invertPropagator(dirac, src_seq, 1, 0)
+
+
 def down_quark_insertion_pyquda(Q: LatticePropagator, Gamma, P):
     """
     PyQUDA version: Down quark insertion function.

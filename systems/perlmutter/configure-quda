@@ -1,0 +1,113 @@
+#!/bin/bash
+#
+# Perlmutter (NVIDIA CUDA) QUDA configure script
+#
+# This script mirrors the existing Frontier/Aurora helpers, but pins the
+# CUDA/MPI configuration we validated for Perlmutter:
+#   - CUDA target
+#   - sm_80
+#   - MPI enabled
+#   - multigrid enabled
+#   - Wilson / Clover / Staggered / Laplace enabled
+#   - covariant derivative enabled
+#   - dynamic clover reconstruction disabled
+#
+
+CMAKE=cmake
+
+# Clean previous CMake state.
+rm -f CMakeCache.txt
+rm -rf include
+
+# ----------------------------
+# User-tunable locations
+# ----------------------------
+
+# Adjust these paths if you move the repository or want a different install.
+software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
+quda_src="${QUDA_SRC:-$software_root/quda}"
+prefix="${QUDA_PREFIX:-$quda_src/install}"
+
+# ----------------------------
+# Target / compilers / GPU
+# ----------------------------
+
+# Keep this build on the CUDA backend.
+export QUDA_TARGET=CUDA
+
+# Use the Cray wrappers so MPI detection stays aligned with the loaded PE.
+export CC="${CMAKE_C_COMPILER:-cc}"
+export CXX="${CMAKE_CXX_COMPILER:-CC}"
+
+# Current Perlmutter CUDA stack that we validated.
+export CUDA_HOME="${CUDA_HOME:-/opt/nvidia/hpc_sdk/Linux_x86_64/25.5/cuda/12.9}"
+export CMAKE_CUDA_COMPILER="${CMAKE_CUDA_COMPILER:-$CUDA_HOME/bin/nvcc}"
+
+# Perlmutter H100/SM80-style build target as requested.
+export GPU_ARCH="${GPU_ARCH:-sm_80}"
+export QUDA_GPU_ARCH="${GPU_ARCH}"
+
+# ----------------------------
+# CMake options
+# ----------------------------
+
+o=""
+
+o="$o -DCMAKE_INSTALL_PREFIX=$prefix"
+o="$o -DCMAKE_BUILD_TYPE=RELEASE"
+o="$o -DQUDA_TARGET_TYPE=CUDA"
+o="$o -DQUDA_GPU_ARCH=${QUDA_GPU_ARCH}"
+o="$o -DQUDA_MPI=ON"
+o="$o -DQUDA_DIRAC_COVDEV=ON"
+o="$o -DQUDA_MULTIGRID=ON"
+o="$o -DQUDA_DIRAC_DEFAULT_OFF=ON"
+o="$o -DQUDA_DIRAC_WILSON=ON"
+o="$o -DQUDA_DIRAC_CLOVER=ON"
+o="$o -DQUDA_DIRAC_STAGGERED=ON"
+o="$o -DQUDA_DIRAC_LAPLACE=ON"
+o="$o -DQUDA_CLOVER_DYNAMIC=OFF"
+o="$o -DQUDA_CLOVER_RECONSTRUCT=OFF"
+
+# Use the system Eigen already present on Perlmutter.
+o="$o -DQUDA_DOWNLOAD_EIGEN=OFF"
+o="$o -DEIGEN_INCLUDE_DIRS=/usr/include/eigen3"
+
+# Keep the build lean and avoid test installation noise.
+o="$o -DQUDA_BUILD_ALL_TESTS=OFF"
+o="$o -DQUDA_INSTALL_ALL_TESTS=OFF"
+o="$o -DCMAKE_C_COMPILER=${CC}"
+o="$o -DCMAKE_CXX_COMPILER=${CXX}"
+o="$o -DCMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER}"
+
+# Make MPI launcher explicit for downstream test jobs if needed.
+if command -v mpiexec >/dev/null 2>&1; then
+  o="$o -DMPIEXEC_EXECUTABLE=$(command -v mpiexec)"
+fi
+
+# Generator.
+o="$o -GNinja"
+
+# ----------------------------
+# Reproducibility info
+# ----------------------------
+
+echo "QUDA_TARGET:"
+echo "$QUDA_TARGET"
+echo "GPU_ARCH:"
+echo "$QUDA_GPU_ARCH"
+echo "CC:"
+echo "$CC"
+echo "CXX:"
+echo "$CXX"
+echo "CUDA_HOME:"
+echo "$CUDA_HOME"
+echo "Install prefix:"
+echo "$prefix"
+echo "QUDA source:"
+echo "$quda_src"
+echo "CMake options:"
+echo "$o"
+
+echo
+echo "$CMAKE --fresh $o $quda_src"
+$CMAKE --fresh $o "$quda_src"

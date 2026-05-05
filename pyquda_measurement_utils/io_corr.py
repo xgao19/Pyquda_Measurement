@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import h5py
 import numpy as np
 
@@ -40,6 +42,99 @@ def get_qTMDWF_file_tag(data_dir, lat, cfg, ama, src, sm):
     sm_tag  = str(sm)
 
     return data_dir + "/qTMDWF/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag
+
+def ensure_parent_dir(path):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+
+# -----------------------------------------------------------------------------
+# EMT file-name helpers
+# -----------------------------------------------------------------------------
+
+def _emt_site_tag(src):
+    return "x" + str(src[0]) + "y" + str(src[1]) + "z" + str(src[2]) + "t" + str(src[3])
+
+
+def get_emt_gluon_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
+    return str(Path(data_dir) / "EMTg" / (str(lat) + ".EMTg." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+
+
+def get_emt_quark_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
+    return str(Path(data_dir) / "EMTc" / (str(lat) + ".EMTc." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+
+
+def get_emt_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, spin):
+    return str(Path(data_dir) / "EMT3pt" / (str(lat) + ".EMT3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm) + ".spin" + str(spin)))
+
+
+def get_emt_meson_2pt_file_tag(data_dir, lat, cfg, ama, src, sm):
+    return str(Path(data_dir) / "EMT2pt" / (str(lat) + ".EMT2pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+# -----------------------------------------------------------------------------
+# EMT HDF5 writers
+# -----------------------------------------------------------------------------
+
+
+def _write_h5_attrs(obj, attrs):
+    if not attrs:
+        return
+    for key, value in attrs.items():
+        if value is None:
+            continue
+        obj.attrs[key] = value
+
+
+def _prepare_h5_file(path, attrs=None):
+    ensure_parent_dir(path)
+    f = h5py.File(path, "w")
+    _write_h5_attrs(f, attrs)
+    return f
+
+
+def save_emt_quark_1pt_hdf5(tag, Tmunu_pervec, CHI_pervec, Tmunu, CHI, attrs=None):
+    save_h5 = f"{tag}.h5"
+    with _prepare_h5_file(save_h5, attrs) as f:
+        raw = f.require_group("raw")
+        raw.create_dataset("Tmunu_pervec", data=Tmunu_pervec)
+        raw.create_dataset("CHI_pervec", data=CHI_pervec)
+
+        avg = f.require_group("avg")
+        avg.create_dataset("CHI", data=CHI)
+        g_t = avg.require_group("Tmunu")
+        for mu in range(4):
+            for nu in range(mu, 4):
+                g_t.create_dataset(f"T{mu+1}{nu+1}", data=Tmunu[mu, nu])
+
+
+def save_emt_quark_3pt_hdf5(tag, C2, C3_chi, C3_Tmunu, momentum_transfer_list=None, attrs=None):
+    save_h5 = f"{tag}.h5"
+    with _prepare_h5_file(save_h5, attrs) as f:
+        f.create_dataset("C2", data=C2)
+        f.create_dataset("C3_chi", data=C3_chi)
+        f.create_dataset("C3_Tmunu", data=C3_Tmunu)
+        if momentum_transfer_list is not None:
+            f.create_dataset("momentum_transfer_list", data=np.asarray(momentum_transfer_list, dtype=np.int32))
+
+
+def save_emt_meson_2pt_hdf5(tag, C2, gamma_list, momentum_list, attrs=None):
+    save_h5 = f"{tag}.h5"
+    with _prepare_h5_file(save_h5, attrs) as f:
+        f.create_dataset("C2", data=C2)
+        f.create_dataset("gamma_list", data=np.asarray(gamma_list, dtype="S"))
+        f.create_dataset("momentum_list", data=np.asarray(momentum_list, dtype=np.int32))
+
+
+def save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=None):
+    save_h5 = f"{tag}.h5"
+    with _prepare_h5_file(save_h5, attrs) as f:
+        g_t = f.require_group("Tmunu")
+        for mu in range(4):
+            for nu in range(mu, 4):
+                g_t.create_dataset(f"T{mu+1}{nu+1}", data=Tmunu_t[mu, nu])
+
+
+# -----------------------------------------------------------------------------
+# Existing non-EMT HDF5 writers
+# -----------------------------------------------------------------------------
 
 def save_proton_c2pt_hdf5(corr, tag, gammalist, plist):
 

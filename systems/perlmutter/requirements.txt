@@ -1,0 +1,17 @@
+# Perlmutter Python dependencies for the validated PyQUDA / QUDA setup.
+#
+# This file matches the current venv that was validated on login32 with:
+# - QUDA installed under /global/cfs/cdirs/m3760/xgao/software/quda/install
+# - PyQUDA on the develop branch
+# - parallel h5py enabled through the Cray HDF5 runtime
+#
+# Install with:
+#   python -m pip install -r systems/perlmutter/requirements.txt
+
+Cython==3.2.4
+cupy-cuda12x==14.0.1
+h5py==3.16.0
+mpi4py==4.1.1
+numpy==2.4.4
+opt-einsum==3.4.0
+packaging==26.2
