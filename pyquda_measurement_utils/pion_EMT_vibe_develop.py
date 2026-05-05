@@ -242,7 +242,6 @@ intended to correspond to flow time ``step * flow_epsilon``.
 """
 
 import numpy as np
-import cupy as cp
 from opt_einsum import contract
 
 from pyquda import getMPIComm
@@ -273,6 +272,27 @@ D_gammas = [gamma.gamma(idx) for idx in D_GAMMA_IDS]
 G5 = gamma.gamma(15)
 
 
+def _gamma_matrix(gamma_like):
+    if hasattr(gamma_like, "matrix"):
+        return gamma_like.matrix
+    return gamma_like
+
+
+def _array_on_backend(val, ref_arr):
+    xp = _get_xp_from_array(ref_arr)
+    if type(val).__module__.split(".")[0] == xp.__name__:
+        return val
+    if hasattr(val, "get"):
+        val = val.get()
+    return _asarray_on_queue(val, xp, ref_arr)
+
+
+def _gamma_list_on_backend(gamma_list, ref_arr):
+    xp = _get_xp_from_array(ref_arr)
+    gamma_arrays = [_array_on_backend(_gamma_matrix(gamma_item), ref_arr) for gamma_item in gamma_list]
+    return xp.stack(gamma_arrays)
+
+
 def _normalize_flow_type(flow_type: str) -> str:
     flow = str(flow_type).strip().lower()
     if flow not in _VALID_FLOW_TYPES:
@@ -301,21 +321,21 @@ class QuarkEMT:
 
     @staticmethod
     def _gamma5_for(ref_arr):
-        return _asarray_on_queue(G5, _get_xp_from_array(ref_arr), ref_arr)
+        return _array_on_backend(_gamma_matrix(G5), ref_arr)
 
     @staticmethod
     def _gamma_stack_for(ref_arr):
-        return _asarray_on_queue(my_pyquda_gammas, _get_xp_from_array(ref_arr), ref_arr)
+        return _gamma_list_on_backend(my_pyquda_gammas, ref_arr)
 
     @staticmethod
     def _dirac_gammas_for(ref_arr):
-        return _asarray_on_queue(D_gammas, _get_xp_from_array(ref_arr), ref_arr)
+        return _gamma_list_on_backend(D_gammas, ref_arr)
 
     @classmethod
     def _get_interpolator_gamma_for(cls, interpolator, ref_arr):
         if interpolator not in my_gammas:
             raise ValueError(f"Unsupported interpolator {interpolator!r}. Expected one of {my_gammas}.")
-        return _asarray_on_queue(my_pyquda_gammas[my_gammas.index(interpolator)], _get_xp_from_array(ref_arr), ref_arr)
+        return _array_on_backend(_gamma_matrix(my_pyquda_gammas[my_gammas.index(interpolator)]), ref_arr)
 
     @staticmethod
     def make_zn_noise_fermion(latt_info, n: int = 2) -> LatticeFermion:
@@ -340,8 +360,9 @@ class QuarkEMT:
         n         : order of Z_n noise, e.g. n=2 or n=4
         """
         xi = LatticeFermion(latt_info)
-        r = cp.random.randint(0, n, size=xi.data.shape)
-        xi.data[:] = cp.exp(2j * cp.pi * r / n).astype(xi.data.dtype)
+        xp = _get_xp_from_array(xi.data)
+        r = xp.random.randint(0, n, size=xi.data.shape)
+        xi.data[:] = xp.exp(2j * xp.pi * r / n).astype(xi.data.dtype)
         return xi
 
     @staticmethod
@@ -479,7 +500,9 @@ class QuarkEMT:
         dirac.loadGauge(U)
         mpi_print(latt_info, "Multigrid inverter ready.")
 
-        cp.random.seed(randseed)
+        rng_probe = LatticeFermion(latt_info)
+        xp = _get_xp_from_array(rng_probe.data)
+        xp.random.seed(randseed)
 
         # Per-noise-vector storage before averaging.
         Tmunu = np.zeros([n_vec, 4, 4, len(self.qlist), Nsteps + 1, Nt], dtype=np.complex128)
@@ -504,14 +527,14 @@ class QuarkEMT:
 
                 if Nsteps > 0 and step == 0:
                     # First step is subdivided into 10 smaller flow steps to better preserve the initial condition.
-                    temp = core.MultiLatticeFermion(U.latt_info, 2, cp.array([xi.data, eta.data]))
+                    temp = convert.multiField([xi, eta])
                     temp_flow = U_f.gradientFlow(temp, self.flow_type, 10, stepsize/10)
                     xi, eta = temp_flow[0], temp_flow[1]
 
                 elif Nsteps > 0 and step < Nsteps:
                     # Flow xi and eta simultaneously so they remain on the same
                     # flowed gauge background U_f(t).
-                    temp = core.MultiLatticeFermion(U.latt_info, 2, cp.array([xi.data, eta.data]))
+                    temp = convert.multiField([xi, eta])
                     temp_flow = U_f.gradientFlow(temp, self.flow_type, 1, stepsize)
                     xi, eta = temp_flow[0], temp_flow[1]
 
@@ -600,11 +623,7 @@ class QuarkEMT:
         L5_b = mf_b.L5
         assert L5_a == L5_b
 
-        packed = MultiLatticeFermion(
-            U_f.latt_info,
-            L5_a + L5_b,
-            cp.concatenate([mf_a.data, mf_b.data], axis=0),
-        )
+        packed = convert.multiField([mf_a[idx] for idx in range(L5_a)] + [mf_b[idx] for idx in range(L5_b)])
 
         packed_flow = U_f.gradientFlow(packed, flow_type, Nsteps, stepsize)
 

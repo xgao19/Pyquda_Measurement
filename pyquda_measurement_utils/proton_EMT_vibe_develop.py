@@ -82,7 +82,6 @@ analysis code.
 """
 
 import numpy as np
-import cupy as cp
 from opt_einsum import contract
 
 from pyquda import getMPIComm
