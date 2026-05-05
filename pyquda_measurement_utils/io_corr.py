@@ -74,6 +74,14 @@ def get_emt_quark_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
     return str(Path(data_dir) / "EMTc" / (str(lat) + ".EMTc." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
 
 
+def get_flowed_disc_quark_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
+    return str(Path(data_dir) / "flowed_disc_quark_1pt" / (str(lat) + ".flowedDiscQuark1pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+
+
+def get_flowed_disc_gluon_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
+    return str(Path(data_dir) / "flowed_disc_gluon_1pt" / (str(lat) + ".flowedDiscGluon1pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+
+
 def get_emt_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, spin):
     return str(Path(data_dir) / "EMT3pt" / (str(lat) + ".EMT3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm) + ".spin" + str(spin)))
 
