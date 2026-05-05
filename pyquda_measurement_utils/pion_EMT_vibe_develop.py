@@ -239,6 +239,30 @@ The quark and gluon flow schedules are aligned: because the code measures
 before each flow update, the first interval is subdivided into 10 small flow
 steps immediately after measuring ``step == 0``.  Thus output index ``step`` is
 intended to correspond to flow time ``step * flow_epsilon``.
+
+Future upgrade targets
+----------------------
+The current stochastic quark 1pt estimator uses plain Z_n noise.  Two natural
+variance-reduction upgrades should be considered before large production runs:
+
+1. Hierarchical probing, following arXiv:1302.4018.  The EMT 1pt trace
+   estimator is a trace of an inverse Dirac operator with local gamma/derivative
+   insertions.  Replacing or supplementing purely random noise vectors with
+   distance-ordered Hadamard/coloring vectors on the four-dimensional torus
+   should cancel near-diagonal contributions of ``D^{-1}`` more deterministically
+   and reduce stochastic variance at fixed inversion count.
+
+2. Frequency splitting / propagator-decomposition variance reduction, following
+   the strategies reviewed in arXiv:2605.00643.  The flowed EMT loop could be
+   decomposed into low/infrared and high/ultraviolet components, or into
+   frequency-filtered estimator pieces, so that expensive noise averaging is
+   focused on the component with the largest residual variance.  This should be
+   designed together with the gradient-flow radius because flow already smooths
+   ultraviolet modes.
+
+These are not implemented in this file yet.  When added, they should preserve
+the existing HDF5 schema or add explicit estimator metadata so disconnected
+diagram analysis can combine old and new 1pt data safely.
 """
 
 import numpy as np

@@ -79,6 +79,28 @@ This module computes connected proton EMT three-point functions for U and D
 insertions.  Disconnected diagrams, renormalization coefficients, vacuum
 subtractions, and flavor mixing are intentionally left to separate workflows or
 analysis code.
+
+Future upgrade targets
+----------------------
+The proton connected 3pt contractions use sequential propagators, while the
+disconnected quark EMT contribution is inherited from the stochastic quark 1pt
+loop estimator in ``pion_EMT_vibe_develop.py``.  The next variance-reduction
+upgrades should therefore target the shared 1pt loop code:
+
+1. Hierarchical probing, following arXiv:1302.4018.  Structured probing vectors
+   on the toroidal lattice can reduce the stochastic variance of trace
+   estimators by canceling near-neighbor contributions of the inverse Dirac
+   operator more systematically than independent noise alone.
+
+2. Frequency splitting / propagator-decomposition variance reduction, following
+   the strategies reviewed in arXiv:2605.00643.  Splitting the quark propagator
+   or loop estimator into frequency components can let the code treat low-mode,
+   high-mode, and flowed ultraviolet-suppressed pieces with different estimator
+   budgets.
+
+These upgrades are roadmap items only.  They should be implemented in the
+shared quark 1pt path and recorded in HDF5 metadata before being mixed with
+connected proton EMT data in disconnected-diagram analyses.
 """
 
 import numpy as np
