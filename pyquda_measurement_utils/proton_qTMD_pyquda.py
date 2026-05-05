@@ -1,3 +1,127 @@
+"""
+Proton connected qTMD and PDF contractions in PyQUDA.
+
+This module implements the connected proton two-point function and the
+connected fixed-sink sequential-source contractions used by the nucleon qTMD
+applications.  It is intentionally baryon-specific: unlike the pion code, the
+proton contains three quark lines and therefore needs a color-antisymmetric
+epsilon contraction, flavor-dependent sequential sources, and spin projection
+matrices.
+
+Gamma and interpolator conventions
+----------------------------------
+The 16 bilinear operator insertions are ordered as
+
+    5, T, T5, X, X5, Y, Y5, Z, Z5, I, SXT, SXY, SXZ, SYT, SYZ, SZT.
+
+The proton interpolating operator is schematically
+
+    chi_alpha(x) =
+        epsilon_abc
+        [u_a^T(x) C Gamma_interp d_b(x)] u_{c, alpha}(x),
+
+with supported interpolation choices currently mapped as
+
+    "5"  -> C gamma5,
+    "T5" -> C gamma_t gamma5,
+    "Z5" -> C gamma_z gamma5.
+
+The spin/polarization projection is supplied by ``PolProjections`` in
+``bw_seq_pyquda.py`` when the backward sequential source is built.
+
+Two-point function
+------------------
+For a sink bilinear Gamma_g and source/sink interpolator Gamma_interp, the
+proton two-point function has the schematic form
+
+    C2_g(p, t) =
+        sum_x exp(-i p . (x - x0))
+        P_{alpha alpha'}
+        < chi_alpha(x) Gamma_g(t) chi_bar_{alpha'}(x0) >.
+
+After Wick contraction this becomes the standard pair of baryon contraction
+terms built from three quark propagators and two color epsilon tensors.  In
+``contract_2pt_TMD`` the two terms are split into smaller einsums for memory
+reasons, but algebraically they correspond to
+
+    epsilon_abc epsilon_def
+    Gamma_interp Gamma_interp
+    S_u S_d S_u
+
+with the required exchange term from the two identical up quarks.  The code
+currently assumes isospin-symmetric propagators, so the same forward propagator
+is reused for all three valence lines unless the caller provides otherwise.
+
+Fixed-sink sequential sources
+-----------------------------
+The three-point functions are evaluated with fixed-sink sequential propagators
+created by ``create_bw_seq_pyquda``.  Separate sequential sources are needed for
+flavor insertions:
+
+    flavor = 1: insertion on an up-quark line,
+    flavor = 2: insertion on the down-quark line.
+
+The application contracts both sequential propagators with the shifted forward
+line.  This gives connected diagrams only.  Disconnected diagrams are not
+included in this module.
+
+Connected qTMD three-point function
+-----------------------------------
+The connected qTMD contraction used in the application is schematically
+
+    C3_g^flavor(q, b, tau; pf, tsep) =
+        sum_x exp(-i q . (x - x0))
+        Tr_spin,color[
+            Seq_flavor(x; pf, tsep, P)
+            Gamma_g
+            O_b S_q(x, x0)
+        ],
+
+where ``Seq_flavor`` already contains the baryon sink contraction, the final
+state momentum pf, the sink time tsep, and the chosen spin projection P.  The
+momentum transfer is q = pf - pi in the usual three-point convention.
+
+CG qTMD operator
+----------------
+For the CG qTMD path, the nonlocal operator O_b is implemented as a coordinate
+shift of the forward propagator without explicit gauge links:
+
+    O_b S_q(x, x0) = S_q(x + bT * e_perp + bz * ez, x0).
+
+The transverse direction is scanned over x and y and saved as ``b_X`` and
+``b_Y``.  Wilson-line indices are ordered to keep successive shifts small.
+
+PDF operators
+-------------
+The PDF path is the bT = 0 straight-z special case.  The proton application has
+two variants:
+
+    CG_PDF:  ordinary lattice shift, no explicit gauge link.
+    GI_PDF:  covariant z-direction shift using gauge.pure_gauge.covDev.
+
+The GI version represents a gauge-invariant straight Wilson line through
+successive gauge-covariant nearest-neighbor shifts in +z or -z.  The helper
+raises an error for non-nearest-neighbor jumps, which protects against
+accidentally skipping links.
+
+Array and output shape conventions
+----------------------------------
+The application stores connected qTMD/PDF data with the writer convention
+
+    [Wilson_index, polarization, momentum, gamma, time]
+
+for proton correlators before selecting one polarization/flavor/gamma for each
+HDF5 file.  Pion correlators use a reduced shape because there is no flavor or
+polarization dimension.
+
+Important limitations
+---------------------
+This code is for connected proton diagrams only.  It does not compute
+disconnected insertions, flavor mixing, or operator renormalization factors.
+Those should be added as separate, explicit workflows rather than hidden inside
+the current connected contraction path.
+"""
+
 from pyquda_utils import core, gamma
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5

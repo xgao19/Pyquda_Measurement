@@ -2,6 +2,7 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import re
 
 def get_sample_log_tag(ama, src, sm):
 
@@ -138,7 +139,14 @@ def save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=None):
 
 def save_proton_c2pt_hdf5(corr, tag, gammalist, plist):
 
-    roll = -int(tag.split(".")[4].split('t')[1])
+    src_match = None
+    for part in tag.split("."):
+        src_match = re.search(r"^x-?\d+y-?\d+z-?\d+t(-?\d+)$", part)
+        if src_match is not None:
+            break
+    if src_match is None:
+        raise ValueError(f"Could not parse source time from c2pt tag: {tag}")
+    roll = -int(src_match.group(1))
 
     save_h5 = tag + ".h5"
     f = h5py.File(save_h5, 'w')
@@ -176,6 +184,9 @@ def save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep
                 g_data = g_p.require_group(path)
                 g_data.create_dataset('bz'+str(idx[1]), data=corr[i][ip][ig][:tsep+2])
     f.close()
+
+def save_qTMD_pion_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info):
+    save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info)
 
 def save_qTMDWF_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list):
 
