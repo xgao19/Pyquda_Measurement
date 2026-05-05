@@ -1,0 +1,6 @@
+__pycache__/
+.cupy-cache/
+.quda-cache/
+data/
+profile_*.tsv
+profile_*_async.tsv

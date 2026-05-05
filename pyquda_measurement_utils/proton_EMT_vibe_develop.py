@@ -65,13 +65,13 @@ used in ``pion_EMT_vibe_develop.py``.
 One-point and gradient-flow data
 --------------------------------
 The stochastic quark 1pt, ringed-fermion kinetic normalization, and gluon 1pt
-building blocks are inherited from the meson EMT implementation.  Thus the
-same comments in ``pion_EMT_vibe_develop.py`` apply: the quark 1pt output
+building blocks are inherited from the shared
+``EMT_disconnected_1pt_vibe_develop.py`` implementation.  The quark 1pt output
 contains ``avg/Tmunu/T11`` through ``T44`` for reconstructing the zero-momentum
 ``bar_chi overleftrightarrow{not D} chi`` normalization, and the gluon 1pt
-output provides the flowed gluonic EMT building block.  The final
-renormalized gradient-flow EMT is assembled in analysis from connected 3pt,
-quark 1pt, and gluon 1pt data.
+output provides the flowed gluonic EMT building block.  The final renormalized
+gradient-flow EMT is assembled in analysis from connected 3pt, quark 1pt, and
+gluon 1pt data.
 
 Limitations
 -----------
@@ -83,9 +83,9 @@ analysis code.
 Future upgrade targets
 ----------------------
 The proton connected 3pt contractions use sequential propagators, while the
-disconnected quark EMT contribution is inherited from the stochastic quark 1pt
-loop estimator in ``pion_EMT_vibe_develop.py``.  The next variance-reduction
-upgrades should therefore target the shared 1pt loop code:
+disconnected quark EMT contribution is inherited from the shared stochastic
+quark 1pt loop estimator.  The next variance-reduction upgrades should
+therefore target ``EMT_disconnected_1pt_vibe_develop.py``:
 
 1. Hierarchical probing, following arXiv:1302.4018.  Structured probing vectors
    on the toroidal lattice can reduce the stochastic variance of trace
@@ -110,7 +110,10 @@ from pyquda import getMPIComm
 from pyquda.field import LatticePropagator
 from pyquda_utils import core, gamma, source, phase
 
-from pyquda_measurement_utils.pion_EMT_vibe_develop import GluonEMT, QuarkEMT
+from pyquda_measurement_utils.EMT_disconnected_1pt_vibe_develop import (
+    EMTDisconnectedGluon1pt,
+    EMTDisconnectedQuark1pt,
+)
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_bw_seq_pyquda
 from pyquda_measurement_utils.io_corr import save_emt_quark_3pt_hdf5
@@ -118,7 +121,7 @@ from pyquda_measurement_utils.proton_qTMD_pyquda import my_gammas, proton_TMD
 from pyquda_measurement_utils.tools import mpi_print
 
 
-class ProtonQuarkEMT(QuarkEMT):
+class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
     """Connected proton EMT plus inherited stochastic quark 1pt utilities."""
 
     def __init__(self, parameters):
@@ -340,7 +343,7 @@ class ProtonQuarkEMT(QuarkEMT):
         return C2, C3_chi, C3_Tmunu
 
 
-class ProtonGluonEMT(GluonEMT):
+class ProtonGluonEMT(EMTDisconnectedGluon1pt):
     """Proton workflow alias for the shared flowed gluon EMT 1pt code."""
 
 
