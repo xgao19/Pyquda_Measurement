@@ -40,15 +40,46 @@ The default ``src_gamma='fixed_g5'`` gives the usual pseudoscalar pion source,
 while all 16 sink gamma structures are still scanned and saved.  This is cheap
 and useful for diagnostics or later operator studies.
 
-Fixed-sink sequential source for three-point functions
-------------------------------------------------------
-The application builds a meson sequential propagator with
-``create_meson_bw_seq_pyquda``.  It fixes the final-state momentum pf and the
-sink time tsep = t_insert, then this module converts that sequential propagator
-to an antiquark-like backward line using gamma5 hermiticity.  The connected
-three-point function then has the schematic form
+Three-point function and fixed-sink sequential source
+-----------------------------------------------------
+The connected pion qTMD three-point function starts from a source at x0, an
+operator insertion at x = (tau, x), and a fixed sink at y = (tsep, y):
 
-    C3_g(q, b, tau; pf) =
+    C3_g(q, b, tau; pf, tsep) =
+        sum_x sum_y
+        exp(-i q . (x - x0)) exp(-i pf . (y - x0))
+        Tr[
+            S_anti(y, x0) Gamma_sink
+            S_q(y, x) Gamma_g O_b S_q(x, x0) Gamma_src
+        ].
+
+Gamma_sink is the fixed pion sink interpolator used to build the sequential
+source.  Gamma_g is the scanned insertion gamma.  O_b is the nonlocal qTMD/PDF
+operator applied to the forward quark line at the insertion.
+
+The sink sum is absorbed into a fixed-sink sequential propagator.  In
+``create_meson_bw_seq_pyquda`` the right-hand side is built on the sink time
+slice,
+
+    eta_seq(y; pf, tsep) =
+        delta_{t_y,tsep}
+        phase_pf(y - x0)
+        Gamma_seq S_neg(y, x0),
+
+    Gamma_seq = gamma5 Gamma_sink^dagger gamma5,
+
+where ``phase_pf`` is produced by ``MomentumPhase`` with the same sign
+convention used by the application.  The sequential propagator solves
+
+    D S_seq = eta_seq.
+
+After the inversion this module forms the antiquark-like backward line
+
+    S_seq_anti(x, x0; pf, tsep) = gamma5 S_seq(x, x0)^dagger gamma5.
+
+The contraction used in the code is therefore the sink-summed form
+
+    C3_g(q, b, tau; pf, tsep) =
         sum_x exp(-i q . (x - x0))
         Tr[
             S_seq_anti(x, x0; pf, tsep)
@@ -56,9 +87,6 @@ three-point function then has the schematic form
             O_b S_q(x, x0)
             Gamma_src
         ].
-
-Here O_b is the nonlocal displacement/Wilson-line operator applied to the
-forward quark line before contraction.
 
 CG qTMD operator
 ----------------

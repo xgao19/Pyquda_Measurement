@@ -1,108 +1,220 @@
 """Meson EMT measurement formulas and conventions.
 
 This module implements flowed quark/gluon EMT observables for meson matrix
-elements.  The code currently uses the "convention B" connected-meson
+elements.  The connected meson three-point code uses the "convention B"
 contraction with ``meson_sign = +1``.
 
-Notation
---------
-``S_f`` denotes the ordinary forward quark propagator from the source to the
-insertion point.  ``S_seq`` denotes the fixed-sink sequential propagator after
-inverting the meson sequential source.  A backward meson line is built through
-gamma5 hermiticity,
+Common notation
+---------------
+The source is ``x0 = (t0, x0)``.  The current or EMT insertion is
+``x = (tau, x)``.  The fixed sink is ``y = (tsep, y)``.  ``S_q(a, b)`` denotes
+the quark propagator from ``b`` to ``a``.  Antiquark-like lines are represented
+with gamma5 hermiticity,
 
-    S_b(x) = gamma5 * S_seq(x)^dagger * gamma5.
+    S_anti(a, b) = gamma5 S_q(a, b)^dagger gamma5.
 
-Momentum projection is applied as
+The code uses ``pyquda_utils.phase.MomentumPhase`` for all Fourier phases.  To
+avoid hiding sign conventions in prose, write these phases as
 
-    C(q, t) = sum_x exp(i q dot (x - x_src)) C(x, t),
+    Phi_k(r - x0),
 
-using the phase convention provided by ``pyquda_utils.phase.MomentumPhase``.
+where ``k`` is exactly the momentum list passed to ``MomentumPhase``.
 
-Inversion path
---------------
-For connected meson 3pt functions, the code:
+Meson two-point correlation function
+------------------------------------
+The physical connected meson two-point function with source interpolator
+``Gamma_src`` and sink interpolator ``Gamma_sink`` is
 
-1. Builds point sources at ``src_pos`` and optionally applies Gaussian/boosted
-   source smearing.
-2. Inverts the Dirac operator to get source-smeared point-sink forward and
-   backward propagators, ``S_f`` and ``S_b``.  If the forward/backward source
-   smearing is identical, only one inversion is used and the propagator is
-   copied.
-3. Applies sink smearing to the forward propagator used by the fixed-sink
-   sequential source.
-4. Builds the meson sequential source at
-   ``t_sink = src_t + t_sep`` with sink momentum ``pf`` and spin structure
+    C2_{Gamma_sink}(p, t)
+      = sum_x Phi_{-p}(x - x0)
+        Tr_sc[
+            S_anti(x, x0) Gamma_sink
+            S_q(x, x0) Gamma_src
+        ].
 
-       gamma_seq = gamma5 * Gamma_sink^dagger * gamma5.
+The implementation scans all 16 sink gamma structures while keeping
+``Gamma_src`` fixed.  In code, the antiquark line is made from the independent
+``prop_bw`` source propagator,
 
-5. Inverts this sequential source to obtain ``S_seq``.
+    bw_prop(x) = gamma5 prop_bw(x, x0)^dagger gamma5,
 
-Meson 2pt contraction
----------------------
-The meson 2pt function scans all 16 sink gamma structures while keeping the
-source gamma fixed:
+then the contraction is
 
-    C2[Gamma_sink, p, t]
-      = sum_x exp(-i p dot (x - x_src))
-        Tr_sc[ Gamma_sink S_b(x, src) Gamma_src S_f(x, src) ],
+    Tr_sc[ bw_prop(x) Gamma_sink prop_fw(x, x0) Gamma_src ].
 
-where the backward line is reconstructed with gamma5 hermiticity from the
-anti-quark propagator.  This is the same structural convention used for the
-pion two-point function.
+Connected meson three-point function before the sequential trick
+----------------------------------------------------------------
+For a local quark bilinear insertion ``O_g(x)`` and final sink momentum ``pf``,
+the connected three-point function starts as
 
-Connected quark 3pt contractions
---------------------------------
-The scalar connected insertion is
+    C3_g(q, tau; pf, tsep)
+      = sum_x sum_y Phi_q(x - x0) Phi_pf(y - x0)
+        Tr_sc[
+            S_anti(y, x0) Gamma_sink
+            S_q(y, x) O_g(x) S_q(x, x0) Gamma_src
+        ].
 
-    C3_chi(q, t)
-      = sum_x exp(i q dot (x - x_src))
-        Tr_sc[ S_b(x) S_f(x) Gamma_src ].
+For the scalar diagnostic insertion, ``O_g(x) = 1``.  For the connected quark
+EMT, ``O_g(x)`` is the symmetrized derivative bilinear described below.  The
+``q`` list is ``parameters["qext"]`` and the final sink momentum is
+``parameters["pf"]``.
 
-The quark EMT insertion is implemented as the symmetrized Euclidean bilinear
+Fixed-sink meson sequential source
+----------------------------------
+The sink sum over ``y`` is absorbed into a fixed-sink sequential propagator.
+The application first builds a source-smeared and sink-smeared forward
+propagator ``prop_fw_SS``.  ``create_meson_bw_seq_pyquda`` restricts it to the
+sink time slice and builds
 
-    T_{mu nu}^q = 1/2 * [ gamma_nu D_mu - left_D_mu gamma_nu ],
+    eta_seq(y; pf, tsep)
+      = delta_{t_y,t0+tsep}
+        Phi_pf(y - x0)
+        Gamma_seq prop_fw_SS(y, x0),
+
+    Gamma_seq = gamma5 Gamma_sink^dagger gamma5.
+
+The sequential inversion solves
+
+    D S_seq = eta_seq.
+
+The contraction routines then form the backward sequential meson line
+
+    S_seq_anti(x; pf, tsep) = gamma5 S_seq(x)^dagger gamma5.
+
+After this step, the code evaluates the sink-summed three-point function as
+
+    C3_g(q, tau; pf, tsep)
+      = sum_x Phi_q(x - x0)
+        Tr_sc[
+            S_seq_anti(x; pf, tsep)
+            O_g(x) S_q(x, x0) Gamma_src
+        ].
+
+This is the formula implemented by ``get_C3_chi`` and
+``get_C3_Tmunu_symmetrized``.
+
+Connected quark EMT insertion
+-----------------------------
+The Euclidean quark EMT insertion is represented as the symmetrized bilinear
+
+    T_{mu nu}^q(x)
+      = 1/2 [ gamma_nu D_mu - left_D_mu gamma_nu ],
 
 where ``D_mu`` is the symmetric covariant derivative acting on the forward
-line and ``left_D_mu`` is the corresponding left-acting derivative on the
-backward sequential line.  In code this is evaluated as
+source-to-insertion line and ``left_D_mu`` is the corresponding derivative
+acting on the backward sequential line.  The code evaluates
 
-    +1/2 Tr_sc[ S_b(x) gamma_nu D_mu S_f(x) Gamma_src ]
-    -1/2 Tr_sc[ (left_D_mu S_b)(x) gamma_nu S_f(x) Gamma_src ],
+    C3_{mu nu}^{q,first}(q, tau)
+      = +1/2 sum_x Phi_q(x - x0)
+        Tr_sc[
+            S_seq_anti(x)
+            gamma_nu D_mu S_q(x, x0)
+            Gamma_src
+        ],
 
-then projected to momentum ``q`` and symmetrized under ``mu <-> nu``.
+    C3_{mu nu}^{q,second}(q, tau)
+      = -1/2 sum_x Phi_q(x - x0)
+        Tr_sc[
+            (left_D_mu S_seq_anti)(x)
+            gamma_nu S_q(x, x0)
+            Gamma_src
+        ].
 
-Stochastic quark 1pt contraction
---------------------------------
-For random noise ``xi`` and solution ``eta = D^{-1} xi``, the code estimates
+The final measured connected quark EMT is
 
-    CHI[0](q, t) = sum_x exp(i q dot x) xi^dagger(x) eta(x),
-    CHI[1](q, t) = sum_x exp(i q dot x) xi^dagger(x) xi(x),
+    C3_{mu nu}^q = C3_{mu nu}^{q,first} + C3_{mu nu}^{q,second},
+
+followed by explicit symmetrization under ``mu <-> nu``.
+
+Connected scalar diagnostic insertion
+-------------------------------------
+The scalar diagnostic three-point function is the same sequential-source
+contraction with ``O_g(x) = 1``:
+
+    C3_chi(q, tau)
+      = sum_x Phi_q(x - x0)
+        Tr_sc[
+            S_seq_anti(x)
+            S_q(x, x0)
+            Gamma_src
+        ].
+
+Stochastic quark one-point contraction
+--------------------------------------
+The quark one-point part estimates traces with random noise.  For a Z_n noise
+field ``xi`` and solution ``eta = D^{-1} xi``, the code measures
+
+    CHI[0](q, t) = sum_x Phi_q(x) xi^dagger(x) eta(x),
+    CHI[1](q, t) = sum_x Phi_q(x) xi^dagger(x) xi(x),
 
 and the flowed quark EMT building block
 
     T_{nu mu}^q(q, t)
-      = -1/2 sum_x exp(i q dot x)
-        xi^dagger(x) gamma_nu [D_{+mu} - D_{-mu}] eta(x),
+      = -1/2 sum_x Phi_q(x)
+        xi^dagger(x) gamma_nu [D_{+mu} - D_{-mu}] eta(x).
 
-followed by symmetrization in ``mu`` and ``nu`` and averaging over noise
-vectors.  The overall volume normalization is applied after the noise average.
+The result is symmetrized in ``mu`` and ``nu``, averaged over noise vectors, and
+volume-normalized after the average.
 
-Gluon 1pt contraction
----------------------
-The gluon field strength is a traceless anti-Hermitian clover operator with an
-extra factor of ``-i`` to match the original Euclidean convention.  The measured
-building block is
+The same saved ``Tmunu`` data also contains the flowed-fermion kinetic
+bilinear used to construct ringed fermion fields.  At zero momentum, the
+diagonal trace satisfies
+
+    sum_mu T_{mu mu}^q(0, t)
+      = -1/2 sum_x
+        xi^dagger(x) gamma_mu [D_{+mu} - D_{-mu}] eta(x)
+
+      = -1/2 < bar_chi(t, x) overleftrightarrow{not D} chi(t, x) >,
+
+up to the same lattice derivative and stochastic-estimator conventions used in
+the code.  This quantity is the normalization input commonly denoted by the
+flowed fermion kinetic expectation value in ringed-fermion constructions.  In
+the saved quark 1pt HDF5 file it can be reconstructed from the averaged
+datasets
+
+    avg/Tmunu/T11, avg/Tmunu/T22, avg/Tmunu/T33, avg/Tmunu/T44
+
+at the ``q = 0`` momentum index.  The ``CHI`` datasets are saved as scalar
+trace and stochastic-noise diagnostics; they are not the standard
+``bar_chi overleftrightarrow{not D} chi`` normalization by themselves.
+
+Gluon one-point contraction
+---------------------------
+The gluon field strength is built from a clover operator and projected onto the
+traceless anti-Hermitian su(3) algebra, with an extra factor of ``-i`` matching
+the original Euclidean convention.  The measured gluon EMT building block is
 
     T_{mu nu}^g(q, t)
-      = 2 / V3 * sum_x exp(i q dot x)
+      = 2 / V3 sum_x Phi_q(x)
         sum_{rho != mu,nu} Tr_c[ F_{mu rho}(x) F_{nu rho}(x) ].
 
-This code intentionally measures the full gluonic EMT building block used for
-gradient-flow renormalization.  It does not impose a traceless projection at
-the EMT level.  The traceless projection in ``_F_clover_traceless`` is only the
-standard projection of each clover field-strength matrix onto the su(3) gauge
-algebra.
+This intentionally measures the full gluonic EMT building block used for
+gradient-flow renormalization.  The code does not impose a traceless projection
+on the final EMT tensor.  The traceless projection in ``_F_clover_traceless``
+is only the standard projection of each clover field-strength matrix onto the
+su(3) gauge algebra.
+
+How the one-point data is used
+------------------------------
+The connected meson three-point output gives matrix elements with a connected
+quark EMT insertion on the valence line.  The stochastic quark 1pt output gives
+the vacuum/disconnected quark EMT building block and the ringed-fermion
+normalization information described above.  The gluon 1pt output gives the
+flowed gluonic EMT building block.  These pieces are saved separately because
+the final renormalized gradient-flow EMT is usually assembled in analysis, not
+inside this contraction kernel.
+
+Schematically, the analysis stage combines flowed operators as
+
+    T_{mu nu}^{ren}(x)
+      = c_g(t) O_{mu nu}^g(t, x)
+        + c_q(t) O_{mu nu}^q(t, x)
+        + mixing/trace terms,
+
+with coefficients and possible vacuum subtractions determined outside this
+file.  The quark 1pt and gluon 1pt measurements provide the flowed operator
+building blocks and normalization inputs needed for that construction, while
+the connected 3pt files provide the hadron matrix-element part.
 
 Gradient flow convention
 ------------------------

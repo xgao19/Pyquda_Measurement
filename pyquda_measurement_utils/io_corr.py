@@ -44,6 +44,16 @@ def get_qTMDWF_file_tag(data_dir, lat, cfg, ama, src, sm):
 
     return data_dir + "/qTMDWF/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag
 
+def get_pion_EMFF_file_tag(data_dir, lat, cfg, ama, src, sm):
+
+    cfg_tag = str(cfg)
+    lat_tag = str(lat) + ".pion_EMFF"
+    ama_tag = str(ama)
+    src_tag = "x"+str(src[0]) + "y"+str(src[1]) + "z"+str(src[2]) + "t"+str(src[3])
+    sm_tag  = str(sm)
+
+    return data_dir + "/pion_EMFF/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag
+
 def ensure_parent_dir(path):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -187,6 +197,23 @@ def save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep
 
 def save_qTMD_pion_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info):
     save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info)
+
+def save_pion_EMFF_hdf5_noRoll(corr, tag, gammalist, qlist, tsep, latt_info):
+
+    save_h5 = tag + ".h5"
+    f = h5py.File(save_h5, 'w')
+
+    if latt_info.mpi_rank == 0:
+        print(f"no roll")
+        print(f"corr.shape, {np.shape(corr)}")
+        print(f"qlist.shape, {np.shape(qlist)}")
+    sm = f.require_group("SS")
+    for ig, gm in enumerate(gammalist):
+        g_gm = sm.require_group(gm)
+        for iq, q in enumerate(qlist):
+            q_tag = "PX"+str(q[0])+"PY"+str(q[1])+"PZ"+str(q[2])
+            g_gm.create_dataset(q_tag, data=corr[iq][ig][:tsep+2])
+    f.close()
 
 def save_qTMDWF_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list):
 
