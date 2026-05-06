@@ -820,36 +820,383 @@ The one-point flow schedule mirrors the connected 3pt schedule (measure-before-f
           U_flow.wilsonFlow(1, epsilon=stepsize)       # or symanzik
 \end{verbatim}
 
-\subsection{Renormalization Assembly (Analysis Stage)}
-\label{sec:renorm_analysis}
+\subsection{Disconnected Matrix Element Analysis}
+\label{sec:analysis}
 
-The contraction kernel outputs \emph{bare flowed operators}. The final renormalized EMT is assembled in the analysis stage:
+The contraction kernel outputs \emph{bare flowed operators} to HDF5 files (Sec.~\ref{sec:hdf5_summary}).
+This section documents the full analysis chain that turns those outputs into physical gravitational form factors.
+The procedure is organized in six steps.
 
-\begin{equation}\label{eq:renorm_full}
-  T_{\mu\nu}^{\text{ren}}(x)
-    = c_g(t)\; O_{\mu\nu}^g(t, x)
-    + c_q(t)\; O_{\mu\nu}^q(t, x)
-    + c_s(t)\; \big[ O_{\mu\nu}^q(t, x) \big]_{\text{traceless}}
-    + \delta_{\mu\nu}\, c_{\text{trace}}(t)\, \Tr\big[O(t,x)\big]
-    + \dots
+% ------------------------------------------------------------------------------
+\subsubsection{Step 1 -- Read input data per configuration}
+\label{sec:analysis_step1}
+
+For each gauge configuration, four HDF5 files are read:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{File} & \textbf{Dataset} & \textbf{Shape} \\
+\midrule
+\code{EMT2pt/...h5}   & \code{C2}          & \code{[16, Np, Nt]} \\
+                       & \code{gamma\_list} & 16 strings \\
+                       & \code{momentum\_list} & \code{[Np, 4]} \\
+\midrule
+\code{EMT3pt/...h5}   & \code{C2}          & \code{[Nt]} (zero-momentum, one gamma) \\
+                       & \code{C3\_chi}     & \code{[Nts, Ns+1, Nq, Nt]} \\
+                       & \code{C3\_Tmunu}   & \code{[Nts, Ns+1, Nq, 4, 4, Nt]} \\
+\midrule
+\code{EMTc/...h5}     & \code{avg/Tmunu/Tij} & \code{[Nq, Ns+1, Nt]} each \\
+                       & \code{avg/CHI}      & \code{[2, Nq, Ns+1, Nt]} \\
+                       & \code{raw/Tmunu\_pervec} & \code{[Nv, 4, 4, Nq, Ns+1, Nt]} \\
+\midrule
+\code{EMTg/...h5}     & \code{Tmunu/Tij}   & \code{[Nq, Ns+1, Nt]} each \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Notation: \code{Np} = number of 2pt momenta, \code{Nq} = number of momentum transfers,
+\code{Nts} = number of $t_{\text{sep}}$ values, \code{Ns} = number of flow steps,
+\code{Nv} = number of noise vectors, \code{Nt} = temporal lattice extent.
+
+For the disconnected analysis, the relevant interpolator is $\Gamma = \gamma_5$ (pseudoscalar, labeled \code{"5"} in \code{gamma\_list}).
+The sink-gamma index \code{ig5} is located by matching against \code{gamma\_list}.
+The momentum index \code{ip} for a desired sink momentum $p_f$ is located by matching against \code{momentum\_list}.
+
+% ------------------------------------------------------------------------------
+\subsubsection{Step 2 -- Time alignment: source position and absolute vs.\ relative time}
+\label{sec:analysis_step2}
+
+The meson 2pt function $C_2$ is computed with a specific source located at
+$x_0 = (t_0, \vec{x}_0)$.  The source time $t_0$ is encoded in the file tag
+(e.g., \code{...x0y0z0t32...}).  The 2pt dataset \code{C2} has shape
+\code{[16, Np, Nt]} where the last axis is the \textbf{absolute sink time}
+$t_{\text{sink}} \in [0, N_t - 1]$.
+
+The 1pt loops $L_{\mu\nu}(q, \tau)$ also use \textbf{absolute lattice time}
+$\tau \in [0, N_t - 1]$ for the operator insertion.  Although the 1pt
+measurement itself does not involve a source, its file tag shares the same
+\code{src} label for bookkeeping, so $t_0$ can be read from it identically.
+
+The physically meaningful time coordinates are \emph{relative to the source}:
+
+\begin{equation}\label{eq:time_alignment}
+  t_{\text{sep}} = (t_{\text{sink}} - t_0) \bmod N_t, \qquad
+  \tau_{\text{rel}} = (\tau_{\text{abs}} - t_0) \bmod N_t.
 \end{equation}
 
-where:
+In practice the source is placed away from the temporal boundary and
+$t_{\text{sep}} \ll N_t$, so the modulo operation is a formality.
+The analysis loops over $t_{\text{sep}}$ values of interest and, for each,
+extracts $C_2$ at $t_{\text{sink}} = t_0 + t_{\text{sep}}$ and $L$ at
+$\tau_{\text{abs}} = t_0 + \tau_{\text{rel}}$ (with trivial wrap-around handling).
+
+\textbf{Location of $t_0$ in the HDF5 files.}
+The source position $x_0$ is stored in:
 \begin{itemize}[nosep]
-  \item $O_{\mu\nu}^g(t,x)$ is from the gluon 1pt measurement (Sec.~\ref{sec:gluon1pt}).
-  \item $O_{\mu\nu}^q(t,x)$ is from the quark 1pt measurement (Sec.~\ref{sec:quark1pt}) for the disconnected piece, and from the connected 3pt measurement (Sec.~\ref{sec:quark_emt_connected}) for the connected piece.
-  \item $c_g(t)$, $c_q(t)$ are perturbative matching coefficients computed at small flow time.
-  \item Traceless projections and trace anomaly subtraction terms are handled in analysis.
-  \item Vacuum subtraction (for the disconnected diagrams) is performed per gauge configuration.
+  \item The file name (e.g., \code{...x0y0z0t32...} -- the $t$ component is $t_0$).
+  \item The HDF5 attribute \code{src\_interpolator} or \code{source\_position}
+    (convention varies by file type; the file name is the authoritative source).
 \end{itemize}
 
-The disconnected matrix element is formed in analysis as
+Parsing example (Python pseudocode):
+\begin{verbatim}
+  import re
+  fname = "lat.EMT2pt.cfg100.ama0.x0y0z0t32.sm0.h5"
+  t0 = int(re.search(r"t(-?\d+)", fname).group(1))
+\end{verbatim}
 
-\begin{equation}\label{eq:disc_connected}
-  C_3^{\text{disc}} = \langle C_2 \, L \rangle - \langle C_2 \rangle \langle L \rangle,
+% ------------------------------------------------------------------------------
+\subsubsection{Step 3 -- Kinematics and momentum matching}
+\label{sec:analysis_step3}
+
+The meson 2pt and the 1pt loops have independent momentum lists.
+The source pion carries momentum $p_i$, the sink carries $p_f$ (from
+\code{momentum\_list} in the 2pt file), and the operator insertion carries
+momentum $q$ (from \code{qext}).  Momentum conservation at the operator vertex
+requires
+
+\begin{equation}\label{eq:kinematics}
+  q = p_f - p_i.
 \end{equation}
 
-where $L$ is the quark or gluon loop (1pt) and $C_2$ is the meson two-point function. The quark 1pt and gluon 1pt files provide $L$, while the meson 2pt file provides $C_2$.
+The source momentum $p_i$ is determined by the source construction:
+\begin{itemize}[nosep]
+  \item For a point source without boost: $p_i = (0, \vec{0})$.
+  \item For a Gaussian-smeared source with boost \code{pos\_boost}:
+    $p_i = \mathtt{pos\_boost}$ (up to smearing-induced smearing of the
+    momentum distribution).
+\end{itemize}
+
+Thus, for each pair $(p_f \in \mathtt{p\_2pt},\; q \in \mathtt{qext})$
+satisfying $q = p_f - p_i$, the relevant 2pt and 1pt entries are matched.
+The \textbf{simplest and most common case} is $p_i = 0$, for which
+$p_f = q$ and the momentum lists can be chosen identical
+($\mathtt{p\_2pt} = \mathtt{qext}$).
+
+In the analysis loop, for each momentum transfer $q$:
+\begin{enumerate}[nosep]
+  \item Compute $p_f = q + p_i$.
+  \item Find the index \code{ip} of $p_f$ in \code{momentum\_list}.
+  \item Find the index \code{iq} of $q$ in \code{qext} (from HDF5 attributes
+    or the \code{momentum\_transfer\_list} dataset).
+  \item The 2pt at this kinematics is \code{C2[ig5, ip, :]}.
+  \item The 1pt loop at this kinematics is \code{Tmunu[iq, :, :]}.
+\end{enumerate}
+
+% ------------------------------------------------------------------------------
+\subsubsection{Step 4 -- Form the disconnected three-point function}
+\label{sec:analysis_step4}
+
+For a single gauge configuration, fixed flow step \code{is} (flow time
+$t_f = \code{is} \times \varepsilon$), fixed Lorentz indices $(\mu,\nu)$,
+and a matched momentum pair $(p_f, q)$, the disconnected three-point function
+at relative insertion time $\tau$ and source-sink separation $t_{\text{sep}}$ is
+
+\begin{equation}\label{eq:C3_disc_per_cfg}
+  C_3^{\text{disc},\,q}(q, \tau, t_{\text{sep}}, t_f)\big|_{\text{cfg}}
+    = C_2\big(p_f,\; t_{\text{sink}}{=}t_0{+}t_{\text{sep}}\big)\;
+      \times\;
+      L_{\mu\nu}^q\big(q,\; \tau_{\text{abs}}{=}t_0{+}\tau,\; t_f\big).
+\end{equation}
+
+Indices on the right-hand side refer to the stored array axes:
+\begin{itemize}[nosep]
+  \item \code{C2[ig5, ip, t0 + tsep]} -- 2pt at sink gamma $\gamma_5$,
+    sink momentum $p_f$, absolute sink time $t_0 + t_{\text{sep}}$.
+  \item \code{L\_quark[iq, istep, t0 + tau]} -- quark loop at momentum
+    transfer $q$, flow step \code{is}, absolute insertion time $t_0 + \tau$.
+  \item \code{L\_gluon[iq, istep, t0 + tau]} -- gluon loop, same indexing.
+\end{itemize}
+
+The gluon loop enters identically to the quark loop:
+
+\begin{equation}\label{eq:C3_disc_gluon_per_cfg}
+  C_3^{\text{disc},\,g}(q, \tau, t_{\text{sep}}, t_f)\big|_{\text{cfg}}
+    = C_2\big(p_f,\; t_0{+}t_{\text{sep}}\big)\;
+      \times\;
+      L_{\mu\nu}^g\big(q,\; t_0{+}\tau,\; t_f\big).
+\end{equation}
+
+Only the window $0 < \tau < t_{\text{sep}}$ contributes to the ground-state
+signal (the operator must be inserted between source and sink).
+Points outside this window serve as cross-checks (should be consistent with
+zero after vacuum subtraction).
+
+The connected three-point function $C_3^{\text{conn}}$ is read directly from
+\code{EMT3pt/...h5} (dataset \code{C3\_Tmunu}, shape
+\code{[Nts, Ns+1, Nq, 4, 4, Nt]}).  It already includes the sequential-source
+summation and uses the same source $x_0$; its time axis is absolute and must
+be aligned identically.
+
+% ------------------------------------------------------------------------------
+\subsubsection{Step 5 -- Ensemble averaging and vacuum subtraction}
+\label{sec:analysis_step5}
+
+Let $N_{\text{cfg}}$ be the number of gauge configurations.  For each jackknife or bootstrap
+resampling bin $b$, compute the ensemble averages:
+
+\begin{align}
+  \langle C_2(p, t_{\text{sep}}) \rangle_b
+    &= \frac{1}{N_{\text{cfg}} - 1} \sum_{\text{cfg} \neq b}
+       C_2(p, t_{\text{sep}})\big|_{\text{cfg}}, \label{eq:avg_C2} \\[4pt]
+  \langle L_{\mu\nu}(q, \tau, t_f) \rangle_b
+    &= \frac{1}{N_{\text{cfg}} - 1} \sum_{\text{cfg} \neq b}
+       L_{\mu\nu}(q, \tau, t_f)\big|_{\text{cfg}}, \label{eq:avg_L} \\[4pt]
+  \langle C_2 \cdot L_{\mu\nu} \rangle_b
+    &= \frac{1}{N_{\text{cfg}} - 1} \sum_{\text{cfg} \neq b}
+       \big[ C_2(p, t_{\text{sep}}) \; L_{\mu\nu}(q, \tau, t_f) \big]_{\text{cfg}}. \label{eq:avg_C2L}
+\end{align}
+
+The disconnected three-point function with vacuum subtraction is then
+
+\begin{equation}\label{eq:C3_disc_ens}
+  \boxed{
+    C_3^{\text{disc}}(q, \tau, t_{\text{sep}}, t_f)
+      = \langle C_2 \cdot L \rangle
+      - \langle C_2 \rangle \; \langle L \rangle
+  }.
+\end{equation}
+
+This subtraction removes the vacuum expectation value of the operator and the
+disconnected contribution where the pion propagates without interacting with the EMT.
+Eq.~\eqref{eq:C3_disc_ens} is applied separately to the quark loop ($L^q$) and gluon loop ($L^g$).
+
+The jackknife error on $C_3^{\text{disc}}$ is computed in the standard way:
+$\sigma^2 = \frac{N_{\text{cfg}} - 1}{N_{\text{cfg}}} \sum_b (C_3^{\text{disc}}(b) - \overline{C_3^{\text{disc}}})^2$.
+
+% ------------------------------------------------------------------------------
+\subsubsection{Step 6 -- Ratio method and ground-state extraction}
+\label{sec:analysis_step6}
+
+The bare matrix element is isolated by forming the ratio with the two-point function:
+
+\begin{equation}\label{eq:ratio}
+  R_{\mu\nu}^{\mathcal{O}}(q, \tau, t_{\text{sep}}, t_f)
+    = \frac{C_3^{\mathcal{O}}(q, \tau, t_{\text{sep}}, t_f)}
+           {\langle C_2(p_f,\, t_{\text{sep}}) \rangle},
+\end{equation}
+
+where $\mathcal{O} \in \{\text{conn},\, \text{disc-}q,\, \text{disc-}g\}$.
+For the connected piece, $C_3^{\text{conn}}$ from the 3pt file enters the numerator.
+For the disconnected pieces, $C_3^{\text{disc}}$ from Eq.~\eqref{eq:C3_disc_ens} enters.
+
+In the limit of large source-insertion and insertion-sink separations, excited states
+decay exponentially and the ratio plateaus to the ground-state matrix element:
+
+\begin{equation}\label{eq:plateau}
+  R_{\mu\nu}^{\mathcal{O}}(q, \tau, t_{\text{sep}}, t_f)
+    \xrightarrow[\tau \gg 0,\; t_{\text{sep}}-\tau \gg 0]{}
+    \frac{\bra{\pi(p_f)} T_{\mu\nu}^{\mathcal{O}}(t_f) \ket{\pi(p_i)}}
+         {2\sqrt{E_\pi(p_i)\,E_\pi(p_f)}}.
+\end{equation}
+
+With $p_i = 0$ and $E_\pi(0) = m_\pi$, this simplifies to
+
+\begin{equation}\label{eq:plateau_rest}
+  R_{\mu\nu}^{\mathcal{O}} \;\xrightarrow{\text{plateau}}\;
+    \frac{\bra{\pi(p_f)} T_{\mu\nu}^{\mathcal{O}}(t_f) \ket{\pi(0)}}
+         {2\sqrt{m_\pi\,E_\pi(p_f)}}.
+\end{equation}
+
+\textbf{Plateau fitting procedure:}
+\begin{enumerate}[nosep]
+  \item For each $t_{\text{sep}}$, plot $R(\tau)$ as a function of $\tau$.
+  \item Identify the plateau region where $R(\tau)$ is flat within errors.
+    Typical choices: $\tau \in [2,\, t_{\text{sep}}-2]$ or $\tau \in [t_{\text{sep}}/3,\, 2t_{\text{sep}}/3]$.
+  \item Fit $R(\tau)$ to a constant (or constant $+$ single-exponential correction)
+    in the plateau window.
+  \item The fit result is the bare matrix element
+    $M_{\mu\nu}^{\mathcal{O},\,\text{bare}}(q, t_f, t_{\text{sep}})$.
+  \item As a cross-check, verify that the extracted $M$ is independent of $t_{\text{sep}}$
+    (within errors) for sufficiently large $t_{\text{sep}}$.
+\end{enumerate}
+
+Alternatively, the \textbf{summation method} integrates over $\tau$:
+
+\begin{equation}\label{eq:summation}
+  S_{\mu\nu}^{\mathcal{O}}(q, t_{\text{sep}}, t_f)
+    = \sum_{\tau = \tau_{\text{min}}}^{t_{\text{sep}} - \tau_{\text{min}}}
+      R_{\mu\nu}^{\mathcal{O}}(q, \tau, t_{\text{sep}}, t_f),
+\end{equation}
+
+whose slope against $t_{\text{sep}}$ gives the matrix element with reduced excited-state
+contamination at the cost of larger statistical errors.
+
+% ------------------------------------------------------------------------------
+\subsubsection{Step 7 -- Assemble, renormalize, and decompose}
+\label{sec:analysis_step7}
+
+\paragraph{Total bare matrix element.}
+After ground-state extraction, the three pieces are summed at each flow time $t_f$:
+
+\begin{equation}\label{eq:M_total_bare}
+  M_{\mu\nu}^{\text{bare}}(q, t_f)
+    = M_{\mu\nu}^{\text{conn}}(q, t_f)
+    + M_{\mu\nu}^{\text{disc},\,q}(q, t_f)
+    + M_{\mu\nu}^{\text{disc},\,g}(q, t_f).
+\end{equation}
+
+All three pieces share the same lattice kinematics and flow schedule, so they can be
+summed directly.
+
+\paragraph{Renormalization and flow-time dependence.}
+The bare flowed matrix elements are converted to the $\overline{\text{MS}}$ scheme at scale $\mu$
+using perturbative matching coefficients \cite{Suzuki:2013, Makino:2016}:
+
+\begin{equation}\label{eq:renorm_full}
+  M_{\mu\nu}^{\overline{\text{MS}}}(q, \mu)
+    = \lim_{t_f \to 0}\,
+      \Big[ c_q(t_f, \mu)\; M_{\mu\nu}^{q,\,\text{bare}}(q, t_f)
+         + c_g(t_f, \mu)\; M_{\mu\nu}^{g,\,\text{bare}}(q, t_f)
+         + \delta_{\mu\nu}\, c_{\text{trace}}(t_f, \mu)\,
+           \sum_{\rho,\sigma} M_{\rho\sigma}^{\text{bare}}(q, t_f)
+      \Big].
+\end{equation}
+
+Here $M_{\mu\nu}^{q,\,\text{bare}} = M_{\mu\nu}^{\text{conn}} + M_{\mu\nu}^{\text{disc},\,q}$ is the total quark contribution,
+and $M_{\mu\nu}^{g,\,\text{bare}} = M_{\mu\nu}^{\text{disc},\,g}$ is the total gluon contribution.
+The trace term accounts for the trace anomaly; $c_{\text{trace}}$ is determined by the
+renormalization condition $\sum_\mu T_{\mu\mu}^{\text{ren}} = (\beta/2g) F_{\rho\sigma}^a F_{\rho\sigma}^a
++ (1+\gamma_m) m \bar{\psi}\psi$.
+
+In practice, the $t_f \to 0$ limit is implemented by:
+\begin{enumerate}[nosep]
+  \item Extracting the matrix element at each flow time $t_f = \code{step} \times \varepsilon$.
+  \item Applying the matching coefficients $c_q(t_f, \mu)$, $c_g(t_f, \mu)$ at each $t_f$.
+  \item Performing a linear (or constant) extrapolation in $t_f$ to $t_f = 0$,
+    using only the small-$t_f$ window where perturbation theory is reliable
+    (typically $\sqrt{8t_f} \lesssim 0.3$\,fm).
+\end{enumerate}
+
+\paragraph{Gravitational form factor decomposition.}
+For a spin-0 pion, the Lorentz decomposition of the renormalized EMT matrix element is
+\cite{DelDebbio:2021}:
+
+\begin{equation}\label{eq:GFF_decomp}
+  \bra{\pi(p_f)} T_{\mu\nu}^{\overline{\text{MS}}}(\mu) \ket{\pi(p_i)}
+    = 2\,P_\mu P_\nu\, A(q^2)
+    + \tfrac{1}{2}\big(q_\mu q_\nu - \delta_{\mu\nu} q^2\big)\, D(q^2)
+    + 2\,m_\pi^2\,\delta_{\mu\nu}\, \bar{c}(q^2),
+\end{equation}
+
+where $P = (p_i + p_f)/2$ and $q = p_f - p_i$.
+The three gravitational form factors are:
+\begin{itemize}[nosep]
+  \item $A(q^2)$ -- the mass form factor ($A(0) = 1$ for a stable hadron),
+  \item $D(q^2)$ -- the $D$-term encoding pressure and shear distributions,
+  \item $\bar{c}(q^2)$ -- the trace-anomaly form factor ($\bar{c}(0)$ gives the gluon
+    contribution to the pion mass).
+\end{itemize}
+
+Given $M_{\mu\nu}(q) \equiv \bra{\pi(p_f)} T_{\mu\nu} \ket{\pi(p_i)}$ from the lattice,
+the form factors are extracted by solving the $4 \times 4$ linear system at each $q^2$.
+With $p_i = 0$, the components simplify:
+
+\begin{align}
+  M_{44}(q) &= 2E_\pi^2(q)\, A(q^2)
+              + \tfrac{1}{2}\big(q_4^2 + \vec{q}\,^2\big)\, D(q^2)
+              + 2 m_\pi^2\, \bar{c}(q^2), \label{eq:M44} \\
+  M_{ii}(q) &= 2q_i^2\, A(q^2)
+              + \tfrac{1}{2}\big(q_i^2 - \vec{q}\,^2\big)\, D(q^2)
+              + 2 m_\pi^2\, \bar{c}(q^2) \quad (i = 1,2,3), \label{eq:Mii} \\
+  M_{4i}(q) &= 2E_\pi(q)\,q_i\, A(q^2)
+              + \tfrac{1}{2}\,q_4\,q_i\, D(q^2), \label{eq:M4i} \\
+  M_{ij}(q) &= 2q_i q_j\, A(q^2)
+              + \tfrac{1}{2}\,q_i q_j\, D(q^2) \quad (i \neq j). \label{eq:Mij}
+\end{align}
+
+In practice, $A(q^2)$, $D(q^2)$, and $\bar{c}(q^2)$ are overdetermined (10 independent
+$M_{\mu\nu}$ components for 3 unknowns at each $q^2$) and are extracted by a least-squares
+fit to Eqs.~\eqref{eq:M44}--\eqref{eq:Mij}.
+
+\paragraph{Summary of the full analysis chain.}
+\begin{center}
+\fbox{
+\begin{minipage}{0.92\textwidth}
+\vspace{4pt}
+\begin{enumerate}[nosep, leftmargin=*]
+  \item \textbf{Read} HDF5 files for all $N_{\text{cfg}}$ configurations.
+  \item \textbf{Match} momenta: $p_f = q$, locate indices in \code{momentum\_list} and
+    \code{qext}.
+  \item \textbf{Form} $C_3^{\text{disc},\,q}$ and $C_3^{\text{disc},\,g}$ per
+    configuration via Eq.~\eqref{eq:C3_disc_per_cfg}.
+  \item \textbf{Jackknife} over configurations; compute $\langle C_2 \rangle$,
+    $\langle L \rangle$, $\langle C_2 L \rangle$; subtract vacuum via
+    Eq.~\eqref{eq:C3_disc_ens}.
+  \item \textbf{Ratio} $R = C_3 / \langle C_2 \rangle$; plateau-fit in $\tau$
+    for each $(q, t_f, \mu, \nu, t_{\text{sep}})$.
+  \item \textbf{Sum} connected + disconnected quark + gluon $\to$
+    $M_{\mu\nu}^{\text{bare}}(q, t_f)$.
+  \item \textbf{Renormalize} with $c_q(t_f,\mu)$, $c_g(t_f,\mu)$; extrapolate
+    $t_f \to 0$.
+  \item \textbf{Solve} for $A(q^2)$, $D(q^2)$, $\bar{c}(q^2)$ via
+    Eqs.~\eqref{eq:M44}--\eqref{eq:Mij}.
+\end{enumerate}
+\vspace{2pt}
+\end{minipage}
+}
+\end{center}
 
 \subsection{Future Variance Reduction Strategies}
 \label{sec:variance_reduction}
