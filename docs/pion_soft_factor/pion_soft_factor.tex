@@ -1,0 +1,973 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------------------------------------------------------------------------
+% Packages
+% ---------------------------------------------------------------------------
+\usepackage{amsmath,amssymb}
+\usepackage{physics}
+\usepackage{braket}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{fancyhdr}
+
+% ---------------------------------------------------------------------------
+% Page style
+% ---------------------------------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Pion Soft Factor -- Physics Note}
+\fancyhead[R]{\today}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ---------------------------------------------------------------------------
+% Math convenience
+% ---------------------------------------------------------------------------
+\newcommand{\Gfive}{\gamma_{5}}
+\newcommand{\Gmu}{\gamma_{\mu}}
+\newcommand{\Gnu}{\gamma_{\nu}}
+\newcommand{\Grho}{\gamma_{\rho}}
+\newcommand{\Gsigma}{\gamma_{\sigma}}
+\newcommand{\Gone}{\gamma_{1}}
+\newcommand{\Gtwo}{\gamma_{2}}
+\newcommand{\Gthree}{\gamma_{3}}
+\newcommand{\einsum}{\texttt{einsum}}
+\newcommand{\xp}{\texttt{xp}}
+\newcommand{\conj}[1]{#1^{\dagger}}
+\newcommand{\gbar}[1]{\bar{#1}}
+\newcommand{\walltag}[1]{\texttt{#1}}
+
+% Dirac matrix shorthand in text
+\newcommand{\gI}{\mathbf{1}}
+
+\begin{document}
+
+% ===========================================================================
+\title{\textbf{Pion Soft Factor Measurement}\\[4pt]
+\large A Detailed Physics Note for the PyQUDA Implementation}
+\author{}
+\date{\today}
+\maketitle
+\thispagestyle{fancy}
+
+% ===========================================================================
+\section{Physics Overview}
+% ===========================================================================
+
+The pion soft factor is a four-point correlation function that appears ubiquitously
+in the factorization of transverse-momentum-dependent (qTMD) observables.
+In the Collins--Soper (CS) framework~\cite{Collins:1981uk,Collins:1984kg} and the
+Ji--Ma--Yuan (JMY) framework~\cite{Ji:2004wu,Ji:2019ewn}, the soft factor absorbs
+rapidity divergences that arise when one attempts to separate the hard scattering,
+the collinear beam functions, and the soft radiation in hadron scattering processes.
+
+For a pion, the soft factor is defined through a matrix element of four Wilson-line
+staple operators arranged on the light-cone.  In a Euclidean lattice calculation one
+gives up the light-cone separation and instead works with equal-time correlators in
+a large-momentum frame, following the LaMET/quasi-PDF philosophy.  The Lorentz
+invariant definition is then replaced by a quasi-soft-factor whose infrared
+structure coincides with the physical soft factor after a perturbative matching.
+
+Concretely, the lattice object we compute is
+
+\begin{equation}\label{eq:soft_def}
+S(b_{\perp}, t; t_{0}, t_{\mathrm{sep}}, \Gamma_{1}, \Gamma_{2})
+ \;=\;
+\sum_{\mathbf{x}}
+\Tr\Big[
+  A_{b}(\mathbf{x}, t)\;\Gamma_{2}\;B_{b}(\mathbf{x}, t)\;\Gamma_{1}
+\Big]\, ,
+\end{equation}
+
+where $b_{\perp}$ is a transverse displacement between the quark and antiquark
+Wilson lines, $t_{0}$ is the source time slice, $t_{\mathrm{sep}}$ is the sink--source
+separation, and the closed spin-color blocks $A_{b}$ and $B_{b}$ are built from four
+Coulomb-gauge-fixed wall-source propagators as described in detail below.  The
+matrices $\Gamma_{1}$ and $\Gamma_{2}$ are drawn from a reduced gamma set appropriate
+for the soft factor.
+
+The physical interpretation of Eq.~\eqref{eq:soft_def} is that the two blocks
+$A_{b}$ and $B_{b}$ represent the quark and antiquark lines that travel from the
+source to the sink, with the transverse displacement $b$ inserted to probe the
+transverse-momentum dependence of the soft radiation.  The trace over spin and
+color indices projects onto the desired gamma structures.
+
+% ===========================================================================
+\section{Two-Stage Workflow}
+% ===========================================================================
+
+The calculation is intentionally split into two independent stages to allow flexible
+reuse of the expensive propagator inversions.
+
+\paragraph{Stage 1 -- Propagator Generation}
+(\walltag{Pyquda\_pion\_soft\_factor\_prop.py})
+
+\begin{itemize}[nosep]
+  \item Read a Coulomb-gauge-fixed configuration.
+  \item For every requested source time slice $t_{0}$ and every quark momentum
+        $\mathbf{k}$ (and $-\mathbf{k}$), construct a momentum-phase wall source and
+        invert the Dirac operator.
+  \item Save each propagator as an HDF5 file with full metadata (lattice tag,
+        configuration number, smearing tag, source position, quark momentum).
+\end{itemize}
+
+\paragraph{Stage 2 -- Contraction}
+(\walltag{Pyquda\_pion\_soft\_factor\_contract.py})
+
+\begin{itemize}[nosep]
+  \item Load the wall propagators saved in Stage~1 (no gauge field needed except for
+        lattice geometry metadata).
+  \item For each pair of forward/backward quark momenta $(\mathbf{k}_{\mathrm{fw}},
+        \mathbf{k}_{\mathrm{bw}})$ compute:
+        \begin{enumerate}[nosep,label=(\roman*)]
+          \item the wall-to-wall two-point diagnostic $C_{2}(t)$,
+          \item the qTMDWF-like diagnostic $C_{\mathrm{TMDWF}}(b_{T}, b_{z}, t)$,
+          \item the full soft-factor four-point correlator
+                $S(b_{\perp}, t; t_{\mathrm{sep}}, \Gamma_{1}, \Gamma_{2})$.
+        \end{enumerate}
+  \item Save all correlators to HDF5 with appropriate group hierarchies.
+\end{itemize}
+
+This two-stage design means that one can change contraction parameters
+(e.g.\ $\Gamma_{1}$, $\Gamma_{2}$, $b_{T}$ ranges, sink interpolators) without
+re-running any inversions.
+
+% ===========================================================================
+\section{Wall-Source Propagators}
+% ===========================================================================
+
+\subsection{Coulomb-Gauge Wall Source}
+
+The source for quark momentum $\mathbf{k}$ at time $t_{0}$ is
+
+\begin{equation}\label{eq:wall_src}
+\eta_{\mathbf{k}}(\mathbf{x}, t)
+   \;=\; \delta_{t,\,t_{0}}\;\exp\!\big( +i\,\mathbf{k}\!\cdot\!\mathbf{x} \big)\, .
+\end{equation}
+
+The spatial part is a plane wave with momentum $+\mathbf{k}$, applied uniformly on
+every spatial site of time slice $t_{0}$.  The Coulomb gauge condition is imposed
+before the wall source is constructed, which suppresses the gauge noise that would
+otherwise contaminate a point source.  The corresponding propagator is
+
+\begin{equation}\label{eq:wall_prop}
+G_{\mathbf{k}}(x; t_{0}) \;=\; D^{-1}\,\eta_{\mathbf{k}}\, ,
+\end{equation}
+
+where $D$ is the Wilson-clover Dirac operator with appropriate boundary conditions
+($t$-boundary set to antiperiodic, \walltag{t\_boundary = -1}).
+
+\subsection{Both Signs of Quark Momentum}
+
+The soft-factor contraction requires both $+\mathbf{k}$ and $-\mathbf{k}$
+propagators on all time slices.  Stage~1 therefore loops over a set of momenta that
+includes both signs:
+
+\begin{equation}
+\mathcal{K}_{\text{save}} \;=\;
+  \{\,\mathbf{k}_{\mathrm{fw}},\,\mathbf{k}_{\mathrm{bw}},\,
+   -\mathbf{k}_{\mathrm{fw}},\,-\mathbf{k}_{\mathrm{bw}}\,\}
+\quad\text{(duplicates removed)}.
+\end{equation}
+
+\subsection{Antiquark Line from Gamma5 Hermiticity}
+
+The Euclidean Dirac operator satisfies $\gamma_{5}$-hermiticity,
+
+\begin{equation}\label{eq:gamma5_herm}
+D^{\dagger} \;=\; \Gfive\, D\, \Gfive\, .
+\end{equation}
+
+For an antiquark propagating \emph{backward} in time the required propagator is
+obtained from the $-\mathbf{k}$ forward propagator via
+
+\begin{equation}\label{eq:antiquark}
+\gbar{G}_{-\mathbf{k}}(x; t_{0})
+   \;=\; \Gfive \; G_{-\mathbf{k}}(x; t_{0})^{\dagger} \; \Gfive\, .
+\end{equation}
+
+In the code this operation is performed by the \einsum\ pattern
+
+\begin{verbatim}
+    xp.einsum("ij, tzyxmlca, kl -> tzyxkjca",
+             gamma5, prop.conj(), gamma5)
+\end{verbatim}
+
+which transposes the spin indices $(i\leftrightarrow j,\;k\leftrightarrow l)$
+appropriately.  The color index $a$ and the spatial lattice indices $(z,y,x)$ are
+spectators in this transformation.
+
+\subsection{Momentum Phase Convention}
+
+The phase convention is tied to the definition of the wall source, Eq.~\eqref{eq:wall_src}:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Operation & Phase factor \\
+\midrule
+Wall source at $t_{0}$ with momentum $\mathbf{k}$
+   & $\exp(+i\,\mathbf{k}\!\cdot\!\mathbf{x})$ \\[4pt]
+Sink-side phase on $G_{\mathbf{k}}$ (two-point)
+   & $\exp(-i\,\mathbf{p}\!\cdot\!\mathbf{x})$ where $\mathbf{p}$ is the meson momentum \\[4pt]
+Sink-side phase on $G_{\mathbf{k}_{\mathrm{bw}}}$ (soft factor)
+   & $\exp(-2i\,\mathbf{P}\!\cdot\!\mathbf{x})$ where $\mathbf{P}=\mathbf{k}_{\mathrm{fw}}+\mathbf{k}_{\mathrm{bw}}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The sign of the applied phase in \walltag{apply\_phase} is controlled by the
+\walltag{sign} argument.  When \walltag{sign=1}, the raw momentum-phase factor
+$\exp(+i\mathbf{k}\!\cdot\!\mathbf{x})$ is multiplied onto the propagator data.
+When \walltag{sign=-1}, the complex conjugate $\exp(-i\mathbf{k}\!\cdot\!\mathbf{x})$
+is used instead.
+
+% ===========================================================================
+\section{Wall-to-Wall Two-Point Diagnostic}
+% ===========================================================================
+
+Before computing the four-point soft factor we verify that the wall-source
+propagators produce a sensible pion two-point function.  Using the forward
+propagator $G_{\mathrm{fw}} \equiv G_{\mathbf{k}}(t_{0})$ and the backward-source
+propagator $G_{\mathrm{bw}} \equiv G_{-\mathbf{k}_{\mathrm{bw}}}(t_{0})$, the
+wall-to-wall two-point function for source interpolator $\Gamma_{\mathrm{src}}$ and
+sink interpolator $\Gamma_{\mathrm{sink}}$ is
+
+\begin{equation}\label{eq:C2}
+C_{2}(t) \;=\;
+\sum_{\mathbf{x}} \Tr\Big[
+   \Gamma_{\mathrm{src}}\;
+   \gbar{G}_{\mathrm{bw}}(\mathbf{x}, t; t_{0})\;
+   \Gamma_{\mathrm{sink}}\;
+   G_{\mathrm{fw}}^{\mathrm{phased}}(\mathbf{x}, t; t_{0})
+\Big]\, ,
+\end{equation}
+
+where
+
+\begin{itemize}[nosep]
+  \item $\gbar{G}_{\mathrm{bw}}$ is the gamma5-hermiticity-conjugated antiquark line,
+        Eq.~\eqref{eq:antiquark}.
+  \item $G_{\mathrm{fw}}^{\mathrm{phased}}$ is the forward propagator multiplied by
+        the meson momentum phase $\exp(-i\mathbf{p}\!\cdot\!\mathbf{x})$ with
+        $\mathbf{p} = \mathbf{k}_{\mathrm{fw}} + \mathbf{k}_{\mathrm{bw}}$.
+  \item The backward propagator is \emph{not} phased, because the wall source
+        $\eta_{-\mathbf{k}_{\mathrm{bw}}}(t_{0})$ already carries
+        $-\mathbf{k}_{\mathrm{bw}}$ in its construction; the antiquark line thus
+        naturally projects onto total momentum $\mathbf{p}$.
+\end{itemize}
+
+In the code, \walltag{contract\_wall\_2pt} performs this computation using
+three nested \einsum\ calls:
+
+\begin{enumerate}[nosep]
+  \item $\gbar{G}_{\mathrm{bw}}$ via gamma5 conjugation.
+  \item $\Gamma_{\mathrm{src}} \cdot \gbar{G}_{\mathrm{bw}} \cdot \Gamma_{\mathrm{sink}}$.
+  \item Trace with $G_{\mathrm{fw}}^{\mathrm{phased}}$ and spatial sum.
+\end{enumerate}
+
+The final index structure is \walltag{(sink\_key, src\_key, t)}, and after gathering
+across MPI ranks the time axis is rolled so that the source time $t_{0}$ maps to
+$t=0$.
+
+% ===========================================================================
+\section{qTMDWF-like Diagnostic Check}
+% ===========================================================================
+
+The qTMDWF diagnostic generalizes the two-point function by shifting the backward
+antiquark line transversely and longitudinally before contracting.  For transverse
+displacement $b_{T}$ along axis $\hat{n}_{T}$ and longitudinal displacement $b_{z}$:
+
+\begin{equation}\label{eq:tmdwf}
+C_{\mathrm{TMDWF}}(b_{T}, b_{z}, t) \;=\;
+\sum_{\mathbf{x}} \Tr\Big[
+   \Gamma_{\mathrm{src}}\;
+   \gbar{G}_{\mathrm{bw}}^{\,\mathrm{shift}}(\mathbf{x}, t; t_{0})\;
+   G_{\mathrm{fw}}^{\mathrm{phased}}(\mathbf{x}, t; t_{0})
+\Big]\, ,
+\end{equation}
+
+where $\gbar{G}_{\mathrm{bw}}^{\,\mathrm{shift}}$ is the gamma5-conjugated backward
+propagator shifted by $(b_{T}, b_{z})$.  The forward propagator is left unshifted.
+
+This diagnostic is valuable because:
+
+\begin{enumerate}[nosep]
+  \item It tests that the backward propagator carries the expected momentum
+        and spatial structure.
+  \item It previews the transverse displacement needed for the full soft factor.
+  \item For $b_{T}=0,\;b_{z}=0$ it reduces to a simpler trace that can be compared
+        against the two-point diagnostic as a consistency check.
+\end{enumerate}
+
+In the code, \walltag{contract\_tmdwf\_check} iterates over $b_{T}$ and $b_{z}$,
+applies coordinate-gauge shifts via \walltag{prop.shift()}, gamma5-conjugates the
+shifted propagator, and contracts against the phased forward propagator with a
+single $\Gamma_{\mathrm{src}}$ insertion (no sink interpolator).
+
+% ===========================================================================
+\section{Soft-Factor Four-Point Contraction}
+% ===========================================================================
+
+This is the main measurement.  For each source time $t_{0}$ and sink separation
+$t_{\mathrm{sep}}$ the contraction uses four Coulomb-gauge wall propagators,
+organized by their role in the forward/backward quark and antiquark lines:
+
+\begin{equation}\label{eq:four_props}
+\begin{aligned}
+G_{w}            &\equiv G_{+\mathbf{k}_{\mathrm{fw}}}(t_{0})
+                  \qquad\text{(forward quark, source time)} \\[2pt]
+G_{w,\mathrm{b}_{\perp}}^{\dagger}
+                 &\equiv G_{-\mathbf{k}_{\mathrm{bw}}}(t_{0})
+                  \qquad\text{(backward antiquark, source time)} \\[2pt]
+G_{w}^{\dagger}  &\equiv G_{-\mathbf{k}_{\mathrm{fw}}}(t_{0}+t_{\mathrm{sep}})
+                  \qquad\text{(forward antiquark, sink time)} \\[2pt]
+G_{w}^{\mathrm{b}_{\perp}}
+                 &\equiv G_{+\mathbf{k}_{\mathrm{bw}}}(t_{0}+t_{\mathrm{sep}})
+                  \qquad\text{(backward quark, sink time)}
+\end{aligned}
+\end{equation}
+
+The naming convention follows the legacy code:
+
+\begin{itemize}[nosep]
+  \item \walltag{Gw}: \textbf{G}auge-fixed \textbf{w}all propagator for the forward
+        quark at the source.
+  \item \walltag{Gw\_bperp\_dagger}: The dagger emphasizes that this propagator will
+        be gamma5-conjugated (``dagger'') and that it corresponds to the backward
+        line that will be transversely displaced (``bperp'').
+  \item \walltag{Gw\_dagger}: Forward antiquark at the sink, gamma5-conjugated.
+  \item \walltag{Gw\_bperp}: Backward quark at the sink, transversely displaced.
+\end{itemize}
+
+\subsection{Sink-Side Momentum Phase}
+
+The backward quark propagator at the sink, $G_{w}^{\mathrm{b}_{\perp}}$, is multiplied
+by the momentum-transfer phase
+
+\begin{equation}\label{eq:sink_phase}
+G_{w}^{\mathrm{b}_{\perp}}
+\;\longrightarrow\;
+\exp\!\big({-2i\,\mathbf{P}\!\cdot\!\mathbf{x}}\big)\;
+G_{w}^{\mathrm{b}_{\perp}} ,
+\qquad
+\mathbf{P} \equiv \mathbf{k}_{\mathrm{fw}} + \mathbf{k}_{\mathrm{bw}}
+\end{equation}
+
+where $\mathbf{P}$ is the total pion momentum.  The factor of~2 arises from the
+kinematic structure of the soft factor, where both the source and sink sides
+contribute equal and opposite phases to the four-point function.  All other
+propagators carry their momentum through the wall-source construction; only
+$G_{w}^{\mathrm{b}_{\perp}}$ receives this explicit phase because it is the only
+propagator for which the wall-source momentum ($+\mathbf{k}_{\mathrm{bw}}$) does not
+match the required total momentum projection.
+
+\subsection{Time-Major Lexicographic Layout}
+
+Before contraction, all four propagators are rearranged into \emph{time-major}
+lexicographic order via
+
+\begin{verbatim}
+    prop.lexico(False)
+\end{verbatim}
+
+This yields the index ordering
+
+\begin{equation}
+\underbrace{t}_{\text{time}}\,
+\underbrace{z}_{\text{slowest spatial}}\,
+\underbrace{y}_{\text{middle spatial}}\,
+\underbrace{x}_{\text{fastest spatial}}\,
+\underbrace{j,\,i}_{\text{spin sink, source}}\,
+\underbrace{b,\,a}_{\text{color sink, source}}
+\end{equation}
+
+or, in the einsum convention used throughout the code,
+
+\begin{equation}
+\text{\walltag{tzyx\;j i\;b a}}
+\end{equation}
+
+where Latin letters $(i,j,k,l)$ denote Dirac spin indices and $(a,b,c)$ denote
+color indices.  This time-major layout is essential because the final trace over
+spatial volume and the time projection must respect the lexicographic order for
+correct MPI halo exchanges.
+
+% ===========================================================================
+\section{Closed Spin-Color Blocks}
+% ===========================================================================
+
+For each transverse displacement vector $\mathbf{b}$ (pointing along the axis
+$\hat{n}_{\mathrm{T}}$ with magnitude $b_{T}$ lattice units), we form two
+closed spin-color blocks:
+
+\subsection{Block $A_{b}$ -- Source Side}
+
+\begin{equation}\label{eq:A_block}
+A_{b}(\mathbf{x}, t) \;=\;
+G_{w}(\mathbf{x}, t)\;
+\cdot\;
+\Gamma_{\mathrm{src}}\;
+\cdot\;
+\Gfive\;
+\cdot\;
+G_{w}^{\mathrm{b}_{\perp}\dagger}
+   (\mathbf{x}+\mathbf{b},\,t)^{\dagger}
+\cdot\;
+\Gfive\, .
+\end{equation}
+
+\noindent
+In words:
+\begin{enumerate}[nosep]
+  \item Start with the forward quark propagator $G_{w}$ at position $\mathbf{x}$.
+  \item Insert the source interpolator $\Gamma_{\mathrm{src}}$.
+  \item Gamma5-conjugate the transversely-shifted backward antiquark propagator
+        $G_{w}^{\mathrm{b}_{\perp}\dagger}$ (the dagger in the name refers to the
+        fact that this propagator is stored as $G_{-\mathbf{k}_{\mathrm{bw}}}$
+        and must be conjugated).
+  \item The shift by $+\mathbf{b}$ is applied to $G_{w}^{\mathrm{b}_{\perp}\dagger}$
+        before conjugation.
+\end{enumerate}
+
+\subsection{Block $B_{b}$ -- Sink Side}
+
+\begin{equation}\label{eq:B_block}
+B_{b}(\mathbf{x}, t) \;=\;
+G_{w}^{\mathrm{b}_{\perp}}(\mathbf{x}+\mathbf{b},\,t)
+\cdot\;
+\Gamma_{\mathrm{sink}}
+\cdot\;
+\Gfive\;
+\cdot\;
+G_{w}^{\dagger}(\mathbf{x},\,t)^{\dagger}
+\cdot\;
+\Gfive\, .
+\end{equation}
+
+\noindent
+In words:
+\begin{enumerate}[nosep]
+  \item Start with the transversely-shifted backward quark propagator
+        $G_{w}^{\mathrm{b}_{\perp}}$ at position $\mathbf{x}+\mathbf{b}$.
+        This propagator already carries the sink-side phase,
+        Eq.~\eqref{eq:sink_phase}.
+  \item Insert the sink interpolator $\Gamma_{\mathrm{sink}}$.
+  \item Gamma5-conjugate the forward antiquark propagator $G_{w}^{\dagger}$
+        at position $\mathbf{x}$.
+\end{enumerate}
+
+Both blocks $A_{b}$ and $B_{b}$ are matrices in spin-color space at each spacetime
+point $(\mathbf{x}, t)$.  Their open indices are the spin and color indices that
+will be contracted in the final trace.
+
+\subsection{Four-Point Correlator}
+
+With the blocks defined, the soft-factor four-point function is assembled as
+
+\begin{equation}\label{eq:C4_full}
+\begin{aligned}
+C_{4}(t; t_{\mathrm{sep}}, \mathbf{b}, \Gamma_{1}, \Gamma_{2})
+\;=\;
+\sum_{\mathbf{x}}
+\Tr\Big[
+   A_{b}(\mathbf{x}, t)\;
+   \Gamma_{2}\;
+   B_{b}(\mathbf{x}, t)\;
+   \Gamma_{1}
+\Big]\, .
+\end{aligned}
+\end{equation}
+
+The trace is over the spin and color indices that connect $A_{b}$ and $B_{b}$; the
+spatial sum $\sum_{\mathbf{x}}$ projects onto zero (or total) spatial momentum after
+the phase factors have been accounted for in the propagator definitions.
+
+% ===========================================================================
+\section{Gamma and Interpolator Conventions}
+% ===========================================================================
+
+\subsection{Soft-Factor Gamma Set}
+
+The soft factor uses a reduced set of gamma structures compared to standard meson
+spectroscopy.  The PyQUDA gamma matrices follow the Euclidean conventions of the
+underlying library:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Key & Matrix & Description \\
+\midrule
+\walltag{"5"}  & $\Gfive = \gamma_{5}$          & Chirality \\
+\walltag{"I"}  & $\gI$                          & Identity \\
+\walltag{"X"}  & $\Gone$                        & $\gamma_{1}$ \\
+\walltag{"Y"}  & $\Gtwo$                        & $\gamma_{2}$ \\
+\walltag{"X5"} & $\Gone\Gfive$                  & $\gamma_{1}\gamma_{5}$ \\
+\walltag{"Y5"} & $\Gtwo\Gfive$                  & $\gamma_{2}\gamma_{5}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+In the code these are stored in the dictionary \walltag{soft\_factor\_pyquda\_gammas},
+which maps each key to the corresponding PyQUDA \walltag{gamma} object.  The
+\walltag{gamma(15)} denotes $\Gfive$ (the 16th element in the standard Euclidean
+gamma basis, 0-indexed), and \walltag{gamma(0)} is the identity.
+
+\subsection{Pion Interpolators}
+
+The default pion interpolator set is
+
+\begin{equation}\label{eq:pion_interp}
+\walltag{"Z5-X5"} \;=\; \Gthree\Gfive - \Gone\Gfive
+   \;=\; \gamma_{3}\gamma_{5} - \gamma_{1}\gamma_{5}\, .
+\end{equation}
+
+This is a linear combination that projects onto the pseudoscalar pion with good
+overlap at finite momentum.  Both $\Gamma_{1}/\Gamma_{2}$ (the soft-factor gamma
+insertions) and \walltag{pion\_src}/\walltag{pion\_sink} (the pion interpolators)
+are passed as Python dictionaries, so the user can supply arbitrary operator sets.
+
+The legacy convention is that the source and sink interpolator dictionaries
+are the same object by default, but they can be set independently to explore
+operator dependence.
+
+\subsection{Gamma5 as \texorpdfstring{$\Gfive$}{gamma5}}
+
+The matrix $\Gfive$ appears in three distinct roles:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Gamma5-hermiticity conjugation} of antiquark propagators,
+        Eq.~\eqref{eq:antiquark}.
+  \item \textbf{Block closure} in $A_{b}$ and $B_{b}$, Eqs.~\eqref{eq:A_block}--\eqref{eq:B_block}.
+  \item \textbf{As a gamma insertion}: when $\Gamma_{1}$ or $\Gamma_{2}$ is
+        \walltag{"5"}, it acts as a genuine operator insertion probing the chiral
+        structure of the soft factor.
+\end{enumerate}
+
+In the code, the variable \walltag{G5 = gamma.gamma(15)} is used for roles~1 and~2,
+while role~3 uses the entry \walltag{soft\_factor\_pyquda\_gammas["5"]}, which is
+the same underlying matrix.
+
+% ===========================================================================
+\section{Transverse Displacement Implementation}
+% ===========================================================================
+
+\subsection{Coordinate-Gauge Shifts}
+
+The transverse displacement $\mathbf{b}$ is implemented by a simple array roll
+in the coordinate gauge (CG).  No explicit gauge link is inserted between the
+shifted quark fields.  This is consistent with the CG convention used in the
+pion qTMD workflow: in Coulomb gauge the gluon field is minimized, and at
+leading order the gauge link reduces to unity.
+
+For a displacement of $b_{T}$ lattice units along axis $\hat{n}_{T}$ (where
+$n_{T}=0$ means $x$, $n_{T}=1$ means $y$, $n_{T}=2$ means $z$), the operation is
+
+\begin{verbatim}
+    xp.roll(Gw_bperp, shift=bT, axis=axis)
+\end{verbatim}
+
+where \walltag{axis = 3 - bT\_dir} converts from the physics axis convention
+to the time-major lexicographic index convention.  In the time-major layout
+\walltag{tzyx...}, the spatial axes are ordered $(z=1, y=2, x=3)$, so:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\walltag{bT\_dir} & \walltag{axis} in lexicographic layout \\
+\midrule
+0 ($x$) & 3 \\
+1 ($y$) & 2 \\
+2 ($z$) & 1 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Displacement Parameters}
+
+\begin{itemize}[nosep]
+  \item \walltag{bT\_dir}: list of axes along which to displace, e.g.\
+        \walltag{[0]} for $x$ only, \walltag{[0, 1]} for both $x$ and $y$.
+  \item \walltag{bT\_length}: maximum displacement in lattice units (inclusive;
+        loop runs from $0$ to \walltag{bT\_length}).
+  \item \walltag{bz\_length}: maximum longitudinal displacement (default $0$,
+        used only in the qTMDWF diagnostic).
+\end{itemize}
+
+% ===========================================================================
+\section{Code Implementation}
+% ===========================================================================
+
+The core logic lives in the class \walltag{pion\_soft\_factor} (file
+\walltag{pion\_soft\_factor\_vibe\_develop.py}).  This section documents each method.
+
+\subsection{\walltag{\_\_init\_\_(parameters)}}
+
+Accepts a dictionary with keys:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Key & Description \\
+\midrule
+\walltag{quark\_mom} & List of quark 3-momenta $[\mathbf{k}_{1}, \mathbf{k}_{2}, \dots]$ \\
+\walltag{bT\_dir}    & List of transverse displacement axes \\
+\walltag{bT\_length} & Maximum $b_{T}$ \\
+\walltag{bz\_length} & Maximum $b_{z}$ (qTMDWF diagnostic) \\
+\walltag{tsep\_list} & List of sink separations \\
+\walltag{pion\_src}  & Dictionary of source interpolators (default: \walltag{Z5-X5}) \\
+\walltag{pion\_sink} & Dictionary of sink interpolators (default: same as src) \\
+\walltag{Gamma1}     & Dictionary of $\Gamma_{1}$ insertions (default: soft-factor set) \\
+\walltag{Gamma2}     & Dictionary of $\Gamma_{2}$ insertions (default: soft-factor set) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{\walltag{create\_wall\_src(latt\_info, tslice, momentum)}}
+
+Constructs the Coulomb-gauge wall source, Eq.~\eqref{eq:wall_src}.  Internally it
+calls \walltag{phase.MomentumPhase} to build the momentum phase factor
+$\exp(+i\mathbf{k}\!\cdot\!\mathbf{x})$ and \walltag{source.propagator} to place it
+on the specified time slice.
+
+\subsection{\walltag{create\_wall\_propagator(dirac, latt\_info, tslice, momentum)}}
+
+Assembles the wall source and inverts the Dirac operator:
+\walltag{core.invertPropagator(dirac, wall\_src, 1, 0)}.  The arguments \walltag{1, 0}
+specify the multigrid level and the number of deflation vectors, respectively
+(standard single-level inverter with no deflation).
+
+\subsection{\walltag{save\_wall\_propagator(prop, tag, attrs=None)}}
+
+Saves the propagator to HDF5 using \walltag{prop.saveH5(tag + ".h5", "propagator")}.
+Optional metadata (lattice tag, configuration number, smearing, source time, quark
+momentum) is written as HDF5 attributes for reproducibility.
+
+\subsection{\walltag{load\_wall\_propagator(latt\_info, tag)}}
+
+Loads a previously saved propagator via
+\walltag{core.LatticePropagator.loadH5(tag + ".h5", "propagator")}.
+
+\subsection{\walltag{apply\_phase(prop, momentum, sign=1, x0=None)}}
+
+Multiplies the propagator data by a momentum phase factor:
+
+\begin{itemize}[nosep]
+  \item Computes the phase $\exp(\pm i\mathbf{k}\!\cdot\!(\mathbf{x}-\mathbf{x}_{0}))$
+        using \walltag{MomentumPhase.getPhase}.
+  \item \walltag{sign=1} gives the positive phase; \walltag{sign=-1} gives the
+        complex conjugate.
+  \item The phase array is broadcast over the spin-color trailing dimensions.
+  \item Returns a copy of the propagator with the phased data.
+\end{itemize}
+
+\subsection{\walltag{contract\_wall\_2pt(latt\_info, prop\_fw, prop\_bw, pion\_mom, src\_key, sink\_keys)}}
+
+Computes the wall-to-wall two-point function, Eq.~\eqref{eq:C2}.  Steps:
+
+\begin{enumerate}[nosep]
+  \item Phase the forward propagator with $\exp(-i\mathbf{p}\!\cdot\!\mathbf{x})$.
+  \item Lexicographically reorder both propagators: \walltag{.lexico(False)}.
+  \item Gamma5-conjugate the backward propagator.
+  \item Contract with source and sink interpolators.
+  \item Trace and spatial sum.
+  \item Gather across MPI ranks.
+\end{enumerate}
+
+\subsection{\walltag{contract\_tmdwf\_check(latt\_info, prop\_fw, prop\_bw, pion\_mom, src\_key)}}
+
+Computes the qTMDWF-like diagnostic, Eq.~\eqref{eq:tmdwf}.  Iterates over
+$(b_{T}, b_{z})$ and returns a flat list of time-series correlators.
+
+\subsection{\walltag{contract\_soft\_factor(latt\_info, prop\_fw, prop\_bw\_src, prop\_sink\_bw, prop\_sink\_fw, pion\_mom)}}
+
+The main four-point contraction, described in full in Sec.~\ref{sec:einsum}.
+Returns the five-dimensional array \walltag{(n\_src, n\_gm1, n\_dir, n\_bT+1, Lt)}
+together with the ordered key lists.
+
+% ===========================================================================
+\section{Einsum Contraction Patterns}
+\label{sec:einsum}
+% ===========================================================================
+
+The soft-factor contraction uses four \einsum\ calls per $(b_{T}, \Gamma_{1})$
+combination.  This is the most complex contraction in the Pyquda\_Measurement
+codebase.  We document the index conventions here.
+
+\subsection{Index Convention}
+
+In the time-major lexicographic layout, propagators carry the indices
+
+\begin{equation}\label{eq:indices}
+\underbrace{t}_{\text{time}}\,
+\underbrace{z}_{\text{spatial }2}\,
+\underbrace{y}_{\text{spatial }1}\,
+\underbrace{x}_{\text{spatial }0}\,
+\underbrace{j}_{\text{spin sink}}\,
+\underbrace{i}_{\text{spin source}}\,
+\underbrace{b}_{\text{color sink}}\,
+\underbrace{a}_{\text{color source}}
+\end{equation}
+
+Gamma matrices are $4\times4$ with indices $(k,l)$ in spin space.  The
+interpolator stacks $\Gamma_{\mathrm{src}}$ and $\Gamma_{\mathrm{sink}}$ carry
+an additional leading batch index $s$ (enumerating the source or sink keys).
+Similarly, the $\Gamma_{1}$ and $\Gamma_{2}$ stacks carry a batch index over
+the gamma keys.
+
+\subsection{Einsum 1: Closed Block \texorpdfstring{$A_{b}$}{A\_b}}
+
+\begin{equation}\label{eq:einsum_A}
+\begin{aligned}
+A_{b} \;=\; &
+\einsum\big(
+   \text{\walltag{tzyxjiba, sik, kl, tzyxmlca, mn}}
+   \to \text{\walltag{stzyxjnbc}}, \\
+   &\qquad G_{w},\;
+        \Gamma_{\mathrm{src}}^{\mathrm{stack}},\;
+        \Gfive,\;
+        \big[G_{w}^{\mathrm{b}_{\perp}\dagger}\big]^{\mathrm{shift},\,\conj{}},\;
+        \Gfive
+\big)
+\end{aligned}
+\end{equation}
+
+Index mapping:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Index & Carried by \\
+\midrule
+$t,z,y,x$ & Spacetime (summed/kept depending on position) \\
+$j,i$     & Spin sink/source of $G_{w}$ \\
+$b,a$     & Color sink/source of $G_{w}$ \\
+$s$       & Batch over source interpolator keys \\
+$k,l,m,n$ & Spin contraction indices (closed in the einsum) \\
+$l,c$     & Spin/color of $G_{w}^{\mathrm{b}_{\perp}\dagger}$ (sink side) \\
+$n,c$     & Output spin/color indices \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The superscript ``shift, $\conj{}$'' means that $G_{w}^{\mathrm{b}_{\perp}\dagger}$
+has been rolled by $b_{T}$ along the appropriate spatial axis and then complex
+conjugated (the dagger in the name).  The two $\Gfive$ insertions perform the
+gamma5-hermiticity conjugation of the shifted propagator.
+
+The output block $A_{b}$ has shape $(s, t, z, y, x, j, n, b, c)$, where $s$
+indexes the source interpolator, $(j,n)$ are the open spin indices, and $(b,c)$
+are the open color indices that will connect to $B_{b}$.
+
+\subsection{Einsum 2: Closed Block \texorpdfstring{$B_{b}$}{B\_b}}
+
+\begin{equation}\label{eq:einsum_B}
+\begin{aligned}
+B_{b} \;=\; &
+\einsum\big(
+   \text{\walltag{tzyxjiba, sik, kl, tzyxmlca, mn}}
+   \to \text{\walltag{stzyxjnbc}}, \\
+   &\qquad G_{w}^{\mathrm{b}_{\perp},\,\mathrm{shift}},\;
+        \Gamma_{\mathrm{sink}}^{\mathrm{stack}},\;
+        \Gfive,\;
+        \big[G_{w}^{\dagger}\big]^{\conj{}},\;
+        \Gfive
+\big)
+\end{aligned}
+\end{equation}
+
+This is structurally identical to $A_{b}$ but with different propagators and
+interpolators:
+
+\begin{itemize}[nosep]
+  \item $G_{w}^{\mathrm{b}_{\perp},\,\mathrm{shift}}$ is the transversely shifted
+        \emph{and sink-phased} backward quark propagator.
+  \item $G_{w}^{\dagger}$ is the forward antiquark propagator from the sink
+        time slice, complex conjugated but \emph{not} shifted.
+  \item $\Gamma_{\mathrm{sink}}$ replaces $\Gamma_{\mathrm{src}}$.
+\end{itemize}
+
+\subsection{Einsum 3: Four-Point Trace}
+
+\begin{equation}\label{eq:einsum_C4}
+\begin{aligned}
+C_{4}(\mathbf{x}, t) \;=\; &
+\einsum\big(
+   \text{\walltag{tzyxjiba, ik, tzyxklba, lj}}
+   \to \text{\walltag{tzyx}}, \\
+   &\qquad A_{b}[\text{isrc}],\;
+        \Gamma_{2}[\text{igm}],\;
+        B_{b}[\text{isrc}],\;
+        \Gamma_{1}[\text{igm}]
+\big)
+\end{aligned}
+\end{equation}
+
+This einsum closes the spin and color indices:
+
+\begin{itemize}[nosep]
+  \item $j$ (spin of $A_{b}$)$\;\to\;$ $i$ (row of $\Gamma_{2}$)
+  \item $k$ (column of $\Gamma_{2}$) $\;\to\;$ $k$ (spin of $B_{b}$)
+  \item $l$ (spin of $B_{b}$) $\;\to\;$ $l$ (row of $\Gamma_{1}$)
+  \item $j$ (column of $\Gamma_{1}$) $\;\to\;$ $j$ (spin of $A_{b}$)
+  \item $b,a$ color indices are traced within \einsum.
+\end{itemize}
+
+The result is a scalar on spin-color space at each spacetime point $(\mathbf{x},t)$.
+
+\subsection{Einsum 4: Time Projection}
+
+\begin{equation}\label{eq:einsum_time}
+C_{4}(t) \;=\;
+\einsum\big(
+   \text{\walltag{tzyx $\to$ t}},\;
+   C_{4}(\mathbf{x}, t)
+\big)
+\end{equation}
+
+This sums over the spatial volume $\mathbf{x} = (z,y,x)$ at each time slice,
+yielding the time-series correlator $C_{4}(t)$.  After this step the result is
+gathered across MPI ranks.
+
+\subsection{Full Loop Structure}
+
+The contraction loops are nested as follows (outermost first):
+
+\begin{enumerate}[nosep]
+  \item $b_{T}$ direction (\walltag{idir})
+  \item $b_{T}$ magnitude (0 to \walltag{bT\_length})
+  \item Source interpolator key (\walltag{isrc})
+  \item Gamma-1 key (\walltag{igm})
+\end{enumerate}
+
+For each $(b_{T}, \text{dir})$ pair, the shifted propagators and the two blocks
+$A_{b}$, $B_{b}$ are computed \emph{outside} the $(\text{isrc}, \text{igm})$ loops.
+Only the final trace (Einsum~3) and time projection (Einsum~4) are inside the
+inner loops.  This is a significant optimization because the block construction
+dominates the computational cost.
+
+% ===========================================================================
+\section{HDF5 Output Structure}
+% ===========================================================================
+
+\subsection{Propagator Files}
+
+\begin{verbatim}
+data/pion_soft_factor_prop/
+  {lat}.pion_soft_factor_prop.{cfg}.{ama}.{src}.{sm}.{mom}.h5
+\end{verbatim}
+
+Each file contains a single dataset \walltag{"propagator"} and HDF5 attributes:
+\walltag{lat\_tag}, \walltag{config\_num}, \walltag{sm\_tag}, \walltag{tslice},
+\walltag{quark\_momentum} (as int32 array).
+
+\subsection{Two-Point Diagnostic}
+
+\begin{verbatim}
+data/pion_soft_factor_c2pt/
+  {lat}.pion_soft_factor_c2pt.{cfg}.{ama}.{src}.{sm}.fw_{mom1}.bw_{mom2}.h5
+\end{verbatim}
+
+HDF5 group hierarchy (from \walltag{save\_pion\_soft\_factor\_c2pt\_hdf5\_noRoll}):
+
+\begin{verbatim}
+  /SS/{src_key}/{sink_key}/PX{p[0]}PY{p[1]}PZ{p[2]}   -> dataset
+\end{verbatim}
+
+\subsection{qTMDWF Diagnostic}
+
+\begin{verbatim}
+data/pion_soft_factor_qTMDWF/
+  {lat}.pion_soft_factor_qTMDWF.{cfg}.{ama}.{src}.{sm}.fw_{mom1}.bw_{mom2}.h5
+\end{verbatim}
+
+HDF5 group hierarchy (from \walltag{save\_pion\_soft\_factor\_qTMDWF\_hdf5\_noRoll}):
+
+\begin{verbatim}
+  /SP/{src_key}/PX{px}PY{py}PZ{pz}/{b_dir}/bT{bT}/bz{bz}   -> dataset
+\end{verbatim}
+
+\subsection{Four-Point Soft Factor}
+
+\begin{verbatim}
+data/pion_soft_factor/
+  {lat}.pion_soft_factor.{cfg}.{ama}.{src}.{sm}.fw_{mom1}.bw_{mom2}.h5
+\end{verbatim}
+
+HDF5 group hierarchy (from \walltag{save\_pion\_soft\_factor\_hdf5\_noRoll}):
+
+\begin{verbatim}
+  /src{src_key}_sink{sink_key}/{gm1}_{gm2}/{b_dir}_{bT}/ts{tsep}   -> dataset
+\end{verbatim}
+
+Each dataset contains a 1D complex array of length $L_{t}$, the time-series
+correlator for that combination of source interpolator, gamma insertions,
+transverse displacement, and sink separation.
+
+% ===========================================================================
+\section{Comparison with Legacy Code}
+% ===========================================================================
+
+This implementation is a port from the GPT/PyQUDA mixed workflow
+\walltag{PyQUDA\_qTMD\_ff\_4pt\_einsum.py}.  The key differences are:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Pure PyQUDA}: No GPT dependency.  All gauge fixing, smearing,
+        inversion, and I/O use the PyQUDA stack.
+  \item \textbf{HDF5 propagator storage}: Propagators are saved between Stage~1
+        and Stage~2, enabling (a) decoupled production and analysis, (b) reuse
+        of propagators for multiple contraction parameter sets, and
+        (c) portability across machines (propagators can be analyzed locally).
+  \item \textbf{Identical physics}: The contraction patterns, gamma conventions,
+        phase factors, and wall-source definitions are preserved from the legacy
+        workflow to ensure output compatibility.  The numerical results should
+        agree to machine precision with the GPT/PyQUDA mixed code.
+  \item \textbf{Class-based design}: The \walltag{pion\_soft\_factor} class
+        encapsulates all parameters and provides methods for each computational
+        step, improving maintainability and enabling unit testing.
+  \item \textbf{Backend abstraction}: All \einsum\ calls are dispatched through
+        \walltag{xp} (which can be \walltag{numpy}, \walltag{cupy}, \walltag{dpnp},
+        or \walltag{torch}), so the same code runs on CPU, NVIDIA GPU, Intel GPU,
+        or PyTorch backends without modification.
+\end{enumerate}
+
+% ===========================================================================
+\section*{Acknowledgments}
+
+This work builds on the PyQUDA framework and the legacy GPT/PyQUDA mixed
+soft-factor code.  The implementation follows the conventions established
+in the pion qTMD and qTMDWF analyses.
+
+% ===========================================================================
+\begin{thebibliography}{99}
+
+\bibitem{Collins:1981uk}
+J.~C.~Collins and D.~E.~Soper,
+``Back-To-Back Jets in QCD,''
+Nucl.\ Phys.\ B \textbf{193}, 381 (1981).
+
+\bibitem{Collins:1984kg}
+J.~C.~Collins and D.~E.~Soper,
+``The Theorems of Perturbative QCD,''
+Ann.\ Rev.\ Nucl.\ Part.\ Sci.\ \textbf{37}, 383 (1987).
+
+\bibitem{Ji:2004wu}
+X.~Ji, J.~Ma and F.~Yuan,
+``QCD factorization for semi-inclusive deep-inelastic scattering at low
+transverse momentum,''
+Phys.\ Rev.\ D \textbf{71}, 034005 (2005)
+[arXiv:hep-ph/0404183].
+
+\bibitem{Ji:2019ewn}
+X.~Ji, Y.~Liu and Y.-S.~Liu,
+``Transverse-momentum-dependent parton distribution functions from
+large-momentum effective theory,''
+Phys.\ Lett.\ B \textbf{811}, 135946 (2020)
+[arXiv:1911.03840 [hep-ph]].
+
+\end{thebibliography}
+
+\end{document}

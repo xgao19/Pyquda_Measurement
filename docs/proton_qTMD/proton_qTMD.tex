@@ -1,0 +1,1101 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb}
+\usepackage{physics}
+\usepackage{braket}
+\usepackage{hyperref}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{slashed}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue,
+}
+
+% ----------------------------------------------------------------------
+% Custom notation
+% ----------------------------------------------------------------------
+\newcommand{\eps}{\varepsilon}
+\newcommand{\Gammaint}{\Gamma_{\text{interp}}}
+\newcommand{\Gammasink}{\Gamma_{\text{sink}}}
+\newcommand{\Cg}{C\gamma_5}
+\newcommand{\CgT}{C\gamma_t\gamma_5}
+\newcommand{\CgZ}{C\gamma_z\gamma_5}
+\newcommand{\Cmat}{C}
+\newcommand{\xvec}{x}
+\newcommand{\xzerovec}{x_0}
+\newcommand{\bperp}{b_\perp}
+\newcommand{\bvec}{b}
+\newcommand{\ehat}[1]{\hat{e}_{#1}}
+\newcommand{\Oop}{\mathcal{O}}
+
+\title{Proton qTMD and PDF Measurement \\
+       \large Physics and Contraction Note}
+\author{PyQUDA Measurement Collaboration}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+% ======================================================================
+\section{Physics Overview}
+% ======================================================================
+
+Proton transverse momentum dependent (TMD) distributions encode the three-dimensional
+momentum structure of the nucleon in QCD. Unlike the pion, the proton is a baryon
+composed of three valence quarks, which introduces two key complications relative to
+meson TMD measurements:
+
+\begin{enumerate}
+  \item The proton interpolating field requires a color-antisymmetric contraction via
+    the Levi-Civita tensor $\eps_{abc}$, producing a baryon two-point function with
+    two distinct contraction terms (direct and exchange).
+  \item Sequential sources are flavor-dependent: the up-quark insertion involves four
+    epsilon-contracted terms, while the down-quark insertion involves two.
+\end{enumerate}
+
+The leading-twist TMDs accessible from this measurement include:
+\begin{itemize}
+  \item $f_1(x, k_\perp^2)$ -- unpolarized quark distribution,
+  \item $g_{1L}(x, k_\perp^2)$ -- helicity distribution,
+  \item $h_1(x, k_\perp^2)$ -- transversity distribution,
+\end{itemize}
+where $x$ is the longitudinal momentum fraction and $k_\perp$ is the intrinsic
+transverse momentum. The Fourier-conjugate of the TMD in impact-parameter space
+$b_\perp$ is the quasi-TMD (qTMD) wave function, which is the primary object
+computed in this lattice QCD measurement.
+
+This document describes in full technical detail: (i) the Wick contraction of the
+proton two-point function, (ii) the sequential-source construction for the connected
+three-point qTMD function, (iii) the Wilson-line index generation for CG and
+GI-displaced propagators, (iv) the einsum decomposition strategy used in the PyQUDA
+GPU implementation, and (v) the HDF5 output conventions. The target audience is
+lattice QCD practitioners who need to understand every contraction index.
+
+% ======================================================================
+\section{Proton Interpolating Field}
+% ======================================================================
+
+The proton interpolating operator used throughout this measurement is the standard
+color-singlet three-quark field (suppressing the time argument for brevity):
+
+\begin{equation}
+  \chi_\alpha(x) =
+    \eps_{abc}\,
+    \bigl[ u_a^T(x) \; \Cmat \Gammaint \; d_b(x) \bigr] \;
+    u_{c,\alpha}(x),
+  \label{eq:proton_interp}
+\end{equation}
+
+where:
+\begin{itemize}
+  \item $\alpha \in \{0,1,2,3\}$ is the free Dirac index of the proton,
+  \item $a,b,c \in \{0,1,2\}$ are fundamental color indices,
+  \item $\eps_{abc}$ is the totally antisymmetric Levi-Civita tensor with
+    $\eps_{012} = +1$,
+  \item $\Cmat = i\gamma_2\gamma_4$ is the charge-conjugation matrix in the Euclidean
+    Dirac basis,
+  \item $\Gammaint$ selects the spin structure of the diquark.
+\end{itemize}
+
+Three interpolator choices are supported, denoted by string tags:
+
+\begin{center}
+  \begin{tabular}{c|c|c}
+    Tag & Matrix & Expression \\
+    \hline
+    \texttt{"5"}  & $\Cg$   & $\Cmat \gamma_5$ \\
+    \texttt{"T5"} & $\CgT$  & $\Cmat \gamma_t \gamma_5$ \\
+    \texttt{"Z5"} & $\CgZ$  & $\Cmat \gamma_z \gamma_5$
+  \end{tabular}
+\end{center}
+
+In the PyQUDA code (using the QUDA bitmask gamma basis), these are constructed as:
+\begin{align}
+  \Cg   &= (i\gamma_2 \gamma_8) \cdot \gamma_{15}, \label{eq:Cg5_code} \\
+  \CgT  &= (i\gamma_2 \gamma_8) \cdot \gamma_7,  \label{eq:CgT5_code} \\
+  \CgZ  &= (i\gamma_2 \gamma_8) \cdot \gamma_{11}, \label{eq:CgZ5_code}
+\end{align}
+where the QUDA basis uses $\gamma_8 = \gamma_t$, $\gamma_7 = \gamma_t\gamma_5$,
+$\gamma_{15} = \gamma_5$, and $\gamma_{11} = \gamma_z\gamma_5$. The factor
+$i\gamma_2\gamma_8$ is the charge conjugation matrix in this basis.
+
+The conjugate field is:
+\begin{equation}
+  \bar{\chi}_\alpha(x) =
+    \eps_{def}\,
+    \bar{u}_{d,\alpha}(x) \;
+    \bigl[ \bar{d}_e(x) \; \Gammaint^\dagger \Cmat^\dagger \;
+           \bar{u}_f^T(x) \bigr],
+  \label{eq:proton_bar}
+\end{equation}
+where $\Gammaint^\dagger = \gamma_4 \Gammaint^\dagger \gamma_4$ in Euclidean space
+and $\Cmat^\dagger = \Cmat^{-1} = -\Cmat$.
+
+% ======================================================================
+\section{Proton Two-Point Function}
+\label{sec:two_point}
+% ======================================================================
+
+\subsection{Definition}
+
+The momentum-projected proton two-point correlation function with a sink spin
+structure $\Gammasink$ is:
+
+\begin{equation}
+  C_2^{\Gammasink}(p, t) =
+    \sum_{\xvec} \exp\bigl(-i p\cdot (\xvec - \xzerovec)\bigr) \;
+    \mathcal{P}_{\alpha\alpha'} \;
+    \bigl\langle
+      \chi_\alpha(\xvec, t) \; \Gammasink \;
+      \bar{\chi}_{\alpha'}(\xzerovec, 0)
+    \bigr\rangle,
+  \label{eq:C2_def}
+\end{equation}
+
+where $\mathcal{P}_{\alpha\alpha'}$ is the spin projection matrix (e.g.\ unpolarized
+$P_+ = \frac{1}{4}(\gamma_0 + I)$ or polarized variants). The sum over $\xvec$ runs
+over the full spatial lattice at fixed time slice $t$.
+
+\subsection{Wick Contraction -- Complete Derivation}
+
+Inserting the interpolating fields from Eqs.~\eqref{eq:proton_interp}
+and~\eqref{eq:proton_bar} into the expectation value, and expanding the quark fields:
+
+\begin{align}
+  \bigl\langle \chi_\alpha(x) \; {\Gammasink}_{\alpha\alpha'} \;
+    \bar{\chi}_{\alpha'}(x_0) \bigr\rangle
+  &=
+  \eps_{abc}\, \eps_{def} \;
+  \bigl(\Cmat \Gammaint\bigr)_{ij}\,
+  \bigl(\Cmat \Gammaint\bigr)_{kl}\,
+  {\Gammasink}^{\alpha\alpha'}_{mn} \notag \\[4pt]
+  &\quad\times
+  \bigl\langle
+    u_a^i(x)\, d_b^j(x)\, u_c^\alpha(x) \;
+    \bar{u}_d^m(x_0)\, \bar{d}_e^k(x_0)\, \bar{u}_f^n(x_0)
+  \bigr\rangle,
+  \label{eq:raw_contraction}
+\end{align}
+
+where the spinor indices are denoted by $i,j,k,l,m,n \in \{0,1,2,3\}$ for the quark
+bilinears, with $\alpha,\alpha'$ being the external proton spin indices. The color
+indices are $a,\dots,f \in \{0,1,2\}$.
+
+\medskip\noindent
+\textbf{Step 1: Identify the quark flavors.}
+The interpolating field contains two up quarks and one down quark:
+\begin{itemize}
+  \item $u_a$, $u_c$ are up quarks (labeled by their Dirac indices and color positions),
+  \item $d_b$ is a down quark.
+\end{itemize}
+Similarly, the conjugate field contains $\bar{u}_d$, $\bar{u}_f$ (up) and $\bar{d}_e$
+(down).
+
+\medskip\noindent
+\textbf{Step 2: Enumerate the Wick pairings.}
+Wick's theorem instructs us to sum over all permutations of pairing each quark field
+with each anti-quark field. Because the up quarks $u_a$ and $u_c$ are identical
+fermions, there are two inequivalent ways to contract the up-quark operators:
+
+\begin{center}
+  \begin{tabular}{c|c|l}
+    Term & Pairing & Description \\
+    \hline
+    Term~1 & $u_a \leftrightarrow \bar{u}_d$, $u_c \leftrightarrow \bar{u}_f$ & Direct \\
+    Term~2 & $u_a \leftrightarrow \bar{u}_f$, $u_c \leftrightarrow \bar{u}_d$ & Exchange \\
+  \end{tabular}
+\end{center}
+
+The down quark always contracts as $d_b \leftrightarrow \bar{d}_e$, since there is
+exactly one down quark and one anti-down quark.
+
+\medskip\noindent
+\textbf{Step 3: Write each term with quark propagators.}
+The quark propagator is defined as:
+\begin{equation}
+  S_q(x, x_0)^{i\alpha}_{ab} \equiv \langle q_a^i(x) \, \bar{q}_b^\alpha(x_0) \rangle,
+\end{equation}
+where $i,\alpha$ are spin indices and $a,b$ are color indices. For isospin-symmetric
+computations ($m_u = m_d$), $S_u = S_d \equiv S$, so the same propagator is used
+for all three valence quarks.
+
+\medskip\noindent
+\textbf{Term 1 (Direct):}
+\begin{align}
+  C_2^{(1)} &=
+  \eps_{abc}\, \eps_{def}\,
+  (\Cmat\Gammaint)_{ij}\,
+  (\Cmat\Gammaint)_{kl}\,
+  (\Gammasink)_{mn} \notag \\[4pt]
+  &\quad\times
+  S(x,x_0)^{ik}_{ad}\,
+  S(x,x_0)^{jl}_{be}\,
+  S(x,x_0)^{mn}_{cf},
+  \label{eq:term1_full}
+\end{align}
+where the index assignments are:
+\begin{itemize}
+  \item $u_a$ (spin $i$, color $a$) $\to$ $\bar{u}_d$ (spin $k$, color $d$):
+    propagator $S(x,x_0)^{ik}_{ad}$,
+  \item $d_b$ (spin $j$, color $b$) $\to$ $\bar{d}_e$ (spin $l$, color $e$):
+    propagator $S(x,x_0)^{jl}_{be}$,
+  \item $u_c$ (spin $\alpha \equiv m$, color $c$) $\to$ $\bar{u}_f$ (spin $n$, color $f$):
+    propagator $S(x,x_0)^{mn}_{cf}$.
+\end{itemize}
+
+\medskip\noindent
+\textbf{Term 2 (Exchange):}
+The exchange term swaps the two up-quark assignments:
+\begin{align}
+  C_2^{(2)} &=
+  \eps_{abc}\, \eps_{def}\,
+  (\Cmat\Gammaint)_{ij}\,
+  (\Cmat\Gammaint)_{kl}\,
+  (\Gammasink)_{mn} \notag \\[4pt]
+  &\quad\times
+  S(x,x_0)^{ik}_{ad}\,
+  S(x,x_0)^{jn}_{be}\,
+  S(x,x_0)^{ml}_{cf},
+  \label{eq:term2_full}
+\end{align}
+where now:
+\begin{itemize}
+  \item $u_a$ (spin $i$, color $a$) $\to$ $\bar{u}_d$ (spin $k$, color $d$):
+    same as Term~1,
+  \item $d_b$ (spin $j$, color $b$) $\to$ $\bar{u}_f$ (spin $n$, color $f$):
+    \emph{exchanged} -- $d$ contracts to $u$,
+  \item $u_c$ (spin $m$, color $c$) $\to$ $\bar{d}_e$ (spin $l$, color $e$):
+    \emph{exchanged} -- $u$ contracts to $d$.
+\end{itemize}
+
+Note that in the exchange term, the flavor labels $u$ and $d$ are interchanged on the
+propagators (a down quark connects to the final $\bar{u}_f$, and an up quark connects
+to the final $\bar{d}_e$). Under isospin symmetry, all propagators are identical, so the
+flavor labels serve only to track the index routing.
+
+\medskip\noindent
+\textbf{Step 4: The sign convention.}
+The fully antisymmetric contraction of two $\eps$ tensors with Fermion-exchange
+antisymmetry produces an overall minus sign:
+\begin{equation}
+  C_2^{\Gammasink}(p, t) =
+    -\Bigl( C_2^{(1)} + C_2^{(2)} \Bigr) \times
+    \sum_{\xvec} e^{-ip\cdot(\xvec-\xzerovec)} \; \mathcal{P}_{\alpha\alpha'},
+  \label{eq:C2_sign}
+\end{equation}
+where $C_2^{(1)}$ and $C_2^{(2)}$ are defined by Eqs.~\eqref{eq:term1_full}
+and~\eqref{eq:term2_full} respectively. The negative sign originates from the fermion
+anticommutation required to bring the quark operators into canonical contraction
+order. After the Wick expansion, each term acquires a sign $(-1)^{n_P}$ where $n_P$
+is the parity of the permutation mapping the original operator ordering to the
+contracted pairing. Since each contraction is a product of three Wick pairs, the
+permutation that aligns the color-epsilon structure with the contracted propagator
+pairs yields $n_P = 1$ for both terms.
+
+\medskip\noindent
+\textbf{Step 5: Compact tensor notation.}
+The two-point function can be written compactly in a factorized diagrammatic form.
+Omitting the external momentum phase and spin projection for clarity, and using
+position-space shorthand:
+
+\begin{align}
+  \text{Term~1:}&\quad
+    \eps_{abc}\,\eps_{def}\,
+    (\Cmat\Gammaint)_{ij}\,(\Cmat\Gammaint)_{kl}\,
+    (\Gammasink)_{mn}\,
+    S^{ik}_{ad}\,S^{jl}_{be}\,S^{mn}_{cf}, \\[4pt]
+  \text{Term~2:}&\quad
+    \eps_{abc}\,\eps_{def}\,
+    (\Cmat\Gammaint)_{ij}\,(\Cmat\Gammaint)_{kl}\,
+    (\Gammasink)_{mn}\,
+    S^{ik}_{ad}\,S^{jn}_{be}\,S^{ml}_{cf}.
+\end{align}
+
+The key difference between the two terms is purely in the index routing of the third
+propagator and the exchange of indices $(l,n)$ on the second and third propagators.
+
+\subsection{Diagrammatic Interpretation}
+
+Term~1 corresponds to the ``direct'' contraction:
+\begin{center}
+  \texttt{u\_a --[C$\Gamma$]-- d\_b} \quad \texttt{u\_c --[$\Gammasink$]-- ubar\_f} \\
+  with $\eps_{abc}$ at source and $\eps_{def}$ at sink.
+\end{center}
+
+Term~2 corresponds to the ``exchange'' contraction where the two identical up quarks
+are crossed:
+\begin{center}
+  \texttt{u\_a --[C$\Gamma$]-- d\_b} \quad (u and d sink legs exchanged).
+\end{center}
+
+There are exactly two terms because the up quarks are identical fermions but are
+distinguished by their role in the interpolating field: one forms the scalar diquark
+with the down quark (via $\Cmat\Gammaint$), the other carries the open spin index.
+The two contractions differ in which up quark at the source connects to which up
+anti-quark at the sink.
+
+% ======================================================================
+\section{Optimized Contraction Code}
+\label{sec:contraction_code}
+% ======================================================================
+
+The function \texttt{contract\_2pt\_TMD} in \texttt{proton\_qTMD\_pyquda.py}
+implements the two-point contraction on GPU accelerators. The full 8-index
+tensor contraction (over $a,b,c,d,e,f,i,j,k,l,m,n$) is too large for a single
+einsum call (the intermediate tensors would exceed GPU memory). The code therefore
+splits the contraction into a sequence of smaller 2-tensor and 3-tensor einsum
+operations, carefully managing intermediate memory through explicit deletion.
+
+The propagator data is shaped as $[\omega, t, z, y, x, \mathrm{spin}_a,
+\mathrm{spin}_b, \mathrm{color}_a, \mathrm{color}_b]$ where $\omega$ is the even-odd
+parity index. The momentum phases array is indexed as $[p, \omega, t, z, y, x]$.
+The 16 gamma matrices for the sink insertion form an array $[g, t_4, m, n]$ where
+$g \in \{0,\dots,15\}$ labels the bilinear.
+
+\subsection{Term 1 Decomposition}
+
+The full Term~1 einsum would be:
+\begin{equation}
+  \eps_{abc}\,\eps_{def}\,
+  (\Cmat\Gammaint)_{ij}\,(\Cmat\Gammaint)_{kl}\,
+  (P_{2\mathrm{pt}})_{g t_4 mn}\,
+  S^{ik}_{ad}\; S^{jl}_{be}\; S^{mn}_{cf}\;
+  \Phi_p
+  \;\to\; [g, p, t],
+\end{equation}
+where $\Phi_p$ is the momentum phase and $P_{2\mathrm{pt}}$ holds the 16 sink gammas.
+
+The decomposition proceeds in three stages:
+
+\medskip\noindent
+\textbf{Stage 1 --- Sink block (split).}
+The sink block contracts $\eps_{abc}$ with the first propagator and
+$(\Cmat\Gammaint)_{ij}$ with the second propagator, then combines on indices
+$i$ and $b$:
+\begin{align}
+  \texttt{t1\_s1} &: \quad \eps_{abc} \times S^{ik}_{ad}
+    \;\to\; [\omega,t,z,y,x,i,k,b,c,d], \\
+  \texttt{t1\_s2} &: \quad (\Cmat\Gammaint)_{ij} \times S^{jl}_{be}
+    \;\to\; [\omega,t,z,y,x,i,l,b,e], \\
+  \texttt{term1\_sink} &: \quad
+    \texttt{t1\_s1} \times \texttt{t1\_s2} \;\to\;
+    [\omega,t,z,y,x,k,l,c,d,e] \quad (\text{contract } i,b).
+\end{align}
+After this stage, the tensors \texttt{t1\_s1} and \texttt{t1\_s2} are deleted.
+
+\medskip\noindent
+\textbf{Stage 2 --- P3 block.}
+The sink gamma array is contracted with the third propagator:
+\begin{equation}
+  \texttt{term1\_p3}: \quad
+    (P_{2\mathrm{pt}})_{gmn} \times S^{mn}_{cf}
+    \;\to\; [g,\omega,t,z,y,x,c,f].
+\end{equation}
+
+\medskip\noindent
+\textbf{Stage 3 --- Final assembly (split).}
+The sink block and P3 block are combined and multiplied by the momentum phases:
+\begin{align}
+  \texttt{t1\_f1} &: \quad
+    \eps_{def} \times \texttt{term1\_sink}
+    \;\to\; [\omega,t,z,y,x,k,l,c,f] \quad (\text{contract } d,e), \\
+  \texttt{t1\_f2} &: \quad
+    (\Cmat\Gammaint)_{kl} \times \texttt{t1\_f1}
+    \;\to\; [\omega,t,z,y,x,c,f] \quad (\text{contract } k,l), \\
+  \texttt{t1\_f3} &: \quad
+    \texttt{t1\_f2} \times \texttt{term1\_p3}
+    \;\to\; [g,\omega,t,z,y,x] \quad (\text{contract } c,f), \\
+  \texttt{term1} &: \quad
+    \Phi_p \times \texttt{t1\_f3}
+    \;\to\; [g,p,t].
+\end{align}
+Each intermediate tensor is deleted immediately after use.
+
+\subsection{Term 2 Decomposition}
+
+Term~2 has a different index routing ($S^{jn}_{be}$ instead of $S^{jl}_{be}$ and
+$S^{ml}_{cf}$ instead of $S^{mn}_{cf}$), so the decomposition differs:
+
+\medskip\noindent
+\textbf{Stage 1 --- Sink block.}
+\begin{align}
+  \texttt{t2\_s1} &: \quad \eps_{abc} \times S^{ik}_{ad}
+    \;\to\; [\omega,t,z,y,x,i,k,b,c,d], \\
+  \texttt{t2\_s2} &: \quad (\Cmat\Gammaint)_{ij} \times S^{jn}_{be}
+    \;\to\; [\omega,t,z,y,x,i,n,b,e] \quad (\text{note: index } n \text{ not } l), \\
+  \texttt{term2\_sink} &: \quad
+    \texttt{t2\_s1} \times \texttt{t2\_s2}
+    \;\to\; [\omega,t,z,y,x,k,n,c,d,e] \quad (\text{contract } i,b).
+\end{align}
+
+\medskip\noindent
+\textbf{Stage 2 --- P3 block.}
+The sink gamma contracts with the third propagator, keeping the exchange index $l$:
+\begin{equation}
+  \texttt{term2\_p3}: \quad
+    (P_{2\mathrm{pt}})_{gmn} \times S^{ml}_{cf}
+    \;\to\; [g,\omega,t,z,y,x,n,l,c,f].
+\end{equation}
+Note that $m$ is contracted between $P_{2\mathrm{pt}}$ and the propagator, while $n$
+and $l$ remain open for the exchange contraction.
+
+\medskip\noindent
+\textbf{Stage 3 --- Final assembly.}
+\begin{align}
+  \texttt{t2\_f1} &: \quad
+    \eps_{def} \times \texttt{term2\_sink}
+    \;\to\; [\omega,t,z,y,x,k,n,c,f] \quad (\text{contract } d,e), \\
+  \texttt{t2\_f2} &: \quad
+    \texttt{t2\_f1} \times \texttt{term2\_p3}
+    \;\to\; [g,\omega,t,z,y,x,k,l] \quad (\text{contract } n,c,f), \\
+  \texttt{t2\_f3} &: \quad
+    (\Cmat\Gammaint)_{kl} \times \texttt{t2\_f2}
+    \;\to\; [g,\omega,t,z,y,x] \quad (\text{contract } k,l), \\
+  \texttt{term2} &: \quad
+    \Phi_p \times \texttt{t2\_f3}
+    \;\to\; [g,p,t].
+\end{align}
+
+\subsection{Final Summation}
+
+The complete two-point function is:
+\begin{equation}
+  \boxed{C_2[g, p, t] = -\bigl(\texttt{term1} + \texttt{term2}\bigr).}
+\end{equation}
+
+After the contraction, the result is MPI-gathered and saved as HDF5 (rank 0 only).
+The saved data is time-rolled by the negative of the source time to align $t=0$
+at the source.
+
+% ======================================================================
+\section{Gamma Matrix Conventions}
+% ======================================================================
+
+\subsection{Sink Bilinears}
+
+Sixteen bilinear gamma insertions are scanned at the sink, ordered as:
+
+\begin{center}
+  \begin{tabular}{c|l}
+    Index & Gamma \\
+    \hline
+    0  & 5   ($\gamma_5$) \\
+    1  & T   ($\gamma_t$) \\
+    2  & T5  ($\gamma_t\gamma_5$) \\
+    3  & X   ($\gamma_x$) \\
+    4  & X5  ($\gamma_x\gamma_5$) \\
+    5  & Y   ($\gamma_y$) \\
+    6  & Y5  ($\gamma_y\gamma_5$) \\
+    7  & Z   ($\gamma_z$) \\
+    8  & Z5  ($\gamma_z\gamma_5$) \\
+    9  & I   (identity) \\
+    10 & SXT ($\sigma_{xt}$) \\
+    11 & SXY ($\sigma_{xy}$) \\
+    12 & SXZ ($\sigma_{xz}$) \\
+    13 & SYT ($\sigma_{yt}$) \\
+    14 & SYZ ($\sigma_{yz}$) \\
+    15 & SZT ($\sigma_{zt}$)
+  \end{tabular}
+\end{center}
+
+In the QUDA bitmask gamma basis, these correspond to the gamma matrix ID array:
+\begin{equation}
+  \texttt{pyquda\_gammas\_order} =
+    [15, 8, 7, 1, 14, 2, 13, 4, 11, 0, 9, 3, 5, 10, 6, 12].
+\end{equation}
+
+\subsection{Interpolator Matrices}
+
+The proton interpolator matrices $C\Gammaint$ described in Section~2 are
+pre-computed and stored as $4 \times 4$ complex arrays. In the QUDA basis:
+
+\begin{itemize}
+  \item \texttt{Cg5}  = $(i\gamma_2 \gamma_8) \cdot \gamma_{15}$
+    $\;\leftrightarrow\;$ $C\gamma_5$,
+  \item \texttt{CgT5} = $(i\gamma_2 \gamma_8) \cdot \gamma_7$
+    $\;\leftrightarrow\;$ $C\gamma_t\gamma_5$,
+  \item \texttt{CgZ5} = $(i\gamma_2 \gamma_8) \cdot \gamma_{11}$
+    $\;\leftrightarrow\;$ $C\gamma_z\gamma_5$.
+\end{itemize}
+
+The choice of interpolator enters the two-point contraction as the
+$(\Cmat\Gammaint)_{ij}$ matrix applied to the propagator indices $i,j$ and $k,l$.
+
+% ======================================================================
+\section{Connected Three-Point qTMD Function}
+\label{sec:three_point}
+% ======================================================================
+
+\subsection{Definition}
+
+The connected three-point qTMD function for a flavor insertion $f \in \{U, D\}$ is:
+
+\begin{align}
+  C_3^{\Gamma, f}(q, b, \tau; p_f, t_{\text{sep}}) =
+    \sum_{\xvec} e^{-i q\cdot (\xvec - \xzerovec)} \;
+    \operatorname{Tr}_{\text{spin,color}}\Bigl[
+      &\mathrm{Seq}_f\bigl(\xvec; p_f, t_{\text{sep}}, \mathcal{P}\bigr) \notag \\
+      &\times\; \Gamma \;
+      \times\; \mathcal{O}_b\, S_q(\xvec, \xzerovec)
+    \Bigr],
+  \label{eq:C3_def}
+\end{align}
+
+where:
+\begin{itemize}
+  \item $\mathrm{Seq}_f(\xvec; p_f, t_{\text{sep}}, \mathcal{P})$ is the
+    fixed-sink sequential propagator for flavor $f$, which already contains the
+    baryon sink contraction, the final momentum projection $p_f$, the sink time
+    $t_{\text{sep}}$, and the spin projection $\mathcal{P}$,
+  \item $\Gamma$ is the bilinear insertion operator (one of the 16 gammas),
+  \item $\mathcal{O}_b$ is the nonlocal displacement operator shifting the forward
+    propagator by impact parameter $b = (b_\perp, b_z)$,
+  \item $q = p_f - p_i$ is the momentum transfer,
+  \item $\tau$ labels the operator insertion time slice.
+\end{itemize}
+
+\subsection{Data Layout}
+
+The sequential propagator after the final $\gamma_5$ conjugation has shape:
+\begin{equation}
+  [\text{polarization},\, \omega,\, t,\, z,\, y,\, x_{cb},\,
+    \mathrm{spin}_a,\, \mathrm{spin}_b,\, \mathrm{color}_a,\, \mathrm{color}_b].
+\end{equation}
+
+The forward propagator (with the nonlocal shift) has shape:
+\begin{equation}
+  [\omega,\, t,\, z,\, y,\, x_{cb},\,
+    \mathrm{spin}_a,\, \mathrm{spin}_b,\, \mathrm{color}_a,\, \mathrm{color}_b].
+\end{equation}
+
+The three-point contraction einsum in the application is:
+\begin{equation}
+  \texttt{Seq[:, j, i, c, f]} \;\times\;
+  \texttt{Gamma[g, i, m]} \;\times\;
+  \texttt{S\_shifted[:, m, j, f, c]}
+  \;\to\; [\text{pol}, g, \omega, t, z, y, x_{cb}],
+\end{equation}
+where indices are: $p$=polarization, $g$=gamma, $i$=spin\_src, $m$=spin\_sink,
+$j$=spin\_b, $c$=color\_a, $f$=color\_b. This is followed by contraction with the
+momentum phase $\Phi_q$ to project onto momentum transfer $q$.
+
+% ======================================================================
+\section{Fixed-Sink Sequential Sources}
+\label{sec:sequential}
+% ======================================================================
+
+The fixed-sink sequential sources for the proton are constructed by
+\texttt{create\_bw\_seq\_pyquda} in \texttt{bw\_seq\_pyquda.py}. The construction
+follows these steps for each polarization $\mathcal{P}$ and flavor:
+
+\begin{enumerate}
+  \item \textbf{Boosted smearing} at the sink: $\texttt{prop} \to
+    \texttt{boosted\_smearing}(\texttt{prop}, w, \texttt{boost\_out})$.
+  \item \textbf{Baryon contraction}: depending on the flavor, either
+    \texttt{up\_quark\_insertion\_pyquda} or \texttt{down\_quark\_insertion\_pyquda}
+    contracts the propagator with epsilon tensors and the polarization matrix
+    $\mathcal{P}$ to form the sequential source at the sink time slice.
+  \item \textbf{Time slicing}: the source is restricted to time slice
+    $t_{\text{sink}} = (t_{\text{src}} + t_{\text{sep}}) \bmod L_t$ using
+    \texttt{sequential12}.
+  \item \textbf{Momentum phase and $\gamma_5$}: the source is multiplied by
+    $e^{i p_f \cdot (\xvec - \xzerovec)}$ and left-multiplied by $\gamma_5$:
+    \begin{equation}
+      \texttt{seq\_data} = \gamma_5 \cdot \Phi_{p_f} \cdot
+        \texttt{seq\_data}^\dagger.
+    \end{equation}
+  \item \textbf{Inversion}: the source is smeared (boosted) and inverted to obtain
+    the sequential propagator.
+  \item \textbf{Post-inversion $\gamma_5$}: the sequential propagator is conjugated
+    and multiplied by $\gamma_5$ on the right:
+    \begin{equation}
+      \texttt{final} = \texttt{prop\_inv}^\dagger \cdot \gamma_5.
+    \end{equation}
+\end{enumerate}
+
+\subsection{Up-Quark Insertion (Flavor 1)}
+
+The up-quark insertion function \texttt{up\_quark\_insertion\_pyquda} constructs the
+sequential source from two up-quark propagators $Q_u$, one down-quark propagator
+$Q_d$, the interpolator $\Gamma$, and the spin projection $\mathcal{P}$.
+
+Let $Q_u$ and $Q_d$ be reshaped to $[\mathrm{vol}, 4, 4, 3, 3]$ with indices
+$[\text{site},\, \text{spin}_{\text{sink}},\, \text{spin}_{\text{src}},\,
+  \text{color}_{\text{sink}},\, \text{color}_{\text{src}}]$.
+
+Internally, the following intermediate combinations are precomputed:
+\begin{align}
+  G^T D G &: \quad (\Gamma^T)_{ij}\, (Q_d)_{jkab}\, (\Gamma)_{kl}
+    \;\to\; [\mathrm{vol}, i, l, a, b], \\
+  \mathcal{P} D_u &: \quad (\mathcal{P})_{ij}\, (Q_u)_{jkab}
+    \;\to\; [\mathrm{vol}, i, k, a, b], \\
+  D_u \mathcal{P} &: \quad (Q_u)_{jkab}\, (\mathcal{P})_{kl}
+    \;\to\; [\mathrm{vol}, j, l, a, b], \\
+  \operatorname{Tr}[D_u \mathcal{P}] &: \quad
+    (Q_u)_{kjab}\, (\mathcal{P})_{jk}
+    \;\to\; [\mathrm{vol}, a, b].
+\end{align}
+
+The four epsilon-contracted terms are:
+\begin{align}
+  R_1 &: \quad
+    \eps_{abc}\,\eps_{def}\,
+    (G^T D G)_{mnbe}\, (Q_u)_{mnad}
+    \;\to\; [\mathrm{vol}, b, e, a, d] \;
+    \xrightarrow{\times \eps\eps} \; [\mathrm{vol}, c, f] \;
+    \xrightarrow{\times \mathcal{P}} \; [\mathrm{vol}, i, j, c, f], \\[4pt]
+  R_2 &: \quad
+    \eps_{abc}\,\eps_{def}\,
+    (\operatorname{Tr}[D_u\mathcal{P}])_{ad}\,
+    (G^T D G)_{jibe}
+    \;\to\; [\mathrm{vol}, i, j, c, f], \\[4pt]
+  R_3 &: \quad
+    \eps_{abc}\,\eps_{def}\,
+    (\mathcal{P} D_u)_{ikad}\, (G^T D G)_{jkbe}
+    \;\to\; [\mathrm{vol}, i, j, c, f], \\[4pt]
+  R_4 &: \quad
+    \eps_{abc}\,\eps_{def}\,
+    (G^T D G)_{kiad}\, (D_u\mathcal{P})_{klbe}
+    \;\to\; [\mathrm{vol}, i, l, c, f] \;
+    \xrightarrow{i \leftrightarrow l} \; [\mathrm{vol}, i, j, c, f].
+\end{align}
+
+The total sequential source is:
+\begin{equation}
+  D_{\text{total}} = -(R_1 + R_2 + R_3 + R_4),
+\end{equation}
+with a final spin swap to reorder the output as
+$[\mathrm{vol}, \mathrm{spin}_{\text{src}}, \mathrm{spin}_{\text{sink}},
+  \mathrm{color}_{\text{sink}}, \mathrm{color}_{\text{src}}]$.
+
+\subsection{Down-Quark Insertion (Flavor 2)}
+
+The down-quark insertion \texttt{down\_quark\_insertion\_pyquda} is simpler (two
+terms), since the down quark appears only once in the interpolating field. It takes a
+single propagator $Q$ (isospin-symmetric), $\Gamma$, and $\mathcal{P}$.
+
+The intermediate combinations are:
+\begin{align}
+  \mathcal{P} D &: \quad (\mathcal{P})_{ij}\, Q_{jiab}
+    \;\to\; [\mathrm{vol}, a, b], \\
+  G^T D G &: \quad (\Gamma^T)_{ij}\, Q_{jkab}\, (\Gamma)_{kl}
+    \;\to\; [\mathrm{vol}, i, l, a, b], \\
+  G^T D &: \quad (\Gamma^T)_{ij}\, Q_{jkab}
+    \;\to\; [\mathrm{vol}, i, k, a, b], \\
+  \mathcal{P} D G &: \quad (\mathcal{P})_{ij}\, Q_{jkab}\, (\Gamma)_{kl}
+    \;\to\; [\mathrm{vol}, i, l, a, b].
+\end{align}
+
+The two terms are:
+\begin{align}
+  T_1 &: \quad
+    \eps_{abc}\,\eps_{def}\,
+    (\mathcal{P} D)_{fc}\, (G^T D G)_{uveb}
+    \;\to\; [\mathrm{vol}, u, v, a, d], \\[4pt]
+  T_2 &: \quad
+    \eps_{abc}\,\eps_{def}\,
+    (G^T D)_{ujec}\, (\mathcal{P} D G)_{jkfb}
+    \;\to\; [\mathrm{vol}, u, k, a, d].
+\end{align}
+
+The total is:
+\begin{equation}
+  D_{\text{total}} = T_2 - T_1,
+\end{equation}
+with the same final spin swap.
+
+\subsection{Spin Projections}
+
+The available spin projection matrices $\mathcal{P}$ are defined as:
+
+\begin{align}
+  P_+ &= \frac{1}{4}(\gamma_0 + I), \\
+  S_z^+ &= \gamma_0 - i\gamma_1\gamma_2, \qquad
+  S_z^- = \gamma_0 + i\gamma_1\gamma_2, \\
+  S_x^+ &= \gamma_0 - i\gamma_2\gamma_4, \qquad
+  S_x^- = \gamma_0 + i\gamma_2\gamma_4.
+\end{align}
+
+The polarization projections stored in \texttt{PolProjections} are:
+\begin{align}
+  \texttt{PpUnpol} &= P_+, \\
+  \texttt{PpSzp}   &= P_+ S_z^+, \\
+  \texttt{PpSzm}   &= P_+ S_z^-, \\
+  \texttt{PpSxp}   &= P_+ S_x^+, \\
+  \texttt{PpSxm}   &= P_+ S_x^-.
+\end{align}
+
+% ======================================================================
+\section{CG qTMD Operator}
+\label{sec:cg_qtmd}
+% ======================================================================
+
+The Coulomb-gauge (CG) qTMD operator is a simple coordinate shift of the forward
+propagator, without explicit gauge links:
+
+\begin{equation}
+  \mathcal{O}_b\, S_q(x, x_0) =
+    S_q\bigl(x + b_\perp \cdot \ehat{\perp} + b_z \cdot \ehat{z},\; x_0\bigr),
+  \label{eq:cg_shift}
+\end{equation}
+
+where $\ehat{\perp} \in \{\ehat{x}, \ehat{y}\}$ selects the transverse direction
+(direction 0 or 1) and $\ehat{z}$ is the longitudinal direction (direction 2 on the
+lattice). The displacement is parameterized by:
+\begin{itemize}
+  \item $b_\perp \in \{0, 1, \dots, b_T\}$ -- transverse displacement,
+  \item $b_z \in \{-b_z, \dots, 0, \dots, b_z\}$ -- longitudinal displacement.
+\end{itemize}
+
+\subsection{Incremental Shift Strategy}
+
+Rather than shifting the propagator by the full vector $(b_\perp, b_z)$ from the
+origin for each Wilson-line index, the code maintains a running shifted propagator
+and applies only incremental shifts:
+
+\begin{equation}
+  \texttt{prop\_shifted} =
+    \texttt{prop\_prev.shift}(\Delta b_\perp, \text{dir}_\perp)\,
+    \texttt{.shift}(\Delta b_z, \text{dir}_z),
+\end{equation}
+
+where $\Delta b_\perp = b_\perp^{\text{current}} - b_\perp^{\text{previous}}$ and
+$\Delta b_z = b_z^{\text{current}} - b_z^{\text{previous}}$. This keeps successive
+shifts small, minimizing communication overhead in the distributed lattice
+implementation.
+
+The method \texttt{create\_fw\_prop\_TMD\_CG} implements this logic: it receives the
+current forward propagator, the current Wilson-line index $W$, and the previous
+index, then applies the needed relative shifts.
+
+% ======================================================================
+\section{PDF Operators}
+\label{sec:pdf}
+% ======================================================================
+
+The PDF operator is the $b_\perp = 0$ special case of the qTMD operator, involving
+only longitudinal displacements along the $z$-direction.
+
+\subsection{CG PDF}
+
+The Coulomb-gauge PDF uses ordinary lattice shifts with $b_\perp = 0$:
+\begin{equation}
+  \mathcal{O}_{b_z}^{\text{CG}}\, S_q(x, x_0) =
+    S_q(x + b_z \cdot \ehat{z},\; x_0).
+\end{equation}
+This is implemented via the same \texttt{create\_fw\_prop\_TMD\_CG} method with
+$b_\perp = 0$ and $b_\perp^{\text{previous}} = 0$.
+
+\subsection{GI PDF}
+
+The gauge-invariant (GI) PDF uses covariant shifts along the $z$-direction, building
+an explicit straight Wilson line through successive gauge-covariant nearest-neighbor
+shifts:
+
+\begin{equation}
+  \mathcal{O}_{b_z}^{\text{GI}}\, S_q(x, x_0) =
+    U_z(x + (b_z-1)\ehat{z}) \cdots U_z(x + \ehat{z})\, U_z(x)\;
+    S_q(x + b_z \cdot \ehat{z},\; x_0).
+\end{equation}
+
+The implementation in \texttt{create\_fw\_prop\_PDF\_GI} uses
+\texttt{gauge.pure\_gauge.covDev} to apply $\psi'(x) = U_\mu(x)\, \psi(x + \hat{\mu})$
+for each nearest-neighbor step:
+\begin{itemize}
+  \item direction 2: $+z$ (forward covariant derivative),
+  \item direction 6: $-z$ (backward covariant derivative).
+\end{itemize}
+
+The code enforces nearest-neighbor steps only ($\Delta b_z \in \{-1, 0, 1\}$) and
+raises an error for larger jumps, protecting against accidentally skipping gauge
+links. The shift is applied spinor-by-spinor and color-by-color in a loop over the
+fermion field.
+
+\subsection{Comparison}
+
+\begin{center}
+  \begin{tabular}{l|c|c|c}
+    Variant & Gauge links & Transverse & Code method \\
+    \hline
+    CG\_TMD & None (CG) & $x$ and $y$ & \texttt{create\_fw\_prop\_TMD\_CG} \\
+    CG\_PDF & None (CG) & none & \texttt{create\_fw\_prop\_TMD\_CG} \\
+    GI\_PDF & Covariant & none & \texttt{create\_fw\_prop\_PDF\_GI}
+  \end{tabular}
+\end{center}
+
+% ======================================================================
+\section{Wilson Line Index Construction}
+\label{sec:wilson}
+% ======================================================================
+
+\subsection{CG qTMD Wilson Indices}
+
+The CG qTMD requires two sets of Wilson-line indices, one for each transverse direction:
+
+\begin{itemize}
+  \item \texttt{index\_list\_trans0}: transverse direction $0$ ($x$),
+  \item \texttt{index\_list\_trans1}: transverse direction $1$ ($y$).
+\end{itemize}
+
+Each Wilson-line index is a 4-tuple $[b_T, b_z, \eta, \text{dir}]$ where:
+\begin{itemize}
+  \item $b_T \in [0, b_T^{\max}]$ -- transverse displacement,
+  \item $b_z$ -- longitudinal displacement,
+  \item $\eta = 0$ (irrelevant for CG, kept for interface compatibility),
+  \item $\text{dir} \in \{0, 1\}$ -- transverse direction ($x$ or $y$).
+\end{itemize}
+
+The generation algorithm:
+\begin{enumerate}
+  \item For each $b_z \in [0, b_z^{\max}]$, $b_T \in [0, b_T^{\max}]$:
+    \begin{itemize}
+      \item add $[b_T, b_z, 0, \text{dir}]$,
+      \item if $b_z \neq 0$, also add $[b_T, -b_z, 0, \text{dir}]$.
+    \end{itemize}
+  \item Reorder the index list to minimize adjacent differences in $(b_T, b_z)$.
+    The reordering sorts by $(b_T, b_z)$ first, then locally permutes to make each
+    step as small as possible.
+\end{enumerate}
+
+The final combined list is:
+\begin{equation}
+  \texttt{W\_index\_list\_CG} =
+    \texttt{index\_list\_trans0} \;+\; \texttt{index\_list\_trans1}.
+\end{equation}
+
+\subsection{PDF Wilson Indices}
+
+The PDF Wilson-line index list contains only $b_T = 0$ entries:
+\begin{enumerate}
+  \item For each $b_z \in [0, b_z^{\max}]$: add $[0, b_z, 0, 0]$.
+  \item For each $b_z \in [1, b_z^{\max}]$: add $[0, -b_z, 0, 0]$.
+\end{enumerate}
+
+Since $b_T = 0$ for all entries, the transverse direction is always 0 (dummy).
+The positive and negative $b_z$ values are separated to facilitate the incremental
+shift strategy: for GI\_PDF, the gauge-covariant link construction requires resetting
+to the unshifted propagator when the sign of $b_z$ changes (i.e., when $b_z = 0$ or
+$b_z = -1$ in the loop).
+
+% ======================================================================
+\section{Code Implementation}
+\label{sec:implementation}
+% ======================================================================
+
+The measurement is organized into a class \texttt{proton\_TMD} in
+\texttt{proton\_qTMD\_pyquda.py}.
+
+\subsection{Constructor Parameters}
+
+\begin{center}
+  \begin{tabular}{l|l}
+    Parameter & Description \\
+    \hline
+    \texttt{eta} & List of $\eta$ values (irrelevant for CG) \\
+    \texttt{b\_z} & Maximum longitudinal displacement \\
+    \texttt{b\_T} & Maximum transverse displacement \\
+    \texttt{pf} & Final nucleon momentum $p_f$ \\
+    \texttt{qext} & Momentum transfers for TMD \\
+    \texttt{qext\_PDF} & Momentum transfers for PDF \\
+    \texttt{plist} & Momentum list (from \texttt{qext}) \\
+    \texttt{pilist} & Initial momenta $p_i$ for 2pt \\
+    \texttt{width} & Gaussian smearing width \\
+    \texttt{boost\_in} & Forward propagator boost smearing \\
+    \texttt{boost\_out} & Backward propagator boost smearing \\
+    \texttt{pol\_list} & List of polarization projections \\
+    \texttt{t\_insert} & Time separation $t_{\text{sep}}$ \\
+    \texttt{save\_propagators} & Whether to save propagators
+  \end{tabular}
+\end{center}
+
+\subsection{Method Summary}
+
+\begin{itemize}
+  \item \texttt{contract\_2pt\_TMD(latt\_info, prop\_f, phases, tag, interpolator)}:
+    Full two-point contraction with all 16 gammas (Section~\ref{sec:contraction_code}).
+  \item \texttt{create\_TMD\_Wilsonline\_index\_list\_CG()}:
+    Generate CG Wilson indices for both transverse directions (Section~\ref{sec:wilson}).
+  \item \texttt{create\_PDF\_Wilsonline\_index\_list()}:
+    Generate PDF Wilson indices ($b_\perp = 0$, Section~\ref{sec:wilson}).
+  \item \texttt{create\_fw\_prop\_TMD\_CG(prop\_f, W\_index, WL\_indices\_previous)}:
+    Incremental CG shift (Section~\ref{sec:cg_qtmd}).
+  \item \texttt{create\_fw\_prop\_PDF\_GI(gauge, prop\_f, W\_index, WL\_indices\_previous)}:
+    Gauge-covariant GI shift (Section~\ref{sec:pdf}).
+\end{itemize}
+
+% ======================================================================
+\section{Array and Output Shape Convention}
+\label{sec:output}
+% ======================================================================
+
+\subsection{Internal Array Shapes}
+
+\begin{center}
+  \begin{tabular}{l|l}
+    Object & Shape \\
+    \hline
+    Propagator data & $[\omega, t, z, y, x_{cb}, s_a, s_b, c_a, c_b]$ \\
+    Momentum phases & $[p, \omega, t, z, y, x]$ or $[p, \omega, t, z, y]$ \\
+    Gamma array & $[g, m, n]$ (16 $\times$ 4 $\times$ 4) \\
+    Sequential propagator & $[\text{pol}, \omega, t, z, y, x_{cb}, s_a, s_b, c_a, c_b]$ \\
+    C2 result & $[g, p, t]$ \\
+    C3 result & $[\text{WL}, \text{pol}, q, g, t]$
+  \end{tabular}
+\end{center}
+
+where:
+\begin{itemize}
+  \item $\omega$: even-odd parity ($L_t \times L_z \times L_y \times L_x/2$),
+  \item $x_{cb}$: checkerboarded $x$ index,
+  \item $s_a, s_b$: spin indices (0--3),
+  \item $c_a, c_b$: color indices (0--2),
+  \item $g$: gamma matrix index (0--15),
+  \item $p, q$: momentum indices,
+  \item $\text{pol}$: polarization index,
+  \item $\text{WL}$: Wilson-line index.
+\end{itemize}
+
+\subsection{HDF5 Output Layout}
+
+\subsubsection{Two-Point Function}
+
+\begin{verbatim}
+  <tag>.h5
+    /SS/<gamma>/PX..PY..PZ..  ->  dataset of shape [Lt]
+\end{verbatim}
+
+Each gamma channel stores all momenta as separate datasets. The time axis is rolled
+so that $t=0$ corresponds to the source position.
+
+\subsubsection{Three-Point qTMD/PDF}
+
+\begin{verbatim}
+  <tag>.h5
+    /SS/<gamma>/PX..PY..PZ../
+      <b_X or b_Y>/eta0/bT<bT>/bz<bz>  ->  dataset of shape [tsep+2]
+\end{verbatim}
+
+The Wilson-line index $[b_T, b_z, \eta, \text{dir}]$ maps to the HDF5 group path:
+\begin{itemize}
+  \item \texttt{dir} = 0 $\to$ \texttt{b\_X}, \texttt{dir} = 1 $\to$ \texttt{b\_Y},
+  \item \texttt{eta} = 0 $\to$ \texttt{eta0},
+  \item $b_T \to$ \texttt{bT}$\langle b_T\rangle$,
+  \item $b_z \to$ \texttt{bz}$\langle b_z\rangle$.
+\end{itemize}
+
+For PDF data, only \texttt{b\_X} appears (since $b_T = 0$ always, and the transverse
+direction is dummy).
+
+The flavor-specific tags encode the flavor as part of the AMA field:
+\texttt{"CG.D.ex"} for down-quark CG insertion, \texttt{"CG.U.ex"} for up-quark
+CG insertion.
+
+% ======================================================================
+\section{Key Differences from Pion qTMD}
+\label{sec:differences}
+% ======================================================================
+
+The proton qTMD measurement differs from the pion qTMD in several fundamental ways:
+
+\begin{center}
+  \begin{tabular}{l|l|l}
+    Aspect & Pion qTMD & Proton qTMD \\
+    \hline
+    Contraction & $\gamma_5$-hermiticity & Baryon epsilon + 2 exchange terms \\
+    Quark lines & 2 (one contraction term) & 3 (two contraction terms) \\
+    Flavor dim. & None (single channel) & $[U, D]$ via 2 seq.\ sources \\
+    Polarization & None & Via spin projectors $\mathcal{P}$ \\
+    Propagators & Separate fw/bw & Same prop reused (isospin) \\
+    Mom.\ params. & \texttt{pos\_boost}/\texttt{neg\_boost} &
+      \texttt{boost\_in}/\texttt{boost\_out} \\
+    Seq.\ source & 1 meson seq.\ source & 2 baryon seq.\ sources \\
+    Output shape & $[\text{WL}, q, g, t]$ &
+      $[\text{WL}, \text{pol}, q, g, t]$
+  \end{tabular}
+\end{center}
+
+The isospin-symmetric approximation ($m_u = m_d$) means the same forward propagator
+is used for all three valence quark lines in the two-point function and for the
+sequential source construction. The up and down sequential sources differ only in
+their baryon contraction pattern, not in the input propagators.
+
+% ======================================================================
+\section{Limitations}
+\label{sec:limitations}
+% ======================================================================
+
+The current implementation has the following limitations:
+
+\begin{enumerate}
+  \item \textbf{Connected diagrams only.} Disconnected insertions (where the operator
+    couples to a sea-quark loop) are not included. These contribute to the singlet
+    TMDs and may be substantial at low $x$.
+  \item \textbf{Isospin symmetry.} The code assumes $m_u = m_d$ and reuses the same
+    forward propagator for all quark lines. Isospin-breaking effects from
+    $m_u \neq m_d$ or from electromagnetic corrections are not captured.
+  \item \textbf{No flavor mixing or renormalization.} The bare lattice operators are
+    not matched to the $\overline{\text{MS}}$ scheme. Renormalization factors and
+    operator mixing (especially for the Wilson-line operators) must be applied
+    externally.
+  \item \textbf{CG paths have no explicit gauge links.} The Coulomb-gauge qTMD
+    operator is a simple coordinate shift. This is gauge-dependent unless the
+    lattice is fixed to Coulomb gauge. Residual gauge-fixing uncertainties are
+    not quantified.
+  \item \textbf{No disconnected TMD contributions.} The full proton TMD includes
+    disconnected diagrams (operator insertion on a sea-quark loop connecting to
+    the proton via gluons), which are not computed.
+  \item \textbf{Fixed sink only.} The sequential-source method fixes the sink time
+    and momentum. To vary $t_{\text{sep}}$ or $p_f$, separate inversions are required.
+\end{enumerate}
+
+% ======================================================================
+\section{Application Workflow Summary}
+\label{sec:workflow}
+% ======================================================================
+
+The production application (\texttt{pyquda\_nucleon\_TMD.py}) follows this workflow
+for each source position:
+
+\begin{enumerate}
+  \item \textbf{Forward propagator}: Generate a point source at position
+    $(x_0, y_0, z_0, t_0)$, apply boosted smearing, and invert.
+  \item \textbf{Two-point contraction}: Call \texttt{contract\_2pt\_TMD} with the
+    forward propagator and momentum phases. This computes all 16 gamma channels
+    and saves the result as HDF5.
+  \item \textbf{Sequential sources}: Build two sequential backward propagators
+    via \texttt{create\_bw\_seq\_pyquda}:
+    \begin{itemize}
+      \item Flavor 2 (down): \texttt{sequential\_bw\_prop\_down},
+      \item Flavor 1 (up): \texttt{sequential\_bw\_prop\_up}.
+    \end{itemize}
+  \item \textbf{TMD contractions (CG)}: Loop over Wilson-line indices for
+    directions $+x$ and $+y$, incrementally shifting the forward propagator
+    and contracting with both sequential propagators and the 16 gammas.
+    Save results per polarization, gamma, and flavor.
+  \item \textbf{PDF contractions (GI)}: Loop over PDF Wilson-line indices,
+    apply gauge-covariant $z$-shifts via \texttt{create\_fw\_prop\_PDF\_GI},
+    and contract similarly.
+  \item \textbf{PDF contractions (CG)}: Same as GI but using ordinary lattice
+    shifts.
+\end{enumerate}
+
+The momentum transfer $q$ for the three-point functions is constructed from the
+\texttt{qext} parameter list: $q = (q_x, q_y, q_z, 0)$ with $q_z = 0$ for TMD
+and unrestricted for PDF. The initial momentum is $p_i = p_f - q$, and the
+two-point momenta are the negative of the \texttt{p\_2pt} list.
+
+% ======================================================================
+\section*{Acknowledgments}
+% ======================================================================
+
+This code was developed as part of the PyQUDA measurement framework for lattice QCD
+nucleon structure calculations. The contraction strategy and sequential-source
+construction build on established methods in the baryon spectroscopy literature.
+
+\end{document}

@@ -1,0 +1,1577 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------------------------------------------------------------------------
+% Packages
+% ---------------------------------------------------------------------------
+\usepackage{amsmath,amssymb}
+\usepackage{physics}
+\usepackage{braket}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+% ---------------------------------------------------------------------------
+% Custom commands for this note
+% ---------------------------------------------------------------------------
+\newcommand{\eps}{\varepsilon}
+\newcommand{\Gint}{\Gamma_{\text{interp}}}
+\newcommand{\Gsink}{\Gamma_{\text{sink}}}
+\newcommand{\PolProj}{\mathcal{P}}
+\newcommand{\Cmat}{C}
+\newcommand{\gfive}{\gamma_{5}}
+\newcommand{\gp}{\gamma_{+}}
+\newcommand{\gm}{\gamma_{-}}
+\newcommand{\Dmu}{D_{\mu}}
+\newcommand{\Dnum}{D_{\nu}}
+\newcommand{\Tmunu}{T_{\mu\nu}}
+\newcommand{\TmunuQ}{T_{\mu\nu}^{q}}
+\newcommand{\TmunuG}{T_{\mu\nu}^{g}}
+\newcommand{\seqsrc}{\eta_{\text{seq}}}
+\newcommand{\seqprop}{\Sigma}
+\newcommand{\fwprop}{S}
+\newcommand{\bwprop}{\bar{S}}
+\newcommand{\cf}{c_{f}}
+\newcommand{\cs}{c_{s}}
+\newcommand{\xsrc}{x_{0}}
+\newcommand{\xsink}{y}
+\newcommand{\xins}{x}
+\newcommand{\pfinal}{p_{f}}
+\newcommand{\pini}{p_{i}}
+\newcommand{\momtrans}{q}
+
+% ---------------------------------------------------------------------------
+\title{\textbf{Proton Energy-Momentum Tensor Measurement}\\[4pt]
+       \large A Detailed Physics Note for the PyQUDA Implementation}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note documents the complete set of formulas, conventions, and algorithmic steps
+used in the PyQUDA-based measurement of the proton matrix elements of the
+energy-momentum tensor (EMT).  We cover the proton interpolating field, the connected
+two-point function, the fixed-sink sequential-source method for connected three-point
+functions, the covariant derivative insertion for the quark EMT, gradient flow, and the
+output data structures.  The note is written for lattice QCD practitioners and aims to
+be sufficiently precise that every einsum in the code can be traced back to a
+well-defined mathematical expression.  Throughout, we adopt the Euclidean metric with
+Hermitian gamma matrices and the DeGrand--Rossi chiral basis as implemented in QUDA
+and exposed through PyQUDA.
+\end{abstract}
+
+\tableofcontents
+
+% ===========================================================================
+\section{Conventions and Gamma Matrix Setup}
+% ===========================================================================
+
+\subsection{Euclidean Gamma Matrices}
+
+We work in four-dimensional Euclidean spacetime with coordinates
+$x_{\mu}$, $\mu = 1,2,3,4$.  The spatial directions are $1,2,3$ and the temporal
+direction is $\mu = 4$.  The Euclidean gamma matrices satisfy
+\begin{equation}
+  \{\gamma_{\mu}, \gamma_{\nu}\} = 2\delta_{\mu\nu}\,\mathbb{1}_{4\times 4},
+  \qquad \gamma_{\mu}^{\dagger} = \gamma_{\mu}.
+\end{equation}
+The chiral matrix is
+\begin{equation}
+  \gamma_{5} \equiv \gamma_{1}\gamma_{2}\gamma_{3}\gamma_{4},
+  \qquad \gamma_{5}^{\dagger} = \gamma_{5},\quad \gamma_{5}^{2} = \mathbb{1}.
+\end{equation}
+
+\subsection{PyQUDA Gamma Indexing}
+\label{sec:gammas}
+
+PyQUDA uses the QUDA bitmask convention for gamma matrices.  The 16 independent
+bilinear structures are ordered as
+\begin{equation}
+  \texttt{my\_gammas} = [\texttt{"5"}, \texttt{"T"}, \texttt{"T5"}, \texttt{"X"},
+  \texttt{"X5"}, \texttt{"Y"}, \texttt{"Y5"}, \texttt{"Z"}, \texttt{"Z5"},
+  \texttt{"I"}, \texttt{"SXT"}, \texttt{"SXY"}, \texttt{"SXZ"}, \texttt{"SYT"},
+  \texttt{"SYZ"}, \texttt{"SZT"}].
+\end{equation}
+The corresponding QUDA-internal integer identifiers are
+\begin{equation}
+  \texttt{pyquda\_gammas\_order} = [15,\,8,\,7,\,1,\,14,\,2,\,13,\,4,\,11,\,
+  0,\,9,\,3,\,5,\,10,\,6,\,12].
+\end{equation}
+The Dirac gamma matrices relevant for derivative insertions are
+\begin{equation}
+  \gamma_{1}\leftrightarrow\texttt{gamma(1)},\quad
+  \gamma_{2}\leftrightarrow\texttt{gamma(2)},\quad
+  \gamma_{3}\leftrightarrow\texttt{gamma(4)},\quad
+  \gamma_{4}\leftrightarrow\texttt{gamma(8)}.
+\end{equation}
+The chiral matrix is $\gamma_{5}\leftrightarrow\texttt{gamma(15)}$.
+
+\subsection{Charge Conjugation Matrix}
+
+The charge conjugation matrix in the Euclidean DeGrand--Rossi basis is
+\begin{equation}
+  \Cmat = i\gamma_{2}\gamma_{4}
+        = i\;\texttt{gamma(2)}\;\texttt{ @ }\;\texttt{gamma(8)}.
+\end{equation}
+It satisfies the standard relations
+\begin{equation}
+  \Cmat\gamma_{\mu}^{T}\Cmat^{-1} = -\gamma_{\mu},\qquad
+  \Cmat^{T} = -\Cmat,\qquad
+  \Cmat^{\dagger} = \Cmat^{-1} = -\Cmat.
+\end{equation}
+
+\subsection{Propagator Data Layout}
+
+A lattice quark propagator in PyQUDA is stored with the index structure
+\begin{equation}
+  \fwprop(x,x_{0}) \;\longleftrightarrow\;
+  \texttt{[w,\, t,\, z,\, y,\, x\_cb,\, spin\_sink,\, spin\_src,\, color\_sink,\, color\_src]},
+\end{equation}
+where \texttt{w} is the checkerboard/parity index, (\texttt{t,z,y,x\_cb}) are the
+local spacetime coordinates, and the remaining four indices carry the spin and color
+degrees of freedom of the two ends of the propagator.  In einsum notation we label
+this layout as
+\begin{equation}
+  \fwprop^{i,k}_{a,d}(x,x_{0}) \quad\text{with}\quad
+  i = \text{spin\_sink},\; k = \text{spin\_src},\;
+  a = \text{color\_sink},\; d = \text{color\_src}.
+\end{equation}
+Greek letters from the middle of the alphabet ($\alpha,\beta,\gamma,\dots$) denote
+spin indices and Latin letters $(a,b,c,\dots)$ denote color indices when we write
+mathematical formulas.  In the einsum code listings, spin indices are
+$i,j,k,l,m,n$ and color indices are $a,b,c,d,e,f$.
+
+\subsection{Momentum Phases}
+
+Momentum projection uses the \texttt{MomentumPhase} class from PyQUDA.  For a
+momentum $k = (k_{1},k_{2},k_{3},0)$ and source position $\xsrc$, the phase at
+position $r$ is
+\begin{equation}
+  \Phi_{k}(r-\xsrc) = \exp\!\big(-i\,k\cdot(r-\xsrc)\big),
+\end{equation}
+where the sign convention follows the \texttt{MomentumPhase} implementation and
+the dot product uses the spatial components only.
+
+% ===========================================================================
+\part{Proton Interpolating Field and Two-Point Function}
+% ===========================================================================
+
+% ---------------------------------------------------------------------------
+\section{Proton Interpolating Field}
+% ---------------------------------------------------------------------------
+
+The proton is interpolated by a color-singlet three-quark operator with
+spin-$\tfrac{1}{2}$.  The standard choice used in the code is the scalar-diquark
+interpolator.  Expressed in terms of up and down quark fields, the proton
+interpolating field at position $y$ is
+\begin{equation}
+  \boxed{
+  \chi_{\alpha}(y) = \eps_{abc}\;
+  \big[u_{a}^{T}(y)\,\Cmat\,\Gint\,d_{b}(y)\big]\;
+  u_{c,\alpha}(y)
+  },
+  \label{eq:chi}
+\end{equation}
+where:
+\begin{itemize}
+  \item $\alpha = 1,\dots,4$ is the free Dirac index of the proton;
+  \item $a,b,c = 1,2,3$ are fundamental color indices;
+  \item $\eps_{abc}$ is the totally antisymmetric Levi-Civita tensor with
+        $\eps_{123} = +1$;
+  \item $\Cmat = i\gamma_{2}\gamma_{4}$ is the charge conjugation matrix;
+  \item $\Gint$ selects the spin structure of the diquark channel;
+  \item $u(x), d(x)$ are the up- and down-quark Dirac spinor fields.
+\end{itemize}
+
+The transpose $u_{a}^{T}$ acts in Dirac space only; the color index $a$ is
+contracted via the epsilon tensor.  The bracketed term $[u^{T}\Cmat\Gint d]$
+forms a Lorentz scalar (for $\Gint = \gamma_{5}$) or a pseudoscalar diquark, and
+the remaining up quark $u_{c,\alpha}$ carries the spin of the proton.
+
+\subsection{Supported Interpolators}
+
+The code supports three choices for $\Gint$, mapped by the string argument
+\texttt{interpolator}:
+
+\begin{center}
+\begin{tabular}{ccl}
+\toprule
+\texttt{interpolator} & $\Gint$ & Description \\
+\midrule
+\texttt{"5"}  & $\Cmat\gamma_{5}$   & Scalar diquark (standard) \\
+\texttt{"T5"} & $\Cmat\gamma_{t}\gamma_{5}$ & Temporal-axial diquark \\
+\texttt{"Z5"} & $\Cmat\gamma_{z}\gamma_{5}$ & Longitudinal-axial diquark \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+In PyQUDA code:
+\begin{verbatim}
+Cg5  = (1j * gamma.gamma(2) @ gamma.gamma(8)) @ gamma.gamma(15)
+CgT5 = (1j * gamma.gamma(2) @ gamma.gamma(8)) @ gamma.gamma(7)
+CgZ5 = (1j * gamma.gamma(2) @ gamma.gamma(8)) @ gamma.gamma(11)
+\end{verbatim}
+Note that $\Cmat = i\gamma_{2}\gamma_{4}$ is built first,
+then right-multiplied by the appropriate gamma structure.
+
+\subsection{Epsilon Tensor Convention}
+
+The color epsilon tensor is defined as
+\begin{equation}
+  \eps_{abc} = \begin{cases}
+    +1 & \text{if }(a,b,c)\text{ is an even permutation of }(0,1,2),\\
+    -1 & \text{if }(a,b,c)\text{ is an odd permutation of }(0,1,2),\\
+    0  & \text{otherwise}.
+  \end{cases}
+\end{equation}
+In the code, $\eps$ is initialized on the host as
+\begin{verbatim}
+epsilon_host = xp.zeros((3,3,3), dtype=...)
+for a in range(3):
+    b = (a+1) % 3
+    c = (a+2) % 3
+    epsilon_host[a,b,c] = 1
+    epsilon_host[a,c,b] = -1
+\end{verbatim}
+This implements $\eps_{012} = \eps_{120} = \eps_{201} = +1$ and
+$\eps_{021} = \eps_{102} = \eps_{210} = -1$, i.e., the standard convention
+with cyclic permutations positive.
+
+% ---------------------------------------------------------------------------
+\section{Spin and Parity Projection}
+% ---------------------------------------------------------------------------
+
+The proton two- and three-point functions are projected onto definite parity and
+spin states by a set of spin projection matrices $\PolProj$.  In the rest frame
+of the proton, the relevant matrices constructed in the code are:
+
+\subsection{Positive Parity Projector}
+
+The positive parity projector isolates the forward-propagating (positive-energy)
+component of the proton two-point function:
+\begin{equation}
+  \PolProj_{P} = \frac{\gamma_{0} + \gamma_{4}}{4}
+               = \frac{1}{4}\big(\texttt{gamma(0)} + \texttt{gamma(8)}\big).
+\end{equation}
+Here $\gamma_{0} \equiv \mathbb{1}_{4\times 4}$ and $\gamma_{4}$ is the temporal
+Dirac matrix.  In Euclidean space, this projector selects states with
+$p_{4} \approx +im_{N}$.
+
+\subsection{Spin Projectors}
+
+For a spin-$\tfrac{1}{2}$ particle at rest, the spin projection operators in the
+$z$ and $x$ directions are
+\begin{align}
+  \PolProj_{Sz}^{+} &= \gamma_{0} - i\gamma_{1}\gamma_{2}
+                     = \texttt{gamma(0)} - i\,\texttt{gamma(1)}\,\texttt{@}\,\texttt{gamma(2)},
+  \label{eq:Szp} \\
+  \PolProj_{Sz}^{-} &= \gamma_{0} + i\gamma_{1}\gamma_{2}
+                     = \texttt{gamma(0)} + i\,\texttt{gamma(1)}\,\texttt{@}\,\texttt{gamma(2)},
+  \label{eq:Szm} \\
+  \PolProj_{Sx}^{+} &= \gamma_{0} - i\gamma_{2}\gamma_{4}
+                     = \texttt{gamma(0)} - i\,\texttt{gamma(2)}\,\texttt{@}\,\texttt{gamma(4)},
+  \label{eq:Sxp} \\
+  \PolProj_{Sx}^{-} &= \gamma_{0} + i\gamma_{2}\gamma_{4}
+                     = \texttt{gamma(0)} + i\,\texttt{gamma(2)}\,\texttt{@}\,\texttt{gamma(4)}.
+  \label{eq:Sxm}
+\end{align}
+
+\subsection{Combined Parity-Spin Projectors}
+\label{sec:spinproj}
+
+The physical proton states are selected by combining the parity and spin
+projectors.  The \texttt{PolProjections} dictionary contains
+\begin{align}
+  \texttt{"PpSzp"}    &= \PolProj_{P}\,\PolProj_{Sz}^{+}, \\
+  \texttt{"PpSzm"}    &= \PolProj_{P}\,\PolProj_{Sz}^{-}, \\
+  \texttt{"PpSxp"}    &= \PolProj_{P}\,\PolProj_{Sx}^{+}, \\
+  \texttt{"PpSxm"}    &= \PolProj_{P}\,\PolProj_{Sx}^{-}, \\
+  \texttt{"PpUnpol"}  &= \PolProj_{P} \qquad\text{(unpolarized)}.
+\end{align}
+These five projectors are labeled by the \texttt{pol\_list} parameter and applied
+as spin matrices with indices $(i,j) = (\text{spin\_sink}, \text{spin\_src})$.
+
+% ---------------------------------------------------------------------------
+\section{Proton Two-Point Function}
+% ---------------------------------------------------------------------------
+
+\subsection{Definition}
+
+The connected proton two-point function with sink bilinear $\Gsink$ and momentum
+projection $p$ is
+\begin{equation}
+  C_{2}^{\Gsink}(p,\,t_{\text{sep}})
+  = \sum_{\mathbf{x}} \exp\!\big(-i\mathbf{p}\cdot(\mathbf{x}-\mathbf{x}_{0})\big)\;
+    \PolProj_{\alpha\alpha'}\;
+    \big\langle
+      \chi_{\alpha}(\mathbf{x},\,t_{\text{sep}}+t_{0})\;
+      {\Gsink}_{\beta\beta'}\;
+      \bar{\chi}_{\beta'}(\mathbf{x}_{0},\,t_{0})
+    \big\rangle,
+  \label{eq:C2_def}
+\end{equation}
+where the source is placed at $\xsrc = (\mathbf{x}_{0}, t_{0})$ and the sink is at
+$(\mathbf{x},\,t = t_{0}+t_{\text{sep}})$.  The sink gamma matrix $\Gsink$ is
+scanned over all 16 bilinear structures listed in Section~\ref{sec:gammas}; in the
+code they are indexed by the integer label $g \in \{0,\dots,15\}$.
+
+The $\bar{\chi}$ conjugate field is obtained via
+$\bar{\chi} = \chi^{\dagger}\gamma_{4}$.  After inserting the three-quark
+interpolators~\eqref{eq:chi}, the two-point function contains six fermion fields
+(three quarks and three antiquarks) whose Wick contractions produce the baryon
+propagator.
+
+\subsection{Wick Contraction Result}
+
+Performing all Wick contractions of~\eqref{eq:C2_def} yields two topologically
+distinct terms, corresponding to the two ways of pairing the identical up-quark
+fields.  In the isospin-symmetric limit (identical propagators for $u$ and $d$
+quarks), we denote the common quark propagator from $\xsrc$ to $x$ as
+\begin{equation}
+  \fwprop^{i,k}_{a,d}(x,\xsrc)
+  \equiv \langle u^{i}_{a}(x)\,\bar{u}^{k}_{d}(\xsrc)\rangle
+      = \langle d^{i}_{a}(x)\,\bar{d}^{k}_{d}(\xsrc)\rangle,
+\end{equation}
+where $(i,k)$ are spin\_sink and spin\_src indices and $(a,d)$ are color\_sink and
+color\_src indices.
+
+The two terms read:
+
+\medskip\noindent
+\textbf{Term 1 (direct contraction):}
+\begin{equation}
+  \boxed{
+  \begin{aligned}
+    C_{2}^{(1)}[g,p,t] = \sum_{\mathbf{x}} \Phi_{p}(\mathbf{x}-\mathbf{x}_{0})\;
+    \eps_{abc}\,\eps_{def}\;
+    (\Cmat\Gint)_{ij}\;(\Cmat\Gint)_{kl}\;
+    [{\Gsink}_{g}]_{mn}\;
+    &\fwprop^{i,k}_{a,d}(x,\xsrc)\;
+    \fwprop^{j,l}_{b,e}(x,\xsrc)\;
+    \fwprop^{m,n}_{c,f}(x,\xsrc).
+  \end{aligned}
+  }
+  \label{eq:term1}
+\end{equation}
+
+\medskip\noindent
+\textbf{Term 2 (exchange contraction):}
+\begin{equation}
+  \boxed{
+  \begin{aligned}
+    C_{2}^{(2)}[g,p,t] = \sum_{\mathbf{x}} \Phi_{p}(\mathbf{x}-\mathbf{x}_{0})\;
+    \eps_{abc}\,\eps_{def}\;
+    (\Cmat\Gint)_{ij}\;(\Cmat\Gint)_{kl}\;
+    [{\Gsink}_{g}]_{mn}\;
+    &\fwprop^{i,k}_{a,d}(x,\xsrc)\;
+    \fwprop^{j,n}_{b,e}(x,\xsrc)\;
+    \fwprop^{m,l}_{c,f}(x,\xsrc).
+  \end{aligned}
+  }
+  \label{eq:term2}
+\end{equation}
+
+\subsection{Sign Convention}
+
+The total two-point function is
+\begin{equation}
+  \boxed{
+  C_{2}^{\Gsink}(p,t) = -\big(C_{2}^{(1)} + C_{2}^{(2)}\big).
+  }
+  \label{eq:C2_sign}
+\end{equation}
+The overall minus sign arises from the Grassmann nature of the fermion fields and
+the conventions of the epsilon tensors.  It is essential for obtaining the
+correct positive-definite spectral decomposition of the proton two-point function.
+
+\subsection{Physical Interpretation of the Two Terms}
+
+In Term~1 (\ref{eq:term1}), the index structure
+$\fwprop^{i,k}_{a,d}\;\fwprop^{j,l}_{b,e}\;\fwprop^{m,n}_{c,f}$ corresponds to the
+``direct'' pairing where the first up quark at the source connects to the first up
+quark at the sink, the down quark connects to the down quark, and the second up
+quark connects to the second up quark.  The spin indices contract as:
+\begin{itemize}
+  \item $(\Cmat\Gint)_{ij}$ couples the spin of propagators 1 and 2 (the diquark);
+  \item $(\Cmat\Gint)_{kl}$ couples the spin of the conjugate diquark;
+  \item $[{\Gsink}_{g}]_{mn}$ provides the sink spin structure.
+\end{itemize}
+
+Term~2 (\ref{eq:term2}) is the exchange term where the spin\_src indices $n$ and
+$l$ are swapped between propagators 2 and 3.  This term is mandatory for fermionic
+statistics: the two up quarks are identical, so their propagators must be
+antisymmetrized.  The sum $C_{2}^{(1)}+C_{2}^{(2)}$ is antisymmetric under exchange
+of the two up-quark propagators, as required by the Pauli principle.
+
+% ---------------------------------------------------------------------------
+\section{Optimized Two-Point Contraction}
+% ---------------------------------------------------------------------------
+
+The direct evaluation of~\eqref{eq:term1} and~\eqref{eq:term2} via a single einsum
+would require a 10-index tensor contraction with memory footprint
+$\mathcal{O}(V \times 4^{6} \times 3^{6})$, which is impractical.  The code in
+\texttt{contract\_2pt\_TMD} splits the large contraction into a sequence of
+smaller two- and three-tensor operations.  We detail each step below.
+
+\subsection{Term 1: Step-by-Step Decomposition}
+
+The einsum indices used in the code are:
+\begin{itemize}
+  \item \texttt{wtzyx} -- local spacetime coordinates (complex, lattice-wide);
+  \item $i,j,k,l,m,n$ -- spin indices ($0,\dots,3$);
+  \item $a,b,c,d,e,f$ -- color indices ($0,1,2$);
+  \item $g$ -- sink gamma index ($0,\dots,15$);
+  \item $p$ -- momentum index.
+\end{itemize}
+
+The full Term~1 contraction before optimization is
+\begin{equation}
+  \texttt{einsum("abc, def, ij, kl, gmn, p..., ...ikad, ...jlbe, ...mncf -> gpt")}.
+\end{equation}
+
+The code decomposes this into eight steps:
+
+\medskip\noindent
+\textbf{Step 1 (t1\_s1):} Contract $\eps_{abc}$ with the first propagator on
+color index $a$:
+\begin{equation}
+  \texttt{t1\_s1 = einsum("abc, wtzyxikad -> wtzyxikbcd")},
+\end{equation}
+producing an intermediate of shape $[\texttt{wtzyx},i,k,b,c,d]$.  The indices
+$(b,c)$ remain free for later epsilon contraction; $(d)$ is the color\_src index
+that will contract with $\eps_{def}$.
+
+\medskip\noindent
+\textbf{Step 2 (t1\_s2):} Contract $(\Cmat\Gint)_{ij}$ with the second propagator
+on spin index $j$:
+\begin{equation}
+  \texttt{t1\_s2 = einsum("ij, wtzyxjlbe -> wtzyxilbe")},
+\end{equation}
+producing $[\texttt{wtzyx},i,l,b,e]$.  Spin index $j$ is summed; $i$ will later
+be contracted with t1\_s1.
+
+\medskip\noindent
+\textbf{Step 3 (term1\_sink):} Combine the two partial sink blocks by contracting
+spin index $i$ and color index $b$:
+\begin{equation}
+  \texttt{term1\_sink = einsum("wtzyxikbcd, wtzyxilbe -> wtzyxklcde")},
+\end{equation}
+producing $[\texttt{wtzyx},k,l,c,d,e]$.  This object encodes the partially
+assembled sink-side baryon contraction.
+
+\medskip\noindent
+\textbf{Step 4 (term1\_p3):} Contract the sink gamma matrix with the third
+propagator on spin indices $(m,n)$:
+\begin{equation}
+  \texttt{term1\_p3 = einsum("gmn, wtzyxmncf -> gwtzyxcf")},
+\end{equation}
+producing $[g,\texttt{wtzyx},c,f]$.  This step also introduces the gamma index
+$g$ for scanning all 16 sink bilinears.
+
+\medskip\noindent
+\textbf{Step 5 (t1\_f1):} Contract $\eps_{def}$ with term1\_sink on color indices
+$(d,e)$:
+\begin{equation}
+  \texttt{t1\_f1 = einsum("def, wtzyxklcde -> wtzyxklcf")},
+\end{equation}
+producing $[\texttt{wtzyx},k,l,c,f]$.
+
+\medskip\noindent
+\textbf{Step 6 (t1\_f2):} Contract $(\Cmat\Gint)_{kl}$ to close the spin structure
+of the diquark:
+\begin{equation}
+  \texttt{t1\_f2 = einsum("kl, wtzyxklcf -> wtzyxcf")},
+\end{equation}
+producing $[\texttt{wtzyx},c,f]$.
+
+\medskip\noindent
+\textbf{Step 7 (t1\_f3):} Contract with the P3 block on the remaining color
+indices $(c,f)$:
+\begin{equation}
+  \texttt{t1\_f3 = einsum("wtzyxcf, gwtzyxcf -> gwtzyx")},
+\end{equation}
+producing $[g,\texttt{wtzyx}]$.
+
+\medskip\noindent
+\textbf{Step 8 (term1):} Contract with the momentum phases to project to definite
+spatial momentum and sum over space:
+\begin{equation}
+  \texttt{term1 = einsum("pwtzyx, gwtzyx -> gpt")},
+\end{equation}
+producing the final shape $[g,p,t]$.
+
+\subsection{Term 2: Step-by-Step Decomposition}
+
+The full Term~2 contraction before optimization is
+\begin{equation}
+  \texttt{einsum("abc, def, ij, kl, gmn, p..., ...ikad, ...jnbe, ...mlcf -> gpt")}.
+\end{equation}
+Note the index differences from Term~1:
+\begin{itemize}
+  \item Prop 2 has indices $(\dots,j,n,b,e)$ instead of $(\dots,j,l,b,e)$;
+  \item Prop 3 has indices $(\dots,m,l,c,f)$ instead of $(\dots,m,n,c,f)$.
+\end{itemize}
+
+The eight optimized steps for Term~2 are:
+
+\medskip\noindent
+\textbf{Step 1 (t2\_s1):} Same as t1\_s1 (eps on first propagator):
+\begin{equation}
+  \texttt{t2\_s1 = einsum("abc, wtzyxikad -> wtzyxikbcd")}.
+\end{equation}
+
+\medskip\noindent
+\textbf{Step 2 (t2\_s2):} Contract $(\Cmat\Gint)_{ij}$ with the second propagator
+on spin index $j$ (note: $n$ remains free instead of $l$):
+\begin{equation}
+  \texttt{t2\_s2 = einsum("ij, wtzyxjnbe -> wtzyxinbe")},
+\end{equation}
+producing $[\texttt{wtzyx},i,n,b,e]$.
+
+\medskip\noindent
+\textbf{Step 3 (term2\_sink):} Combine on indices $(i,b)$, keeping $k,n$ free:
+\begin{equation}
+  \texttt{term2\_sink = einsum("wtzyxikbcd, wtzyxinbe -> wtzyxkncde")},
+\end{equation}
+producing $[\texttt{wtzyx},k,n,c,d,e]$.
+
+\medskip\noindent
+\textbf{Step 4 (term2\_p3):} Contract sink gamma with third propagator (note:
+$n,l$ both free):
+\begin{equation}
+  \texttt{term2\_p3 = einsum("gmn, wtzyxmlcf -> gwtzyxnlcf")},
+\end{equation}
+producing $[g,\texttt{wtzyx},n,l,c,f]$.
+
+\medskip\noindent
+\textbf{Step 5 (t2\_f1):} Contract $\eps_{def}$ with term2\_sink:
+\begin{equation}
+  \texttt{t2\_f1 = einsum("def, wtzyxkncde -> wtzyxkncf")},
+\end{equation}
+producing $[\texttt{wtzyx},k,n,c,f]$.
+
+\medskip\noindent
+\textbf{Step 6 (t2\_f2):} Contract t2\_f1 with term2\_p3 on indices $(n,c,f)$:
+\begin{equation}
+  \texttt{t2\_f2 = einsum("wtzyxkncf, gwtzyxnlcf -> gwtzyxkl")},
+\end{equation}
+producing $[g,\texttt{wtzyx},k,l]$.
+
+\medskip\noindent
+\textbf{Step 7 (t2\_f3):} Contract $(\Cmat\Gint)_{kl}$:
+\begin{equation}
+  \texttt{t2\_f3 = einsum("kl, gwtzyxkl -> gwtzyx")},
+\end{equation}
+producing $[g,\texttt{wtzyx}]$.
+
+\medskip\noindent
+\textbf{Step 8 (term2):} Momentum projection:
+\begin{equation}
+  \texttt{term2 = einsum("pwtzyx, gwtzyx -> gpt")}.
+\end{equation}
+
+\subsection{Memory Optimization Rationale}
+
+The key insight of the split contraction is that the full six-propagator tensor
+(three propagators $\times$ two spin indices $\times$ two color indices each) is
+never materialized.  Instead:
+\begin{itemize}
+  \item Steps 1--3 build the sink block using only \emph{two} propagators at a time,
+        with intermediate tensors of size $\mathcal{O}(V \times 4^{3} \times 3^{2})$.
+  \item Step 4 processes the third propagator with the sink gamma independently.
+  \item Steps 5--8 assemble the final result using tensors where most spin indices
+        have already been contracted.
+\end{itemize}
+The largest intermediate tensor is \texttt{term1\_sink} or \texttt{term2\_sink}
+with shape $[\texttt{wtzyx}, 4, 4, 3, 3, 3]$, which is
+$V \times 4^{2} \times 3^{3} = 432\,V$ complex numbers -- manageable for typical
+lattice volumes.
+
+% ===========================================================================
+\part{Proton Sequential Source and Connected Three-Point Function}
+% ===========================================================================
+
+% ---------------------------------------------------------------------------
+\section{Connected Proton Three-Point Function}
+% ---------------------------------------------------------------------------
+
+\subsection{Definition before the Sequential Trick}
+\label{sec:C3_def}
+
+The connected proton three-point function with a local insertion $O_{f}(x)$ on
+flavor $f \in \{U,D\}$ is
+\begin{equation}
+  \boxed{
+  \begin{aligned}
+  C_{3}^{f}(\momtrans,\tau;\,\pfinal,t_{\text{sep}},\PolProj)
+  = \sum_{\mathbf{x},\mathbf{y}}\;
+    &\Phi_{\momtrans}(\xins-\xsrc)\;
+    \Phi_{\pfinal}(\xsink-\xsrc)\;
+    \PolProj_{\alpha\alpha'}\\
+    &\times\big\langle
+        \chi_{\alpha}(\xsink)\;
+        O_{f}(\xins)\;
+        \bar{\chi}_{\alpha'}(\xsrc)
+      \big\rangle_{\text{connected}}.
+  \end{aligned}
+  }
+  \label{eq:C3_def}
+\end{equation}
+Here:
+\begin{itemize}
+  \item $\xsrc = (\mathbf{x}_{0},t_{0})$ is the source position;
+  \item $\xins = (\mathbf{x},\tau)$ is the EMT insertion point;
+  \item $\xsink = (\mathbf{y},\,t_{0}+t_{\text{sep}})$ is the fixed proton sink;
+  \item $\momtrans = \pfinal - \pini$ is the momentum transfer;
+  \item $\pfinal$ is the final-state proton momentum (set by \texttt{pf});
+  \item $t_{\text{sep}}$ is the source-sink separation;
+  \item $\PolProj$ is one of the five combined spin-parity projectors from
+        Section~\ref{sec:spinproj}.
+\end{itemize}
+The subscript ``connected'' means that all three valence quark lines connect the
+source, insertion, and sink -- no disconnected (sea-quark-loop) diagrams are
+included at this stage.
+
+\subsection{Sequential-Source Strategy}
+
+The double sum over sink position $\mathbf{y}$ and insertion position $\mathbf{x}$
+cannot be evaluated by direct lattice summation for each operator insertion, since
+it would require a new inversion for every $(t_{\text{sep}}, \mathbf{x})$.
+Instead, the fixed-sink sequential-source method is employed:
+
+\begin{enumerate}
+  \item Build the forward (source-to-sink) propagator $\fwprop(\xsink,\xsrc)$
+        and apply sink smearing.
+  \item Contract the sink-side baryon (diquark + spectator) to produce a
+        \emph{sequential source} $\seqsrc(x;\,\pfinal,t_{\text{sep}},\PolProj)$.
+  \item Invert the Dirac operator on the sequential source:
+        $D\,\seqprop = \seqsrc$.
+  \item The sequential propagator $\seqprop$ carries the full sink-side
+        information.  The three-point function is then obtained by a single
+        contraction of $\seqprop$ with the forward propagator and the operator
+        insertion at each $x$.
+\end{enumerate}
+
+This reduces the computational cost from $\mathcal{O}(N_{t_{\text{sep}}} \times V)$
+inversions to $\mathcal{O}(N_{t_{\text{sep}}} \times N_{\text{flavor}} \times
+N_{\text{pol}})$ inversions, where $N_{\text{pol}}$ is the number of polarization
+states.
+
+% ---------------------------------------------------------------------------
+\section{Proton Fixed-Sink Sequential Source}
+% ---------------------------------------------------------------------------
+
+The sequential source is built by \texttt{create\_bw\_seq\_pyquda}, which
+delegates the flavor-specific diquark contraction to either
+\texttt{up\_quark\_insertion\_pyquda} (flavor $U$, insertion on an up quark) or
+\texttt{down\_quark\_insertion\_pyquda} (flavor $D$, insertion on the down quark).
+
+\subsection{Flavor 1: Up-Quark Insertion}
+
+When the operator insertion is on an up-quark line, the proton contains two
+identical up quarks, which leads to four distinct contraction terms after
+antisymmetrization.  We define the following intermediate objects built from
+the forward propagator $\fwprop$ (using isospin symmetry, $\fwprop_{u}=\fwprop_{d}=\fwprop$):
+
+\begin{align}
+  [\Gamma^{T}\!\fwprop\,\Gamma]^{ij}_{ab}
+    &\equiv (\Gint^{T})_{ik}\;\fwprop^{kl}_{ab}\;(\Gint)_{lj},
+    \label{eq:GtDG} \\
+  [\PolProj\,\fwprop]^{ij}_{ab}
+    &\equiv \PolProj_{ik}\;\fwprop^{kj}_{ab},
+    \label{eq:PDu} \\
+  [\fwprop\,\PolProj]^{ij}_{ab}
+    &\equiv \fwprop^{ik}_{ab}\;\PolProj_{kj},
+    \label{eq:DuP} \\
+  [\Tr_{\text{spin}}(\fwprop\,\PolProj)]_{ab}
+    &\equiv \fwprop^{kj}_{ab}\;\PolProj_{jk}.
+    \label{eq:TrDuP}
+\end{align}
+Equation~\eqref{eq:GtDG} is the down-quark propagator dressed with the
+interpolating gamma on both sides -- this is the standard structure appearing
+in the diquark.  Equations~\eqref{eq:PDu} and~\eqref{eq:DuP} are the up-quark
+propagator multiplied by the spin projector from the left or right.
+Equation~\eqref{eq:TrDuP} is the spin-space trace of $\fwprop\PolProj$, leaving
+only color indices.
+
+\medskip\noindent
+With these definitions, the \textbf{four terms} of the up-quark sequential source
+are:
+
+\medskip\noindent
+\textbf{Term R1:} Both up quarks participate in the diquark; the spin projector
+is applied to the output:
+\begin{equation}
+  \boxed{
+  R_{1}^{ij;\,cf} = \PolProj^{ij}\;
+  \eps_{abc}\,\eps_{def}\;
+  \Big[(\Gamma^{T}\fwprop\Gamma)^{mn}_{be}\;
+        \fwprop^{mn}_{ad}\Big],
+  }
+  \label{eq:R1}
+\end{equation}
+where the spin indices $m,n$ are summed (the term $[\Gamma^{T}\fwprop\Gamma \cdot
+\fwprop]$ is a Lorentz scalar in spin space).  The result carries two free spin
+indices $(i,j)$ from the projector and two free color indices $(c,f)$ from the
+epsilon tensors.
+
+\medskip\noindent
+\textbf{Term R2:} The spin trace of $\fwprop\PolProj$ is used, and the diquark
+$\Gamma^{T}\fwprop\Gamma$ provides the spin structure:
+\begin{equation}
+  \boxed{
+  R_{2}^{ij;\,cf} =
+  \eps_{abc}\,\eps_{def}\;
+  [\Tr_{\text{spin}}(\fwprop\,\PolProj)]_{ad}\;
+  [\Gamma^{T}\fwprop\Gamma]^{ji}_{be},
+  }
+  \label{eq:R2}
+\end{equation}
+where the spin indices $(j,i)$ of $\Gamma^{T}\fwprop\Gamma$ become the output
+spin indices $(i,j)$.
+
+\medskip\noindent
+\textbf{Term R3:} Spin contraction between $[\PolProj\,\fwprop]$ and
+$[\Gamma^{T}\fwprop\Gamma]$:
+\begin{equation}
+  \boxed{
+  R_{3}^{ij;\,cf} =
+  \eps_{abc}\,\eps_{def}\;
+  [\PolProj\,\fwprop]^{ik}_{ad}\;
+  [\Gamma^{T}\fwprop\Gamma]^{jk}_{be},
+  }
+  \label{eq:R3}
+\end{equation}
+where the repeated spin index $k$ is summed.
+
+\medskip\noindent
+\textbf{Term R4:} Spin contraction between $[\Gamma^{T}\fwprop\Gamma]$ and
+$[\fwprop\,\PolProj]$:
+\begin{equation}
+  \boxed{
+  R_{4}^{ij;\,cf} =
+  \eps_{abc}\,\eps_{def}\;
+  [\Gamma^{T}\fwprop\Gamma]^{ki}_{ad}\;
+  [\fwprop\,\PolProj]^{kj}_{be},
+  }
+  \label{eq:R4}
+\end{equation}
+where again the spin index $k$ is summed.
+
+\medskip\noindent
+The total up-quark sequential source is
+\begin{equation}
+  \boxed{
+  D_{\text{total}}^{ij;\,cf} = -\big(R_{1} + R_{2} + R_{3} + R_{4}\big).
+  }
+  \label{eq:Dtotal}
+\end{equation}
+The overall minus sign is consistent with the minus sign in the two-point
+function~\eqref{eq:C2_sign}, as verified by the fact that the sequential
+propagator contracted with the forward propagator reproduces the two-point
+function when the insertion is the identity operator.
+
+\subsection{Flavor 2: Down-Quark Insertion}
+
+For the down-quark insertion there is only one down quark in the proton, so the
+antisymmetrization produces only two terms.  The intermediate objects are
+\begin{align}
+  [\PolProj\,\fwprop]^{fc} &\equiv \PolProj_{fk}\,\fwprop^{k}_{c}
+    \quad\text{(spin\_sink $f$, spin\_src $c$)}, \label{eq:PDu_down} \\
+  [\Gamma^{T}\fwprop\Gamma]^{uv}_{eb}
+    &\equiv (\Gint^{T})_{uk}\,\fwprop^{kl}_{eb}\,{\Gint}_{lv},
+    \label{eq:GtDG_down} \\
+  [\Gamma^{T}\fwprop]^{uj}_{ec}
+    &\equiv (\Gint^{T})_{uk}\,\fwprop^{kj}_{ec},
+    \label{eq:GtD_down} \\
+  [\PolProj\,\fwprop\,\Gamma]^{jk}_{fb}
+    &\equiv \PolProj_{jl}\,\fwprop^{lm}_{fb}\,{\Gint}_{mk}.
+    \label{eq:PDG_down}
+\end{align}
+(For compactness we suppress the common spacetime and color indices in the
+notation above; the full forms are given in the einsum expressions below.)
+
+\medskip\noindent
+The two terms are:
+
+\medskip\noindent
+\textbf{Term 1 (down insertion):}
+\begin{equation}
+  \boxed{
+  {D_{1}}^{uv;\,ad}_{\text{(down)}} =
+  \eps_{abc}\,\eps_{def}\;
+  [\PolProj\,\fwprop]^{fc}\;
+  [\Gamma^{T}\fwprop\Gamma]^{uv}_{eb},
+  }
+  \label{eq:Ddown1}
+\end{equation}
+where the spin structure comes entirely from $\Gamma^{T}\fwprop\Gamma$, and
+$[\PolProj\,\fwprop]$ is traced in all internal indices that connect to the
+epsilon contraction (the spin index $c$ and color indices are summed through the
+epsilons).
+
+\medskip\noindent
+\textbf{Term 2 (down insertion):}
+\begin{equation}
+  \boxed{
+  {D_{2}}^{uv;\,ad}_{\text{(down)}} =
+  \eps_{abc}\,\eps_{def}\;
+  [\Gamma^{T}\fwprop]^{uj}_{ec}\;
+  [\PolProj\,\fwprop\,\Gamma]^{jk}_{fb},
+  }
+  \label{eq:Ddown2}
+\end{equation}
+where the spin index $j$ and color index $f$ are summed with the epsilon
+contraction.
+
+\medskip\noindent
+The total down-quark sequential source is
+\begin{equation}
+  \boxed{
+  D_{\text{(down)}}^{uv;\,ad} = D_{2} - D_{1}.
+  }
+  \label{eq:Ddown_total}
+\end{equation}
+
+\subsection{From Diquark Contraction to Sequential Inversion}
+
+After the diquark contraction, the sequential source construction proceeds as
+follows (for each flavor and polarization):
+
+\begin{enumerate}
+  \item \textbf{Time slicing.}  The diquark-contracted object is restricted to
+        the sink time slice $t_{\text{sink}} = (t_{0} + t_{\text{sep}}) \bmod L_{t}$
+        using \texttt{sequential12}, which sets the source to zero at all other
+        time slices.
+
+  \item \textbf{Momentum phase and $\gamma_{5}$ conjugation.}  The sliced source
+        is multiplied by the final-state momentum phase
+        $\Phi_{\pfinal}(\xsink-\xsrc)$ and conjugated with $\gamma_{5}$:
+        \begin{equation}
+          {\seqsrc}^{i,k}_{a,b}(\xsink)
+          = [\gamma_{5}]_{ij}\;
+            \Phi_{\pfinal}(\xsink-\xsrc)\;
+            [D^{\dagger}]^{j,k}_{b,a},
+        \end{equation}
+        where $D$ is the diquark contraction result from~\eqref{eq:Dtotal} or
+        \eqref{eq:Ddown_total}.  This $\gamma_{5}$-hermiticity step is required
+        to convert the source into the correct form for the sequential inversion
+        with the same Dirac operator used for the forward propagator.
+
+  \item \textbf{Boosted smearing.}  The sequential source is smeared using
+        \texttt{boosted\_smearing} with width $w$ and boost vector
+        \texttt{boost\_out}.  This applies the same gauge-covariant Gaussian
+        smearing used at the source and sink of the two-point function.
+
+  \item \textbf{Sequential inversion.}  The smeared source is inverted:
+        \begin{equation}
+          \seqprop = D^{-1}\,{\seqsrc}_{\text{smeared}}.
+        \end{equation}
+
+  \item \textbf{Final $\gamma_{5}$ conjugation.}  The sequential propagator is
+        conjugated once more with $\gamma_{5}$ to obtain the final object:
+        \begin{equation}
+          {\seqprop_{\text{final}}}^{i,j}_{c,f}(x)
+          = [\seqprop^{\dagger}]^{j,i}_{f,c}(x)\;[\gamma_{5}]_{i,j}.
+        \end{equation}
+        In einsum notation:
+        \begin{equation}
+          \texttt{final\_term = einsum("wtzyxijfc, ik -> wtzyxjkcf",}
+          \;\texttt{seq\_prop.conj(), G5)}.
+        \end{equation}
+\end{enumerate}
+
+\subsection{Sequential Object Shape}
+
+The final sequential object (one per polarization) has the shape
+\begin{equation}
+  \boxed{
+  \seqprop[\PolProj]\; \longleftrightarrow\;
+  \texttt{[w,\, t,\, z,\, y,\, x\_cb,\, spin\_a,\, spin\_b,\, color\_a,\, color\_b]},
+  }
+\end{equation}
+where:
+\begin{itemize}
+  \item \texttt{spin\_a}, \texttt{spin\_b} are the Dirac indices at the two ends
+        of the sequential propagator (corresponding to the insertion and sink ends);
+  \item \texttt{color\_a}, \texttt{color\_b} are the corresponding color indices.
+\end{itemize}
+In einsum notation we label these as indices $(j,i,c,f)$ for
+(\texttt{spin\_a}, \texttt{spin\_b}, \texttt{color\_a}, \texttt{color\_b}).
+Note the index ordering: the sequential propagator's ``source'' (insertion-side)
+indices are $(i,f)$ and its ``sink''-side indices are $(j,c)$.
+
+The full list of sequential objects is gathered into an array
+\begin{equation}
+  \texttt{seq\_bw}\;\longleftrightarrow\;
+  \texttt{[polarization,\, w,\, t,\, z,\, y,\, x\_cb,\, spin\_a,\, spin\_b,\, color\_a,\, color\_b]}.
+\end{equation}
+
+% ===========================================================================
+\part{Proton EMT Contractions}
+% ===========================================================================
+
+% ---------------------------------------------------------------------------
+\section{Scalar Diagnostic: $C_{3}^{\chi}$}
+% ---------------------------------------------------------------------------
+
+The scalar diagnostic three-point function tests the sequential-source machinery
+by contracting the sequential propagator with the forward propagator without any
+derivative insertion.  For flavor $f$,
+\begin{equation}
+  \boxed{
+  C_{3}^{\chi,\,f}(\momtrans,\tau)
+  = \sum_{\mathbf{x}}
+    \Phi_{\momtrans}(\xins-\xsrc)\;
+    \big[\seqprop^{f}(x)\big]^{j,i}_{c,f}\;
+    \big[\fwprop(x,\xsrc)\big]^{i,j}_{f,c},
+  }
+  \label{eq:C3_chi}
+\end{equation}
+where the spin indices $(j,i)$ of the sequential propagator are contracted with
+$(i,j)$ of the forward propagator, and color indices $(c,f)$ with $(f,c)$.  This
+is the full spin-color trace that, for $\momtrans=0$, reproduces the zero-momentum
+two-point function $C_{2}(t_{\text{sep}})$ up to a normalization factor.
+
+In einsum notation:
+\begin{equation}
+  \texttt{C3\_chi = contract("wtzyxjicf, wtzyxijfc -> wtzyx", seq\_data, prop\_fw.data)}.
+\end{equation}
+The resulting scalar field is then projected to spatial momentum and the time
+dependence is extracted.
+
+% ---------------------------------------------------------------------------
+\section{Connected Quark EMT Insertion}
+% ---------------------------------------------------------------------------
+
+\subsection{The Quark EMT Operator}
+
+In Euclidean continuum QCD, the symmetric traceless quark energy-momentum tensor is
+\begin{equation}
+  \TmunuQ(x) = \frac{1}{4}\,
+    \bar{\psi}(x)\Big(
+      \gamma_{\mu}\overleftrightarrow{D}_{\nu}
+      + \gamma_{\nu}\overleftrightarrow{D}_{\mu}
+    \Big)\psi(x),
+\end{equation}
+where $\overleftrightarrow{D}_{\mu} = \overrightarrow{D}_{\mu} -
+\overleftarrow{D}_{\mu}$ is the symmetric covariant derivative.  On the lattice, we
+implement this as a sum of two terms: the derivative acting on the forward quark
+line and the derivative acting on the sequential (backward) quark line.
+
+\subsection{First Term: Derivative on the Forward Line}
+
+The forward quark line runs from the source to the insertion point.  Applying the
+covariant derivative to it gives
+\begin{equation}
+  \boxed{
+  C_{3,\,f,\,\mu\nu}^{\text{first}}(\momtrans,\tau)
+  = +\frac{1}{2}\sum_{\mathbf{x}}
+    \Phi_{\momtrans}(\xins-\xsrc)\;
+    \big[\seqprop^{f}(x)\big]^{j,i}_{c,f}\;
+    \big[\gamma_{\nu}\,\Dmu\,\fwprop(x,\xsrc)\big]^{i,j}_{f,c},
+  }
+  \label{eq:C3_first}
+\end{equation}
+where the positive sign and the factor $1/2$ come from the decomposition of the
+symmetrized EMT into forward and backward derivatives.
+
+The implementation first applies the symmetric covariant derivative to the forward
+propagator:
+\begin{equation}
+  \Dmu\fwprop = \frac{1}{2}\big(D_{+\mu} - D_{-\mu}\big)\,\fwprop,
+\end{equation}
+where $D_{\pm\mu}$ are the gauge-covariant forward/backward finite differences
+with the appropriate gauge link parallel transport.  Then $\gamma_{\nu}$ is
+contracted on the spin\_sink index:
+\begin{equation}
+  \texttt{gamma\_D\_fw = contract("ab, wtzyxbdij -> wtzyxadij", gamma\_nu, D\_fw.data)}.
+\end{equation}
+Finally, the spin-color trace with the sequential propagator is formed:
+\begin{equation}
+  \texttt{scalar\_field = 0.5 * contract("wtzyxjicf, wtzyxijfc -> wtzyx",
+    seq\_data, gamma\_D\_fw)}.
+\end{equation}
+
+\subsection{Second Term: Derivative on the Sequential Line}
+
+The sequential propagator runs from the sink to the insertion point (backward in
+time).  The left-acting derivative is applied to it:
+\begin{equation}
+  \boxed{
+  C_{3,\,f,\,\mu\nu}^{\text{second}}(\momtrans,\tau)
+  = -\frac{1}{2}\sum_{\mathbf{x}}
+    \Phi_{\momtrans}(\xins-\xsrc)\;
+    \big[\overleftarrow{\Dmu}\,\seqprop^{f}(x)\big]^{j,i}_{c,f}\;
+    \big[\gamma_{\nu}\,\fwprop(x,\xsrc)\big]^{i,j}_{f,c},
+  }
+  \label{eq:C3_second}
+\end{equation}
+where $\overleftarrow{\Dmu}$ denotes the covariant derivative acting to the left
+(on the sequential propagator's source index).  The negative sign arises because
+$\overleftarrow{D}_{\mu} = -\overrightarrow{D}_{\mu}^{\dagger}$ in the bilinear
+form.
+
+In the implementation, the left derivative is applied by:
+\begin{enumerate}
+  \item Wrapping \texttt{seq\_data} as a \texttt{LatticePropagator};
+  \item Applying the symmetric covariant derivative $\frac{1}{2}(D_{+\mu}-D_{-\mu})$
+        to this propagator (the derivative naturally acts on the ``source'' index,
+        which is the insertion-side index of the sequential propagator);
+  \item Extracting the data from the result.
+\end{enumerate}
+
+\subsection{Full Connected Quark EMT}
+\label{sec:C3_total}
+
+The total connected quark EMT three-point function is the sum of the two terms:
+\begin{equation}
+  \boxed{
+  C_{3,\,f,\,\mu\nu}^{q}(\momtrans,\tau)
+  = C_{3,\,f,\,\mu\nu}^{\text{first}}(\momtrans,\tau)
+  + C_{3,\,f,\,\mu\nu}^{\text{second}}(\momtrans,\tau).
+  }
+  \label{eq:C3_total}
+\end{equation}
+After computing the full tensor, explicit symmetrization is enforced:
+\begin{equation}
+  C_{3,\,f,\,\mu\nu}^{q} \to \frac{1}{2}\big(C_{3,\,f,\,\mu\nu}^{q} + C_{3,\,f,\,\nu\mu}^{q}\big),
+  \qquad
+  C_{3,\,f,\,\nu\mu}^{q} = C_{3,\,f,\,\mu\nu}^{q}.
+\end{equation}
+This guarantees $T_{\mu\nu} = T_{\nu\mu}$ at the level of the measured data.
+
+% ---------------------------------------------------------------------------
+\section{Key Differences from the Meson EMT}
+% ---------------------------------------------------------------------------
+
+The proton EMT contraction differs from the meson (pion) case in several important
+ways:
+
+\begin{enumerate}
+  \item \textbf{No \texttt{\_make\_dst2} required.}
+        In the meson code, the backward sequential line is formed by
+        $\gamma_{5}\,\seqprop^{\dagger}\,\gamma_{5}$ (the \texttt{dst2} object)
+        before each contraction.  In the proton code, the sequential object
+        \emph{already} has the correct spin structure built in during the diquark
+        contraction and the final $\gamma_{5}$ conjugation step.  Therefore
+        $\seqprop$ can be used directly without the \texttt{dst2} transformation.
+
+  \item \textbf{Direct einsum contraction.}
+        The meson contraction is a three-way trace:
+        \begin{equation}
+          \texttt{contract("wtzyxabij, wtzyxbcji, ca -> wtzyx", dst2, gamma\_D\_fw, src\_gamma)}.
+        \end{equation}
+        The proton contraction is simpler:
+        \begin{equation}
+          \texttt{contract("wtzyxjicf, wtzyxijfc -> wtzyx", seq\_data, prop\_fw\_data)},
+        \end{equation}
+        summing over spin indices $(j,i)$ and color indices $(c,f)$.  There is no
+        source gamma matrix in the proton contraction because the spin projection
+        is already absorbed into the sequential source.
+
+  \item \textbf{Covariant derivative on sequential data.}
+        In the meson case, the left derivative is applied to \texttt{dst2} through
+        \texttt{\_left\_covdev\_dst2\_from\_prop}.  In the proton case, the
+        covariant derivative is applied directly to \texttt{seq\_data} through
+        \texttt{\_covdev\_sym\_seq}, which wraps the data as a
+        \texttt{LatticePropagator} and applies the symmetric derivative.
+
+  \item \textbf{Flavor dimension.}  The proton result carries a flavor index
+        $[U, D]$ since the insertion can be on either quark line.  The meson
+        result has no flavor index (only one valence flavor).
+
+  \item \textbf{Polarization dimension.}  The proton result has a polarization
+        index from \texttt{pol\_list} (five entries).  The pion has no spin
+        degree of freedom.
+
+  \item \textbf{Time separation loop.}  The proton code loops over
+        \texttt{t\_separations}, building new sequential sources for each
+        $t_{\text{sep}}$.  The meson code has the same structure, but the proton
+        sequential source construction involves the epsilon-tensor diquark
+        contraction instead of a simple meson two-point contraction.
+\end{enumerate}
+
+% ---------------------------------------------------------------------------
+\section{Gradient Flow}
+% ---------------------------------------------------------------------------
+
+\subsection{Flow Schedule}
+
+The gradient flow is applied identically to the meson and proton codes.  The flow
+schedule is:
+
+\begin{center}
+\begin{tabular}{ccl}
+\toprule
+Step index & Flow action & Description \\
+\midrule
+$s = 0$ & None (measure unflowed) & Unflowed (bare) operators \\
+$s = 0 \to 1$ & 10 sub-steps of $\varepsilon/10$ each & First flow interval subdivided \\
+$s = 1 \to 2$ & 1 step of $\varepsilon$ & Regular flow step \\
+$\cdots$ & $\cdots$ & $\cdots$ \\
+$s = N-1 \to N$ & 1 step of $\varepsilon$ & Final flow step \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Thus output index \texttt{step} corresponds to flow time $t_{\text{flow}} =
+\texttt{step} \times \varepsilon$, with $t_{\text{flow}} = 0$ at
+\texttt{step = 0}.  The subdivision of the first interval ensures that the initial
+condition of the flow equation is well resolved numerically.
+
+\subsection{Flowing Fermion and Gauge Fields Together}
+
+At each flow step, both the forward propagator and the sequential propagator are
+flowed simultaneously on the same flowed gauge background.  This is accomplished
+by packing both propagators into a single \texttt{MultiLatticeFermion} and calling
+\texttt{gradientFlow} once:
+\begin{equation}
+  (\fwprop_{\text{flowed}},\;\seqprop_{\text{flowed}})
+  = \texttt{gradientFlow}\big([\fwprop,\seqprop],\;
+    \texttt{flow\_type},\;N_{\text{steps}},\;\Delta t\big).
+\end{equation}
+The gauge field used for the fermion flow is set to anti-periodic temporal boundary
+conditions via \texttt{U\_f.setAntiPeriodicT()}.  A copy of the unflowed gauge
+field is used (\texttt{U\_f = U.copy()}) so that the original gauge field is
+preserved for subsequent measurements.
+
+\subsection{Physical Significance}
+
+Gradient flow smooths ultraviolet fluctuations at a physical radius approximately
+$\sqrt{8t_{\text{flow}}}$.  The EMT observables measured at finite flow time are
+flowed composite operators.  Their flow-time dependence is analyzed using the
+small-flow-time expansion to extract renormalized matrix elements.  This analysis
+is performed \emph{outside} the contraction kernel; the kernel only produces the
+flowed data at each \texttt{step}.
+
+% ---------------------------------------------------------------------------
+\section{Code Structure Overview}
+% ---------------------------------------------------------------------------
+
+The proton EMT measurement code is organized in the class
+\texttt{ProtonQuarkEMT}, which inherits from
+\texttt{EMTDisconnectedQuark1pt}.  The inheritance provides:
+\begin{itemize}
+  \item The stochastic quark one-point loop measurement
+        (\texttt{flowed\_fermionic\_1pt});
+  \item The covariant derivative utilities
+        (\texttt{\_covdev\_sym\_prop}, \texttt{\_make\_dst2}, etc.);
+  \item The propagator flow utilities (\texttt{\_advance\_flowed\_props});
+  \item Gamma matrix helpers (\texttt{\_dirac\_gammas\_for},
+        \texttt{\_gamma5\_for}, \texttt{\_get\_interpolator\_gamma\_for}).
+\end{itemize}
+
+The key methods of \texttt{ProtonQuarkEMT} are:
+
+\medskip\noindent
+\texttt{connected\_3pt(gauge, invPara, src\_pos, t\_separations, spin, tag, ...)}:
+\begin{itemize}
+  \item Builds the Dirac solver and the forward point-source propagator
+        (via \texttt{\_make\_source\_prop}).
+  \item Contracts the proton two-point function for normalization
+        (via \texttt{contract\_proton\_2pt}, which reuses
+        \texttt{proton\_TMD.contract\_2pt\_TMD}).
+  \item Loops over $t_{\text{sep}}$ and flavor, building sequential sources
+        via \texttt{create\_bw\_seq\_pyquda}.
+  \item Loops over polarization and flow steps, calling
+        \texttt{get\_C3\_chi\_proton} and
+        \texttt{get\_C3\_Tmunu\_symmetrized\_proton} at each step.
+  \item Advances the flow between steps.
+  \item Saves results to HDF5.
+\end{itemize}
+
+\medskip\noindent
+\texttt{get\_C3\_chi\_proton(latt\_info, prop\_fw, seq\_data, phases\_3pt, t0)}:
+\begin{itemize}
+  \item Computes the scalar diagnostic $C_{3}^{\chi}$ by direct einsum contraction.
+\end{itemize}
+
+\medskip\noindent
+\texttt{get\_C3\_Tmunu\_symmetrized\_proton(U\_f, prop\_fw, seq\_data, phases\_3pt, t0)}:
+\begin{itemize}
+  \item Computes the full $4\times 4$ quark EMT three-point function.
+  \item Loops over $\mu,\nu$ to evaluate the first-term (derivative on forward line)
+        and second-term (derivative on sequential line) contributions.
+  \item Symmetrizes the result.
+\end{itemize}
+
+\medskip\noindent
+\texttt{\_covdev\_sym\_seq(U\_f, seq\_data, mu)}:
+\begin{itemize}
+  \item Wraps \texttt{seq\_data} as a \texttt{LatticePropagator}.
+  \item Applies the symmetric covariant derivative using
+        \texttt{\_covdev\_sym\_prop}.
+  \item Returns the derivative data.
+\end{itemize}
+
+\medskip\noindent
+\texttt{\_seq\_to\_prop(latt\_info, seq\_data)}:
+\begin{itemize}
+  \item Creates a \texttt{LatticePropagator} from the sequential data array
+        for use with propagator-level methods.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Output Structure}
+% ---------------------------------------------------------------------------
+
+\subsection{HDF5 Output for Connected Proton Three-Point}
+
+The \texttt{save\_emt\_quark\_3pt\_hdf5} function saves the following datasets:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Dataset & Shape & Description \\
+\midrule
+\texttt{C2} & \texttt{[Nt]} & Zero-momentum, selected-gamma two-point function \\
+\texttt{C3\_chi} & \texttt{[Nflavor, Npol, Nts, Nsteps+1, Nq, Nt]}
+                  & Scalar diagnostic three-point function \\
+\texttt{C3\_Tmunu} & \texttt{[Nflavor, Npol, Nts, Nsteps+1, Nq, 4, 4, Nt]}
+                    & Quark EMT three-point function \\
+\texttt{momentum\_transfer\_list} & \texttt{[Nq, 4]}
+                                   & List of momentum transfer vectors \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The dimensions are:
+\begin{itemize}
+  \item $N_{\text{flavor}} = 2$: index 0 = up-quark insertion, index 1 = down-quark insertion;
+  \item $N_{\text{pol}}$ = number of polarization states from \texttt{pol\_list} (typically 5);
+  \item $N_{\text{ts}}$ = number of source-sink separations;
+  \item $N_{\text{steps}}+1$ = number of flow times (including unflowed);
+  \item $N_{q}$ = number of momentum transfers;
+  \item $N_{t}$ = temporal lattice extent.
+\end{itemize}
+
+The attributes stored in the HDF5 file include the measurement type, spin,
+flow parameters, source time, interpolator, flavor/polarization axis labels,
+and the selected two-point momentum used for normalization.
+
+\subsection{HDF5 Output for Disconnected Pieces}
+
+The disconnected (quark loop and gluon) one-point functions are stored separately
+by the inherited methods:
+
+\begin{itemize}
+  \item Quark 1pt: \texttt{save\_emt\_quark\_1pt\_hdf5} --
+        saves per-noise-vector data (\texttt{raw/Tmunu\_pervec}, \texttt{raw/CHI\_pervec})
+        and noise-averaged data (\texttt{avg/Tmunu/T11}--\texttt{T44}, \texttt{avg/CHI}).
+
+  \item Gluon 1pt: \texttt{save\_emt\_gluon\_1pt\_hdf5} --
+        saves momentum-projected gluonic EMT building blocks
+        (\texttt{Tmunu/T11}--\texttt{T44}).
+\end{itemize}
+
+\subsection{File Organization}
+
+The EMT output files are organized in subdirectories:
+\begin{itemize}
+  \item \texttt{EMTproton2pt/} -- proton two-point functions;
+  \item \texttt{EMTproton3pt/} -- proton connected three-point functions;
+  \item \texttt{EMTc/} -- stochastic quark one-point loops (shared with meson);
+  \item \texttt{EMTg/} -- flowed gluon one-point functions (shared with meson).
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Disconnected Analysis}
+% ---------------------------------------------------------------------------
+
+\subsection{Combined Proton EMT}
+
+The full proton matrix element of the EMT receives contributions from both
+connected and disconnected diagrams:
+\begin{equation}
+  \langle p'|\Tmunu|p\rangle
+  = \langle p'|\Tmunu|p\rangle_{\text{conn}}
+  + \langle p'|\Tmunu|p\rangle_{\text{disc}}.
+\end{equation}
+The connected contribution is computed by \texttt{ProtonQuarkEMT.connected\_3pt}
+as described in Sections~\ref{sec:C3_def}--\ref{sec:C3_total}.
+
+\subsection{Disconnected Quark Contribution}
+
+The disconnected quark contribution is evaluated using stochastic estimators.
+For each noise vector $\xi^{(r)}$, one solves $D\eta^{(r)} = \xi^{(r)}$ and
+computes the one-point function (spatially Fourier-transformed loop):
+\begin{equation}
+  L_{q,\,\mu\nu}^{(r)}(\momtrans,t)
+  = -\frac{1}{2}\sum_{\mathbf{x}}
+    \Phi_{\momtrans}(\mathbf{x})\;
+    \xi^{(r)\dagger}(x)\,
+    \gamma_{\nu}\big[D_{+\mu}-D_{-\mu}\big]\,
+    \eta^{(r)}(x).
+\end{equation}
+The disconnected three-point function is then obtained from the correlation with
+the proton two-point function:
+\begin{equation}
+  C_{3,\,\mu\nu}^{\text{disc},\,q}(\momtrans,\tau)
+  = \Big\langle C_{2}(t_{\text{sep}})\,
+           \frac{1}{N_{v}}\sum_{r=1}^{N_{v}} L_{q,\,\mu\nu}^{(r)}(\momtrans,\tau)
+    \Big\rangle
+    - \big\langle C_{2}(t_{\text{sep}})\big\rangle\,
+      \Big\langle \frac{1}{N_{v}}\sum_{r=1}^{N_{v}} L_{q,\,\mu\nu}^{(r)}(\momtrans,\tau)
+      \Big\rangle.
+\end{equation}
+The subtraction of the product of averages removes the vacuum expectation value
+of the loop.
+
+\subsection{Disconnected Gluon Contribution}
+
+The flowed gluonic EMT building block is built from the clover field strength:
+\begin{equation}
+  F_{\mu\nu}(x) = -\frac{i}{8}\Big(
+    Q_{\mu\nu}(x) - Q_{\mu\nu}^{\dagger}(x)
+    - \frac{1}{N_{c}}\Tr\big[Q_{\mu\nu}(x) - Q_{\mu\nu}^{\dagger}(x)\big]
+  \Big),
+\end{equation}
+where $Q_{\mu\nu}$ is the average of the four plaquettes in the $(\mu,\nu)$ plane
+(clover combination).  The gluonic EMT one-point building block is
+\begin{equation}
+  L_{g,\,\mu\nu}(\momtrans,t)
+  = \frac{2}{V_{3}}\sum_{\mathbf{x}}
+    \Phi_{\momtrans}(\mathbf{x})
+    \sum_{\rho\neq\mu,\nu}
+    \Tr_{c}\!\big[F_{\mu\rho}(x)\,F_{\nu\rho}(x)\big].
+\end{equation}
+This quantity is measured on the flowed gauge field at each flow time.  Its
+disconnected contribution to the proton matrix element is
+\begin{equation}
+  C_{3,\,\mu\nu}^{\text{disc},\,g}(\momtrans,\tau)
+  = \Big\langle C_{2}(t_{\text{sep}})\,
+           L_{g,\,\mu\nu}(\momtrans,\tau)
+    \Big\rangle
+    - \big\langle C_{2}(t_{\text{sep}})\big\rangle\,
+      \big\langle L_{g,\,\mu\nu}(\momtrans,\tau)\big\rangle.
+\end{equation}
+
+\subsection{Ringed-Fermion Normalization}
+
+The renormalization of the flowed quark EMT requires the ringed-fermion kinetic
+normalization.  At zero momentum, the diagonal quark EMT trace provides
+\begin{equation}
+  \sum_{\mu} L_{q,\,\mu\mu}(0,t)
+  = -\frac{1}{2}\sum_{\mathbf{x}}
+    \big\langle
+      \bar{\chi}(t,\mathbf{x})\,
+      \overleftrightarrow{\not{D}}\,
+      \chi(t,\mathbf{x})
+    \big\rangle,
+\end{equation}
+up to the lattice derivative convention.  This quantity is accessible from the
+stochastic quark 1pt HDF5 output as the sum of the diagonal components
+\texttt{avg/Tmunu/T11} through \texttt{T44} at the $\momtrans = 0$ momentum index.
+
+% ===========================================================================
+\part{Appendices}
+% ===========================================================================
+
+\appendix
+
+% ---------------------------------------------------------------------------
+\section{Summary of Einsum Index Conventions}
+% ---------------------------------------------------------------------------
+
+For quick reference, the index labels used throughout the code and this note are:
+
+\begin{center}
+\begin{tabular}{cl}
+\toprule
+Index & Meaning \\
+\midrule
+\texttt{w} & Checkerboard/parity index \\
+\texttt{t, z, y, x} & Local spacetime coordinates on the current MPI rank \\
+\texttt{x\_cb} & Checkerboarded spatial coordinate (in even-odd preconditioned data) \\
+$i,j,k,l,m,n$ & Spin indices (range 0--3) \\
+$a,b,c,d,e,f$ & Color indices (range 0--2 for SU(3)) \\
+$g$ & Sink gamma matrix index (range 0--15) \\
+$p$ & Momentum index \\
+$q$ & Momentum transfer index \\
+\texttt{pol} & Polarization index \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Propagator layout: \texttt{[w, t, z, y, x\_cb, spin\_sink, spin\_src, color\_sink, color\_src]}.
+
+\noindent
+Sequential data layout: \texttt{[w, t, z, y, x\_cb, spin\_a, spin\_b, color\_a, color\_b]}.
+
+% ---------------------------------------------------------------------------
+\section{Gamma Matrix Reference}
+% ---------------------------------------------------------------------------
+
+The 16 bilinear operators and their PyQUDA gamma identifiers:
+
+\begin{center}
+\begin{tabular}{clr}
+\toprule
+Name & Description & PyQUDA ID \\
+\midrule
+\texttt{"I"}  & Scalar (identity)      & \texttt{gamma(0)}  \\
+\texttt{"X"}  & $\gamma_{1}$           & \texttt{gamma(1)}  \\
+\texttt{"Y"}  & $\gamma_{2}$           & \texttt{gamma(2)}  \\
+\texttt{"SXY"}& $\sigma_{12}=[\gamma_{1},\gamma_{2}]/2$ & \texttt{gamma(3)} \\
+\texttt{"Z"}  & $\gamma_{3}$           & \texttt{gamma(4)}  \\
+\texttt{"SXZ"}& $\sigma_{13}$          & \texttt{gamma(5)}  \\
+\texttt{"SYZ"}& $\sigma_{23}$          & \texttt{gamma(6)}  \\
+\texttt{"T5"} & $\gamma_{4}\gamma_{5}$ & \texttt{gamma(7)}  \\
+\texttt{"T"}  & $\gamma_{4}$           & \texttt{gamma(8)}  \\
+\texttt{"SXT"}& $\sigma_{14}$          & \texttt{gamma(9)}  \\
+\texttt{"SYT"}& $\sigma_{24}$          & \texttt{gamma(10)} \\
+\texttt{"Z5"} & $\gamma_{3}\gamma_{5}$ & \texttt{gamma(11)} \\
+\texttt{"SZT"}& $\sigma_{34}$          & \texttt{gamma(12)} \\
+\texttt{"Y5"} & $\gamma_{2}\gamma_{5}$ & \texttt{gamma(13)} \\
+\texttt{"X5"} & $\gamma_{1}\gamma_{5}$ & \texttt{gamma(14)} \\
+\texttt{"5"}  & $\gamma_{5}$           & \texttt{gamma(15)} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+The Dirac gamma matrices used for EMT derivative insertions:
+\begin{align}
+  \gamma_{1} &\leftrightarrow \texttt{gamma(1)}  & (D\text{-}\gamma\text{-}ID = 1),\\
+  \gamma_{2} &\leftrightarrow \texttt{gamma(2)}  & (D\text{-}\gamma\text{-}ID = 2),\\
+  \gamma_{3} &\leftrightarrow \texttt{gamma(4)}  & (D\text{-}\gamma\text{-}ID = 4),\\
+  \gamma_{4} &\leftrightarrow \texttt{gamma(8)}  & (D\text{-}\gamma\text{-}ID = 8).
+\end{align}
+
+% ---------------------------------------------------------------------------
+\section{Complete Two-Point Contraction Einsum Map}
+% ---------------------------------------------------------------------------
+
+For readers who want to verify the code against the formulas, here is the
+complete mapping of the two-point function contraction steps.
+
+\medskip\noindent
+\textbf{Term 1:}
+\begin{alignat}{2}
+  &\text{Math:}\quad
+    \eps_{abc}\,\eps_{def}\,
+    (\Cmat\Gint)_{ij}\,(\Cmat\Gint)_{kl}\,
+    [{\Gsink}_{g}]_{mn}\,
+    \fwprop^{ik}_{ad}\,
+    \fwprop^{jl}_{be}\,
+    \fwprop^{mn}_{cf}
+    &&\longrightarrow\; [g,p,t] \\
+  &\text{Code:}\quad
+    \begin{aligned}
+      &\texttt{t1\_s1 = einsum("abc, wtzyxikad -> wtzyxikbcd")} \\
+      &\texttt{t1\_s2 = einsum("ij, wtzyxjlbe -> wtzyxilbe")} \\
+      &\texttt{term1\_sink = einsum("wtzyxikbcd, wtzyxilbe -> wtzyxklcde")} \\
+      &\texttt{term1\_p3 = einsum("gmn, wtzyxmncf -> gwtzyxcf")} \\
+      &\texttt{t1\_f1 = einsum("def, wtzyxklcde -> wtzyxklcf")} \\
+      &\texttt{t1\_f2 = einsum("kl, wtzyxklcf -> wtzyxcf")} \\
+      &\texttt{t1\_f3 = einsum("wtzyxcf, gwtzyxcf -> gwtzyx")} \\
+      &\texttt{term1 = einsum("pwtzyx, gwtzyx -> gpt")}
+    \end{aligned}
+\end{alignat}
+
+\medskip\noindent
+\textbf{Term 2:}
+\begin{alignat}{2}
+  &\text{Math:}\quad
+    \eps_{abc}\,\eps_{def}\,
+    (\Cmat\Gint)_{ij}\,(\Cmat\Gint)_{kl}\,
+    [{\Gsink}_{g}]_{mn}\,
+    \fwprop^{ik}_{ad}\,
+    \fwprop^{jn}_{be}\,
+    \fwprop^{ml}_{cf}
+    &&\longrightarrow\; [g,p,t] \\
+  &\text{Code:}\quad
+    \begin{aligned}
+      &\texttt{t2\_s1 = einsum("abc, wtzyxikad -> wtzyxikbcd")} \\
+      &\texttt{t2\_s2 = einsum("ij, wtzyxjnbe -> wtzyxinbe")} \\
+      &\texttt{term2\_sink = einsum("wtzyxikbcd, wtzyxinbe -> wtzyxkncde")} \\
+      &\texttt{term2\_p3 = einsum("gmn, wtzyxmlcf -> gwtzyxnlcf")} \\
+      &\texttt{t2\_f1 = einsum("def, wtzyxkncde -> wtzyxkncf")} \\
+      &\texttt{t2\_f2 = einsum("wtzyxkncf, gwtzyxnlcf -> gwtzyxkl")} \\
+      &\texttt{t2\_f3 = einsum("kl, gwtzyxkl -> gwtzyx")} \\
+      &\texttt{term2 = einsum("pwtzyx, gwtzyx -> gpt")}
+    \end{aligned}
+\end{alignat}
+
+\medskip\noindent
+\textbf{Final result:}
+\begin{equation}
+  \texttt{corr = - term1 - term2}.
+\end{equation}
+
+% ---------------------------------------------------------------------------
+\section{List of Parameters}
+% ---------------------------------------------------------------------------
+
+The \texttt{parameters} dictionary expected by \texttt{ProtonQuarkEMT} and its
+parent classes:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Key & Description \\
+\midrule
+\texttt{qext} & List of momentum transfer vectors $q = (q_{x},q_{y},q_{z},0)$ \\
+\texttt{pf} & Final-state proton momentum $p_{f}$ \\
+\texttt{p\_2pt} & List of momenta for the two-point function \\
+\texttt{CG\_GaussSmear} & Boolean: enable gauge-covariant Gaussian smearing \\
+\texttt{pos\_boost} & Boost vector for forward source/sink smearing \\
+\texttt{neg\_boost} & Boost vector for backward source/sink smearing \\
+\texttt{boost\_in} & Boost vector for forward propagator (proton source) \\
+\texttt{boost\_out} & Boost vector for sequential propagator (proton sink) \\
+\texttt{width} & Gaussian smearing width \\
+\texttt{pol} & List of polarization labels (e.g., \texttt{["PpUnpol"]}) \\
+\texttt{t\_insert} & Maximum time separation (for TMD compatibility) \\
+\texttt{save\_propagators} & Boolean: save intermediate propagators \\
+\texttt{flow\_type} & Flow action type: \texttt{"wilson"} or \texttt{"symanzik"} \\
+\texttt{flow\_epsilon} & Flow step size $\varepsilon$ \\
+\texttt{flow\_steps} & Number of flow steps $N$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ---------------------------------------------------------------------------
+\section{Sign Convention Summary}
+% ---------------------------------------------------------------------------
+
+For quick reference, here are all the sign conventions used in the proton EMT code:
+
+\begin{enumerate}
+  \item \textbf{Two-point function:}
+        $C_{2} = -(C_{2}^{(1)} + C_{2}^{(2)})$.  The minus sign is required for
+        a positive-definite spectral decomposition of the proton correlator.
+
+  \item \textbf{Sequential source (up insertion):}
+        $D_{\text{total}} = -(R_{1} + R_{2} + R_{3} + R_{4})$.  The minus sign
+        is consistent with the two-point function sign.
+
+  \item \textbf{Sequential source (down insertion):}
+        $D_{\text{(down)}} = D_{2} - D_{1}$.  The relative minus sign between the
+        two terms is the standard antisymmetrization of the single down quark in
+        the baryon.
+
+  \item \textbf{Quark EMT first term:}
+        $+\frac{1}{2}$ from the decomposition $\overleftrightarrow{D} =
+        \overrightarrow{D} - \overleftarrow{D}$.
+
+  \item \textbf{Quark EMT second term:}
+        $-\frac{1}{2}$, because the left derivative contributes with opposite sign
+        in the bilinear form.
+
+  \item \textbf{Disconnected quark loop:}
+        $-\frac{1}{2}$ overall factor, matching the connected convention.
+        The fermion loop has an additional minus sign from the closed fermion loop.
+
+  \item \textbf{Gluon EMT building block:}
+        Factor $+2/V_{3}$ from the original code convention.  The clover field
+        strength includes an extra factor of $-i$ to match the Euclidean convention.
+\end{enumerate}
+
+% ---------------------------------------------------------------------------
+
+\end{document}

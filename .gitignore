@@ -3,3 +3,6 @@ temp/**/*
 __pycache__/
 .cupy-cache/
 .quda-cache/
+
+AGENTS.md
+CLAUDE.md

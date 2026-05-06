@@ -1,0 +1,698 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath,amssymb,physics,braket,hyperref}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{codeblue}{rgb}{0.13,0.29,0.53}
+
+\lstdefinestyle{pythonstyle}{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    commentstyle=\color{codegray},
+    keywordstyle=\color{codeblue},
+    stringstyle=\color{codepurple},
+    numbers=left,
+    numberstyle=\tiny\color{codegray},
+    stepnumber=1,
+    numbersep=5pt,
+    frame=single,
+    breaklines=true,
+    showstringspaces=false,
+    tabsize=4,
+    captionpos=b,
+}
+\lstset{style=pythonstyle}
+
+\hypersetup{hypertexnames=false}
+
+\title{\textbf{Pion qTMDWF Measurement}\\[4pt]
+\large Physics Note -- Mature Reference Implementation}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We describe the pion quasi-transverse-momentum-dependent distribution with Wilson Flow (qTMDWF) measurement implemented in the \texttt{pion\_qTMDWF\_pyquda.py} module of the PyQUDA measurement framework. This is the mature, validated reference implementation that has been used on ALCF Aurora (Intel PVC GPUs, oneAPI/dpnp backend). Active development continues in the parallel module \texttt{pion\_qTMD\_vibe\_develop.py}, which contains additional features (explicit PDF path contracts, source gamma labels, optimized Wilson index reordering, backend-independent gating with \texttt{xp.asnumpy()}). The ``WF'' designation refers to the Wilson Flow used in the gauge-field preparation stage, not in the contraction code itself. The module computes connected pion two-point and three-point qTMD (CG coordinate-gauge) correlation functions with boosted Gaussian smearing.
+\end{abstract}
+
+\tableofcontents
+
+%==========================================================================
+\section{Physics Overview}
+%==========================================================================
+
+The qTMDWF measurement is a variant of the quasi-TMD measurement in which the gauge configurations are prepared with Wilson Flow smearing prior to the propagator computation and contraction. The Wilson Flow is a smoothing operation that evolves the gauge fields under a diffusion-like equation,
+
+\begin{equation}
+    \partial_\tau V_\mu(x, \tau) = -g_0^2 \frac{\delta S_W[V]}{\delta V_\mu(x, \tau)}\, V_\mu(x, \tau),
+    \qquad V_\mu(x, 0) = U_\mu(x),
+\end{equation}
+where $S_W$ is the Wilson gauge action. The flow time $\tau$ is a tunable parameter that controls the smearing radius; larger flow times produce smoother gauge fields, suppressing ultraviolet fluctuations while preserving long-distance physics.
+
+The qTMDWF contraction code itself does \emph{not} implement Wilson Flow -- this is done upstream in the gauge-field preparation pipeline. The notation ``qTMDWF'' in the module and output tags distinguishes measurements computed on flowed configurations from those computed on unflowed (or HYP-smeared) configurations.
+
+The physical observable is the pion matrix element of a nonlocal quark bilinear operator separated by a spatial displacement $b$:
+
+\begin{equation}
+    \mathcal{O}_{\Gamma}(b) = \bar{d}(x + b)\, \Gamma\, \mathcal{W}(x, x+b)\, u(x),
+\end{equation}
+where $\mathcal{W}(x, x+b)$ is the Wilson line connecting $x$ to $x+b$ and $\Gamma$ is a Dirac matrix. In the coordinate-gauge (CG) approximation used in this implementation, the Wilson line is taken as unity (no explicit gauge links are inserted), and the displacement is implemented as a lattice shift of the propagator.
+
+The leading-twist qTMD correlator is extracted from the three-point function
+
+\begin{equation}
+    C_3^{\Gamma}(b, P^z; t_{\text{sep}}, \tau) = \braket{\pi(P^z, t_{\text{sep}}) \, \mathcal{O}_{\Gamma}(b; \tau) \, \pi^\dagger(P^z, 0)},
+\end{equation}
+where $\pi(P^z, t_{\text{sep}})$ creates a pion with momentum $P^z$ at Euclidean time $t_{\text{sep}}$ and the operator is inserted at time $\tau$.
+
+%==========================================================================
+\section{Relationship to \texttt{pion\_TMD}}
+%==========================================================================
+
+The mature \texttt{pion\_qTMDWF\_pyquda.py} and the development \texttt{pion\_qTMD\_vibe\_develop.py} share a common physical and algorithmic foundation. This section details both the commonalities and the divergences.
+
+\subsection{Shared Structure}
+
+Both modules implement the same core physical content:
+\begin{itemize}
+    \item Connected pion two-point and three-point qTMD contractions with a single quark line and a single antiquark line.
+    \item The antiquark propagator is constructed via $\gamma_5$-hermiticity:
+    \begin{equation}
+        S_{\text{anti}}(x, x_0) = \gamma_5 \, S_q(x, x_0)^\dagger \, \gamma_5.
+    \end{equation}
+    \item The three-point function uses the fixed-sink sequential-source method: a sequential propagator is computed from a sink at time $t_{\text{sep}}$ with the desired sink interpolator, and the operator insertion is contracted along the forward quark line.
+    \item The CG qTMD operator displaces the forward propagator in the transverse ($\hat{x}$ or $\hat{y}$) and longitudinal ($\hat{z}$) directions by integer lattice units.
+    \item Boosted Gaussian smearing with momentum injection is applied to both quark and antiquark lines at the sink.
+\end{itemize}
+
+\subsection{Key Simplifications in the Mature Implementation}
+
+The mature \texttt{pion\_qTMDWF\_pyquda.py} is simpler than the development version in several respects:
+\begin{itemize}
+    \item \textbf{No PDF path.} The mature module contains class definitions for \texttt{create\_PDF\_Wilsonline\_index\_list()} and \texttt{create\_fw\_prop\_PDF\_GI()}, but the \texttt{pion\_TMDWF\_measurement} class does \emph{not} expose a dedicated \texttt{contract\_PDF()} method. The PDF contractions in the development version are separate from the qTMD contractions and support both CG (coordinate-gauge) and GI (gauge-invariant) PDF paths.
+    \item \textbf{Momentum scan via range.} Instead of accepting explicit momentum lists (\texttt{qlist}, \texttt{plist}), the mature implementation constructs the momentum list from a contiguous range: \texttt{plist = [[0, 0, pz, 0] for pz in range(pzmin, pzmax)]}. All spatial momenta are in the $z$-direction only.
+    \item \textbf{Same boosted smearing conventions.} Both modules use \texttt{pos\_boost} and \texttt{neg\_boost} to describe the quark and antiquark momentum injections, respectively, and \texttt{width} for the Gaussian kernel width.
+\end{itemize}
+
+%==========================================================================
+\section{Two-Point Function}
+%==========================================================================
+
+\subsection{Continuum Definition}
+
+The connected pion two-point function with source at $x_0 = (0, \mathbf{0})$ and sink at $x = (t, \mathbf{x})$ is
+
+\begin{equation}
+    C_2^{\Gamma}(p, t) = \sum_{\mathbf{x}} e^{-i \mathbf{p} \cdot (\mathbf{x} - \mathbf{x}_0)} \,
+    \Tr_{\text{spin, color}} \left[ S_{\text{anti}}(x, x_0) \, \Gamma_{\text{sink}} \, S_q(x, x_0) \, \Gamma_{\text{src}} \right],
+\end{equation}
+where $\Gamma_{\text{sink}}$ runs over the 16 bilinear gamma structures (see Section~\ref{sec:gamma}), $\Gamma_{\text{src}}$ is determined by the source gamma mode, and $S_{\text{anti}}$ is the antiquark propagator obtained via $\gamma_5$-hermiticity.
+
+\subsection{Source Gamma Modes}
+
+The mature implementation supports three source gamma modes, specified by the \texttt{src\_mode} parameter:
+
+\begin{enumerate}
+    \item \textbf{\texttt{"fixed\_g5"} (default):} $\Gamma_{\text{src}} = \gamma_5$ for all sink gamma structures. This is the standard pseudoscalar pion interpolator.
+    \item \textbf{\texttt{"same\_as\_sink"}:} $\Gamma_{\text{src}} = \Gamma_{\text{sink}}$, i.e., the same gamma matrix used at the sink is also used at the source.
+    \item \textbf{\texttt{"dagger\_of\_sink"}:} $\Gamma_{\text{src}} = \gamma_5 \, \Gamma_{\text{sink}}^\dagger \, \gamma_5$, the $\gamma_5$-hermitian conjugate of the sink gamma.
+\end{enumerate}
+
+In contrast, the development version additionally supports an arbitrary specific gamma label (e.g., \texttt{"Z"}, \texttt{"X"}).
+
+\subsection{Contraction Algorithm}
+
+Algorithm~\ref{alg:2pt} outlines the two-point contraction as implemented in \texttt{contract\_2pt\_pion()}.
+
+\begin{enumerate}
+    \label{alg:2pt}
+    \item Apply boosted smearing to the forward and backward propagators at the sink:
+    \begin{equation}
+        S_f \leftarrow \text{boosted\_smearing}(S_f, \, w=\text{width}, \, \text{boost}=\text{pos\_boost}), \qquad
+        S_b \leftarrow \text{boosted\_smearing}(S_b, \, w=\text{width}, \, \text{boost}=\text{neg\_boost}).
+    \end{equation}
+    \item Construct the antiquark backward line via $\gamma_5$-hermiticity:
+    \begin{equation}
+        \bar{S}_b = \gamma_5 \, S_b^\dagger \, \gamma_5.
+    \end{equation}
+    \item Contract with the sink gamma list to form the intermediate:
+    \begin{equation}
+        I_{\Gamma}(x)_{\alpha\beta} = \sum_{\mu} \bar{S}_b(x)_{\alpha\mu} \, (\Gamma_{\text{sink}})_{\mu\beta}.
+    \end{equation}
+    \item Contract with the forward propagator and source gamma:
+    \begin{equation}
+        C_2^{\Gamma}(x) = I_{\Gamma}(x)_{\alpha\beta} \, S_f(x)_{\beta\alpha'} \, (\Gamma_{\text{src}})_{\alpha'\alpha}.
+    \end{equation}
+    \item Project to momentum space via Fourier phase:
+    \begin{equation}
+        C_2^{\Gamma}(p, t) = \sum_{\mathbf{x}} e^{-i \mathbf{p} \cdot \mathbf{x}} \, C_2^{\Gamma}(x),
+    \end{equation}
+    implemented as a global lattice sum (\texttt{core.gatherLattice}) after pointwise multiplication with the momentum phases.
+    \item On rank 0, save to HDF5 via \texttt{save\_proton\_c2pt\_hdf5}.
+\end{enumerate}
+
+%==========================================================================
+\section{Three-Point qTMDWF Function}
+\label{sec:threept}
+%==========================================================================
+
+\subsection{Fixed-Sink Sequential Source Method}
+
+The three-point function is computed using the fixed-sink sequential-source method. A sequential propagator is constructed by placing a source at the sink time slice $t_{\text{sep}}$:
+
+\begin{equation}
+    \eta_{\text{seq}}(y; p_f, t_{\text{sep}}) = \delta_{t_y, t_{\text{sep}}} \, e^{-i p_f \cdot (y - x_0)} \, \Gamma_{\text{seq}} \, S_{\text{anti}}(y, x_0),
+\end{equation}
+where $\Gamma_{\text{seq}} = \gamma_5 \Gamma_{\text{sink}}^\dagger \gamma_5$ ensures the correct Dirac structure for the sequential inversion. This source is then inverted:
+
+\begin{equation}
+    D \, S_{\text{seq}} = \eta_{\text{seq}}.
+\end{equation}
+
+The sequential propagator is converted to an antiquark-like backward line,
+
+\begin{equation}
+    S_{\text{seq, anti}}(x, x_0; p_f, t_{\text{sep}}) = \gamma_5 \, S_{\text{seq}}(x, x_0)^\dagger \, \gamma_5,
+\end{equation}
+and enters the three-point contraction.
+
+\subsection{CG qTMD Operator}
+
+In the coordinate-gauge (CG) approximation, the Wilson line is replaced by the identity, and the operator insertion reduces to a spatial displacement of the forward propagator:
+
+\begin{equation}
+    \mathcal{O}_b \, S_q(x, x_0) = S_q\left(x + b_T \hat{e}_{\perp} + b_z \hat{e}_z, \, x_0\right),
+\end{equation}
+where $\hat{e}_{\perp} \in \{\hat{x}, \hat{y}\}$ is the transverse direction and $\hat{e}_z$ is the longitudinal direction. The displacement is implemented as consecutive lattice shifts via the PyQUDA \texttt{prop.shift(distance, direction)} method. To minimize interpolation error from large jumps, the Wilson line index list is ordered so that successive shifts differ by at most one lattice unit whenever possible.
+
+\subsection{Contraction}
+
+The CG qTMD three-point contraction is performed as:
+
+\begin{equation}
+    C_3^{\Gamma}(q, b; p_f, t_{\text{sep}}) = \sum_{\mathbf{x}} e^{-i \mathbf{q} \cdot (\mathbf{x} - \mathbf{x}_0)} \,
+    \Tr_{\text{spin, color}} \left[
+        S_{\text{seq, anti}}(x, x_0; p_f, t_{\text{sep}}) \,
+        \Gamma_{\text{sink}} \,
+        \mathcal{O}_b S_q(x, x_0) \,
+        \Gamma_{\text{src}}
+    \right].
+\end{equation}
+
+In the mature implementation, the contraction is performed inline in the application layer rather than through a dedicated class method. The algorithm is:
+
+\begin{enumerate}
+    \item Copy the backward propagator as the starting shifted propagator.
+    \item For each Wilson line index $W = [b_T, b_z, \eta, \perp\text{-dir}]$:
+    \begin{enumerate}
+        \item Compute the incremental shift from the previous index:
+        \begin{equation}
+            \Delta b_T = b_T^{\text{curr}} - b_T^{\text{prev}}, \qquad
+            \Delta b_z = b_z^{\text{curr}} - b_z^{\text{prev}}.
+        \end{equation}
+        \item Apply the transverse shift: \texttt{prop.shift}($\Delta b_T$, $\perp$-dir).
+        \item Apply the longitudinal shift: \texttt{prop.shift}($\Delta b_z$, $z$-dir).
+        \item Construct the source-side product $G_{\text{src}} \, \gamma_5$ and sink-side product $\gamma_5 \, \Gamma_{\text{sink}}$.
+        \item Contract:
+        \begin{equation}
+            C_3^{\Gamma}(q, b) = \sum_{\mathbf{x}} e^{-i \mathbf{q} \cdot \mathbf{x}} \,
+            \Tr \left[ G_{\text{src}} \gamma_5 \, S_{\text{shifted}}^\dagger \, \gamma_5 \, \Gamma_{\text{sink}} \, S_f \right].
+        \end{equation}
+        \item Gather globally and append to the result list.
+    \end{enumerate}
+\end{enumerate}
+
+\subsection{The ``WF'' in qTMDWF}
+
+It is important to emphasize that the ``WF'' (Wilson Flow) designation refers to the gauge-field preparation, \emph{not} to any flow operation inside the contraction module. The Wilson Flow is applied to the gauge configurations before the measurement workflow begins. The contraction code is identical whether the gauge links are flowed, HYP-smeared, or unsmeared. The qTMDWF tag in the HDF5 output path (via \texttt{get\_qTMDWF\_file\_tag}) distinguishes the flowed gauge ensemble from other ensembles.
+
+%==========================================================================
+\section{Gamma Matrix Conventions}
+\label{sec:gamma}
+%==========================================================================
+
+\subsection{16 Bilinear Structures}
+
+Both the mature and development modules scan 16 gamma matrix structures at the sink. The labels and their physical interpretations are:
+
+\begin{table}[H]
+\centering
+\caption{Gamma matrix labels and their QUDA/PyQUDA bitmask mappings.}
+\begin{tabular}{lll}
+\toprule
+\textbf{Label} & \textbf{PyQUDA \texttt{gamma()} index} & \textbf{Dirac structure} \\
+\midrule
+5    & 15 & $\gamma_5$ \\
+T    & 8  & $\gamma_4$ (temporal) \\
+T5   & 7  & $\gamma_4 \gamma_5$ \\
+X    & 1  & $\gamma_1$ \\
+X5   & 14 & $\gamma_1 \gamma_5$ \\
+Y    & 2  & $\gamma_2$ \\
+Y5   & 13 & $\gamma_2 \gamma_5$ \\
+Z    & 4  & $\gamma_3$ \\
+Z5   & 11 & $\gamma_3 \gamma_5$ \\
+I    & 0  & $\mathbf{1}$ (identity) \\
+SXT  & 9  & $\sigma_{14} = \frac{i}{2}[\gamma_1, \gamma_4]$ \\
+SXY  & 3  & $\sigma_{12} = \frac{i}{2}[\gamma_1, \gamma_2]$ \\
+SXZ  & 5  & $\sigma_{13} = \frac{i}{2}[\gamma_1, \gamma_3]$ \\
+SYT  & 10 & $\sigma_{24} = \frac{i}{2}[\gamma_2, \gamma_4]$ \\
+SYZ  & 6  & $\sigma_{23} = \frac{i}{2}[\gamma_2, \gamma_3]$ \\
+SZT  & 12 & $\sigma_{34} = \frac{i}{2}[\gamma_3, \gamma_4]$ \\
+\bottomrule
+\end{tabular}
+\label{tab:gamma}
+\end{table}
+
+The QUDA bitmask indexing uses a specific encoding where each bit of the 4-bit gamma matrix index corresponds to a spacetime direction: bit 0 $\to \gamma_1$, bit 1 $\to \gamma_2$, bit 2 $\to \gamma_3$, bit 3 $\to \gamma_4$. In the code, the ordered list of bitmask indices is:
+
+\begin{verbatim}
+pyquda_gammas_order = [15, 8, 7, 1, 14, 2, 13, 4, 11, 0, 9, 3, 5, 10, 6, 12]
+\end{verbatim}
+
+\subsection{Gamma Stack Construction}
+
+The 16 gamma matrices are stacked into a single array of shape $(16, 4, 4)$. In the mature implementation, this stacking is done inline inside \texttt{contract\_2pt\_pion()} using a loop over \texttt{my\_pyquda\_gammas}. The development version abstracts this into the helper function \texttt{\_gamma\_stack()}, which additionally uses \texttt{\_asarray\_on\_queue()} to ensure correct backend placement.
+
+%==========================================================================
+\section{Boosted Smearing}
+\label{sec:smearing}
+%==========================================================================
+
+Both the mature and development modules use the same boosted smearing implementation from \texttt{boosted\_smearing\_pyquda.py}. The boosted smearing is a gauge-covariant Gaussian smearing with momentum injection, defined in the continuum as:
+
+\begin{equation}
+    \tilde{\psi}(x) = \int d^3y \; e^{-\frac{(\mathbf{x} - \mathbf{y})^2}{2w^2}} \; e^{i \mathbf{k} \cdot (\mathbf{x} - \mathbf{y})} \; \psi(y),
+\end{equation}
+where $w$ is the Gaussian width (parameter \texttt{width}) and $\mathbf{k}$ is the boost momentum (parameters \texttt{pos\_boost} for the quark line, \texttt{neg\_boost} for the antiquark line).
+
+\subsection{Implementation Details}
+
+The boosted smearing is implemented via distributed FFT:
+
+\begin{enumerate}
+    \item Compute global grid coordinates for the current MPI rank.
+    \item Build the real-space kernel:
+    \begin{equation}
+        K(\mathbf{x}) = \exp\left(-\frac{x^2 + y^2 + z^2}{2w^2}\right) \,
+        \exp\left(2\pi i \left( \frac{k_x}{L_x} x + \frac{k_y}{L_y} y + \frac{k_z}{L_z} z \right)\right).
+    \end{equation}
+    \item Forward FFT the kernel and the fermion field to momentum space.
+    \item Multiply pointwise: $\tilde{\psi}(k) \leftarrow \tilde{\psi}(k) \cdot \tilde{K}(k)$.
+    \item Inverse FFT back to position space.
+    \item The boosted smearing wrapper applies this operation to all spin-color components of a \texttt{LatticePropagator} via \texttt{getFermion}/\texttt{setFermion} iteration.
+\end{enumerate}
+
+The current implementation assumes identity gauge (no gauge rotation before/after FFT), which is valid for Coulomb-gauge-fixed configurations.
+
+\subsection{Usage Convention}
+
+\begin{itemize}
+    \item \texttt{pos\_boost}: Momentum injected into the quark (forward) line. Convention: $[k_x, k_y, k_z]$ in units of $2\pi/L$.
+    \item \texttt{neg\_boost}: Momentum injected into the antiquark (backward) line.
+    \item \texttt{width}: Gaussian kernel width $w$ in lattice units.
+\end{itemize}
+
+In the ALCF Aurora application (\texttt{pyquda\_qTMDWF\_k0.py}), both boosts are set to $[0, 0, 0]$ (no momentum injection), and the width is $w = 7.0$, providing substantial spatial smearing.
+
+%==========================================================================
+\section{Code Implementation}
+\label{sec:implementation}
+%==========================================================================
+
+\subsection{Module: \texttt{pion\_qTMDWF\_pyquda.py}}
+
+The mature reference implementation is located at:
+
+\begin{verbatim}
+pyquda_measurement_utils/pion_qTMDWF_pyquda.py
+\end{verbatim}
+
+It defines the class \texttt{pion\_TMDWF\_measurement} and the following module-level structures:
+
+\begin{itemize}
+    \item \texttt{my\_gammas}: List of 16 gamma matrix label strings.
+    \item \texttt{my\_pyquda\_gammas}: List of 16 \texttt{gamma.gamma()} objects in the canonical order.
+    \item \texttt{pyquda\_gammas\_order}: List of 16 integer bitmask indices.
+    \item \texttt{G5}: The $\gamma_5$ matrix object, \texttt{gamma.gamma(15)}.
+\end{itemize}
+
+\subsection{Class: \texttt{pion\_TMDWF\_measurement}}
+
+\subsubsection{Constructor}
+
+\begin{lstlisting}
+def __init__(self, parameters):
+    self.eta = parameters["eta"]
+    self.b_z = parameters["b_z"]
+    self.b_T = parameters["b_T"]
+    self.pzmin = parameters["pzmin"]
+    self.pzmax = parameters["pzmax"]
+    self.plist = [[0, 0, pz, 0] for pz in range(self.pzmin, self.pzmax)]
+    self.width = parameters["width"]
+    self.pos_boost = parameters["pos_boost"]
+    self.neg_boost = parameters["neg_boost"]
+\end{lstlisting}
+
+Parameters:
+\begin{itemize}
+    \item \texttt{eta}: List of source-sink separations (typically \texttt{[0]}).
+    \item \texttt{b\_z}: Maximum longitudinal displacement in lattice units.
+    \item \texttt{b\_T}: Maximum transverse displacement in lattice units.
+    \item \texttt{pzmin}, \texttt{pzmax}: Momentum range bounds. The momentum list is constructed as $\{[0, 0, p_z, 0] \mid p_z = \text{pzmin}, \dots, \text{pzmax}-1\}$.
+    \item \texttt{width}: Gaussian smearing width $w$.
+    \item \texttt{pos\_boost}: Quark momentum boost $[k_x, k_y, k_z]$.
+    \item \texttt{neg\_boost}: Antiquark momentum boost $[k_x, k_y, k_z]$.
+\end{itemize}
+
+\subsubsection{\texttt{contract\_2pt\_pion()}}
+
+\begin{lstlisting}
+def contract_2pt_pion(self, latt_info, prop_f, prop_b,
+                       phases, tag, src_mode="fixed_g5"):
+\end{lstlisting}
+
+Performs the connected pion two-point contraction with sink smearing. Arguments:
+\begin{itemize}
+    \item \texttt{latt\_info}: PyQUDA lattice information object.
+    \item \texttt{prop\_f}: Forward (quark) propagator.
+    \item \texttt{prop\_b}: Backward (antiquark) propagator.
+    \item \texttt{phases}: Momentum phases from \texttt{MomentumPhase.getPhases()}.
+    \item \texttt{tag}: Output file tag for HDF5.
+    \item \texttt{src\_mode}: One of \texttt{"fixed\_g5"}, \texttt{"same\_as\_sink"}, \texttt{"dagger\_of\_sink"}.
+\end{itemize}
+
+\subsubsection{\texttt{create\_TMD\_Wilsonline\_index\_list\_CG()}}
+
+\begin{lstlisting}
+def create_TMD_Wilsonline_index_list_CG(self):
+\end{lstlisting}
+
+Generates the list of Wilson line displacement indices for the CG qTMD path. Each index is a 4-tuple $[b_T, b_z, \eta, \perp\text{-dir}]$ where:
+\begin{itemize}
+    \item $b_T \in [0, \texttt{b\_T}]$: transverse displacement.
+    \item $b_z \in [-\texttt{b\_z}, \texttt{b\_z}]$: longitudinal displacement.
+    \item $\eta$: always 0 (source-sink separation index, single value).
+    \item $\perp\text{-dir} \in \{0, 1\}$: 0 for $\hat{x}$ direction, 1 for $\hat{y}$ direction.
+\end{itemize}
+
+Returns two lists: \texttt{index\_list\_trans0} ($\perp$-dir = 0) and \texttt{index\_list\_trans1} ($\perp$-dir = 1). Each list is reordered to minimize the difference between adjacent indices, reducing the magnitude of incremental shifts.
+
+The reordering algorithm:
+\begin{enumerate}
+    \item Sort indices by $(b_T, b_z)$.
+    \item Scan linearly; when a jump larger than 1 in either $b_T$ or $b_z$ is detected, search ahead for a better-matching index and swap.
+\end{enumerate}
+
+This is the same algorithm as in the development version, except that the development version has refactored it into a private method \texttt{\_reorder\_wilson\_indices()} and the mature version duplicates the reordering logic inline in \texttt{create\_TMD\_Wilsonline\_index\_list\_CG()} under the local function \texttt{reorder\_indices()}.
+
+\subsubsection{\texttt{create\_fw\_prop\_TMD\_CG()}}
+
+\begin{lstlisting}
+def create_fw_prop_TMD_CG(self, prop_f, W_index,
+                           WL_indices_previous):
+\end{lstlisting}
+
+Applies an incremental spatial shift to the forward propagator for the CG qTMD path. The shift is computed as:
+
+\begin{equation}
+    S_f \leftarrow S_f.\texttt{shift}(\Delta b_T, \perp\text{-dir}).\texttt{shift}(\Delta b_z, z\text{-dir}),
+\end{equation}
+where $\Delta b_T = b_T^{\text{curr}} - b_T^{\text{prev}}$ and $\Delta b_z = b_z^{\text{curr}} - b_z^{\text{prev}}$.
+
+\subsubsection{\texttt{create\_PDF\_Wilsonline\_index\_list()}}
+
+\begin{lstlisting}
+def create_PDF_Wilsonline_index_list(self):
+\end{lstlisting}
+
+Generates Wilson line indices for the pure longitudinal PDF path ($b_T = 0$). The index list is $[0, b_z, 0, 0]$ for $b_z \in [0, \texttt{b\_z}]$ and $[0, -b_z, 0, 0]$ for $b_z \in [1, \texttt{b\_z}]$. This method is defined but not called by any dedicated \texttt{contract\_PDF()} method in the mature implementation; PDF contract support is present only in the development version.
+
+\subsubsection{\texttt{create\_fw\_prop\_PDF\_GI()}}
+
+\begin{lstlisting}
+def create_fw_prop_PDF_GI(self, gauge, prop_f_pyq, W_index,
+                           WL_indices_previous):
+\end{lstlisting}
+
+Implements the gauge-invariant PDF shift using the gauge field links. For each spin-color component of the propagator:
+\begin{itemize}
+    \item $\Delta b_z = 0$: no shift.
+    \item $\Delta b_z = +1$: apply \texttt{gauge.pure\_gauge.covDev(fermion, 2)} (forward $z$-direction).
+    \item $\Delta b_z = -1$: apply \texttt{gauge.pure\_gauge.covDev(fermion, 6)} (backward $z$-direction).
+    \item Other $\Delta b_z$: raise \texttt{ValueError} (only unit-step shifts are supported to ensure a well-defined gauge-invariant path).
+\end{itemize}
+
+This method is defined but not used by the mature implementation's contract methods; it exists for potential standalone use.
+
+\subsection{Application Layer: \texttt{pyquda\_qTMDWF\_k0.py}}
+
+The ALCF Aurora application demonstrates the mature module's usage pattern:
+
+\begin{lstlisting}
+from pyquda_measurement_utils.pion_qTMDWF_pyquda import (
+    pion_TMDWF_measurement, pyquda_gammas_order, my_pyquda_gammas
+)
+Measurement = pion_TMDWF_measurement(parameters)
+\end{lstlisting}
+
+The three-point qTMDWF contraction is performed inline in the application (not via a class method), iterating over Wilson line indices and performing explicit \texttt{xp.einsum} contractions for each shift.
+
+%==========================================================================
+\section{Key Differences from \texttt{pion\_qTMD\_vibe\_develop.py}}
+\label{sec:differences}
+%==========================================================================
+
+Table~\ref{tab:differences} summarizes the structural and functional differences between the mature reference implementation and the active development version.
+
+\begin{table}[H]
+\centering
+\caption{Comparison of mature (\texttt{pion\_qTMDWF\_pyquda.py}) and development (\texttt{pion\_qTMD\_vibe\_develop.py}) implementations.}
+\label{tab:differences}
+\begin{tabular}{p{0.25\textwidth}p{0.35\textwidth}p{0.35\textwidth}}
+\toprule
+\textbf{Aspect} & \textbf{Mature (qTMDWF)} & \textbf{Development (vibe)} \\
+\midrule
+Backend gating & \texttt{.get()} for gather-to-CPU (older PyQUDA API) & \texttt{xp.asnumpy()} for uniform backend dispatch \\
+\hline
+Wilson index reordering & Duplicated inline as local function \texttt{reorder\_indices()} & Refactored as class method \texttt{\_reorder\_wilson\_indices()} \\
+\hline
+Momentum list & \texttt{plist} from \texttt{range(pzmin, pzmax)} in $z$ only & Explicit \texttt{p\_2pt}, \texttt{qext}, \texttt{qext\_PDF} lists with $x$, $y$, $z$ support \\
+\hline
+Source gamma & 3 modes only: \texttt{fixed\_g5}, \texttt{same\_as\_sink}, \texttt{dagger\_of\_sink} & 4 modes: the 3 above plus any specific gamma label (e.g., \texttt{"Z"}) \\
+\hline
+Contraction methods & \texttt{contract\_2pt\_pion()} only; 3pt contracted inline in application & \texttt{contract\_2pt\_pion()}, \texttt{contract\_qTMD\_CG()}, \texttt{contract\_PDF()} all as class methods \\
+\hline
+PDF path support & PDF index/forward-prop helpers defined but no \texttt{contract\_PDF()} & Full CG\_PDF and GI\_PDF contracts via \texttt{contract\_PDF(gauge\_invariant=...)} \\
+\hline
+Code modularity & Gamma stacking, backward line, source gamma built inline in \texttt{contract\_2pt\_pion()} & Abstracted to \texttt{\_gamma\_stack()}, \texttt{\_meson\_backward\_line()}, \texttt{\_source\_gamma\_stack()} \\
+\hline
+Einsum optimization & No \texttt{optimize=True} flag & \texttt{optimize=True} in all \texttt{xp.einsum()} calls \\
+\hline
+Time cut & Not performed in module (done in application) & \texttt{contract\_qTMD\_CG()} returns full time extent \\
+\hline
+Array transpose & Application transposes \texttt{[W, p, g, t]} before writing & Module contracts naturally to \texttt{[W, gamma, p, t]}; application transposes \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Backend API Evolution}
+
+A notable technical difference is the backend dispatch mechanism:
+
+\begin{itemize}
+    \item \textbf{Mature:} Uses \texttt{arr.get()} to transfer GPU arrays to CPU. This is the older PyQUDA API that works with \texttt{dpnp} arrays (Intel oneAPI).
+    \item \textbf{Development:} Uses \texttt{xp.asnumpy(arr)} where \texttt{xp} is the dynamically detected array backend (\texttt{numpy}, \texttt{cupy}, \texttt{dpnp}). This provides uniform backend independence.
+\end{itemize}
+
+\subsection{Wilson Line Index Reordering}
+
+Both implementations use the same reordering algorithm, but the mature version defines the reordering as a nested local function inside \texttt{create\_TMD\_Wilsonline\_index\_list\_CG()}, while the development version has extracted it into a reusable class method. The reordering minimizes the Chebyshev distance between consecutive Wilson line indices, which reduces the magnitude of propagator shifts and improves numerical precision in the CG approximation.
+
+%==========================================================================
+\section{Momentum Convention}
+\label{sec:momentum}
+%==========================================================================
+
+\subsection{Momentum List Construction}
+
+In the mature implementation, momenta are restricted to the $z$-direction and are generated from a contiguous range:
+
+\begin{lstlisting}
+self.plist = [[0, 0, pz, 0] for pz in range(self.pzmin, self.pzmax)]
+\end{lstlisting}
+
+The corresponding momentum phase vector used for projection is:
+
+\begin{lstlisting}
+p_2pt_xyz = [[0, 0, -v] for v in range(parameters["pzmin"], parameters["pzmax"])]
+\end{lstlisting}
+
+The negative sign in the phase vector is the standard convention: the Fourier phase is $e^{-i \mathbf{p} \cdot \mathbf{x}}$, so the phase generator receives the negative of the desired momentum.
+
+\subsection{Four-Component Momentum Convention}
+
+All momentum vectors in the code are four-component lists $[p_x, p_y, p_z, p_E]$, where the energy component $p_E$ is always 0 (Euclidean time is treated separately via the time extent of the correlator). The spatial components are integer multiples of $2\pi/L$:
+
+\begin{equation}
+    p_i = \frac{2\pi n_i}{L_i}, \qquad n_i \in \mathbb{Z}.
+\end{equation}
+
+In the mature qTMDWF implementation, $n_x = n_y = 0$ always, and $n_z$ is scanned over the range $[\texttt{pzmin}, \texttt{pzmax})$.
+
+%==========================================================================
+\section{HDF5 Output}
+\label{sec:hdf5}
+%==========================================================================
+
+\subsection{Output Writer}
+
+The mature qTMDWF measurement uses the shared I/O utility \texttt{io\_corr.py} for HDF5 output. Two writer functions are relevant:
+
+\begin{itemize}
+    \item \textbf{Two-point:} \texttt{save\_proton\_c2pt\_hdf5(corr, tag, gammalist, plist)}. Despite the ``proton'' name, this function is used for all hadron two-point correlators. It writes data organized as:
+    \begin{verbatim}
+    SS/<gamma>/PX0PY0PZ<pz>
+    \end{verbatim}
+    The source time is extracted from the output tag via regex and the time axis is rolled so that $t=0$ corresponds to the source position.
+
+    \item \textbf{Three-point:} \texttt{save\_qTMDWF\_hdf5\_noRoll(corr, tag, gammalist, plist, W\_index\_list)}. Writes data organized as:
+    \begin{verbatim}
+    SP/<gamma>/PX0PY0PZ<pz>/<b_X or b_Y>/eta<eta>/bT<bT>/bz<bz>
+    \end{verbatim}
+    where \texttt{b\_X} or \texttt{b\_Y} is selected by the fourth component of each Wilson line index $[b_T, b_z, \eta, \perp\text{-dir}]$.
+\end{itemize}
+
+\subsection{File Tag Convention}
+
+The output file tag is constructed by \texttt{get\_qTMDWF\_file\_tag()} with the pattern:
+
+\begin{verbatim}
+<data_dir>/qTMDWF/<lat_tag>.qTMDWF.<cfg>.<ama>.<src>.<sm>
+\end{verbatim}
+
+The \texttt{.qTMDWF} infix distinguishes these files from standard qTMD outputs (which use \texttt{.qTMD}), enabling downstream analysis to identify the Wilson Flow gauge preparation.
+
+\subsection{Data Shape Convention}
+
+The three-point qTMDWF data are saved with shape \texttt{[Wilson\_index, momentum, gamma, time]}. The application performs a time roll (\texttt{np.roll(corr, -pos[3], axis=-1)}) so that $t=0$ corresponds to the source position, ensuring consistent relative-time indexing across different source locations.
+
+%==========================================================================
+\section{Application Workflow}
+\label{sec:workflow}
+%==========================================================================
+
+\subsection{Typical Measurement Pipeline}
+
+A complete qTMDWF measurement follows these steps (as exemplified in \texttt{pyquda\_qTMDWF\_k0.py}):
+
+\begin{enumerate}
+    \item Initialize PyQUDA with MPI geometry and backend (dpnp/sycl for Intel GPUs).
+    \item Load the flowed gauge configuration and apply HYP smearing:
+    \begin{lstlisting}
+gauge = io.readNERSCGauge(gauge_path, ...)
+gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)
+    \end{lstlisting}
+    \item Create the Clover Dirac operator with multigrid solver parameters.
+    \item Generate source positions (either a single point or a distributed set).
+    \item For each source position:
+    \begin{enumerate}
+        \item Create a point source and apply boosted smearing.
+        \item Invert to obtain the forward propagator (smeared-point).
+        \item Compute the two-point function via \texttt{contract\_2pt\_pion()}.
+        \item Compute the three-point qTMDWF correlation functions by iterating over Wilson line indices and performing inline contractions.
+        \item Save results to HDF5, parallelized over gamma structures across MPI ranks.
+    \end{enumerate}
+\end{enumerate}
+
+\subsection{MPI Parallelization Strategy}
+
+The code exploits two levels of MPI parallelism:
+
+\begin{enumerate}
+    \item \textbf{Source-level:} Different source positions can be assigned to different MPI sub-partitions (not enforced in the code; typically sources are processed sequentially on all ranks).
+    \item \textbf{Gamma-level I/O:} The HDF5 writing is parallelized over gamma structures: each MPI rank writes a disjoint subset of the 16 gamma channels. This is implemented by cycling through \texttt{tasks[rank::size]} where \texttt{tasks} is $[0, 1, \dots, 15]$.
+\end{enumerate}
+
+All spatial contractions use \texttt{core.gatherLattice()}, which performs a distributed global sum across MPI ranks, reducing the 4D lattice field to a 1D time series.
+
+%==========================================================================
+\section{Status and Usage Guidance}
+\label{sec:status}
+%==========================================================================
+
+\subsection{Mature Reference vs. Active Development}
+
+\begin{itemize}
+    \item \textbf{\texttt{pion\_qTMDWF\_pyquda.py}} (this document): The mature, validated reference implementation. It has been used in production on ALCF Aurora and is known to produce correct results. It uses the older PyQUDA API (\texttt{.get()}) and is less modular, but it is stable and well-tested.
+    \item \textbf{\texttt{pion\_qTMD\_vibe\_develop.py}}: The active development version. It adds backend-independent array dispatch (\texttt{xp.asnumpy()}), dedicated \texttt{contract\_qTMD\_CG()} and \texttt{contract\_PDF()} methods, support for arbitrary source gamma labels, \texttt{optimize=True} einsum flags, full PDF path support (CG and GI), and better code modularity through helper functions.
+\end{itemize}
+
+\subsection{Guidance for New Users}
+
+\begin{itemize}
+    \item For production runs on flowed gauge configurations: use the mature \texttt{pion\_qTMDWF\_pyquda.py} module with the \texttt{pyquda\_qTMDWF\_k0.py} application pattern.
+    \item For development or when PDF path support is needed: use the \texttt{pion\_qTMD\_vibe\_develop.py} module with the \texttt{Pyquda\_pion\_TMD\_CG.py} application pattern.
+    \item The boosted smearing, gamma conventions, and Wilson line index generation are identical between the two implementations.
+    \item The HDF5 output format differs: qTMDWF uses \texttt{save\_qTMDWF\_hdf5\_noRoll()} with \texttt{.qTMDWF} file infix, while the development version uses \texttt{save\_qTMD\_pion\_hdf5\_noRoll()} with \texttt{.qTMD} file infix.
+\end{itemize}
+
+%==========================================================================
+
+\appendix
+\section{PyQUDA Propagator Layout}
+
+The PyQUDA propagator is stored in even-odd checkerboard layout with the following index order:
+
+\begin{center}
+\texttt{prop.data[cb, t, z, y, x\_cb, spin\_sink, spin\_src, color\_sink, color\_src]}
+\end{center}
+
+where \texttt{cb} is the checkerboard parity index (0 or 1), \texttt{t, z, y, x\_cb} are the spacetime coordinates (with $x$ split into even/odd sub-lattices), and the remaining four indices are the spin and color degrees of freedom at the sink and source.
+
+\section{Global Lattice Sum}
+
+The \texttt{core.gatherLattice(array, axes)} function performs a distributed MPI sum over the specified spatial axes, reducing a distributed lattice field to a lower-dimensional tensor. For two-point functions, the call is:
+
+\begin{lstlisting}
+core.gatherLattice(data, [2, -1, -1, -1])
+\end{lstlisting}
+
+where axis 2 ($t$) is kept and axes $-1$ (the three spatial dimensions) are summed over.
+
+\section{Notation Glossary}
+
+\begin{table}[H]
+\centering
+\caption{Common notation used in this document.}
+\begin{tabular}{lp{0.7\textwidth}}
+\toprule
+\textbf{Symbol} & \textbf{Meaning} \\
+\midrule
+$S_q(x, y)$ & Quark propagator from source $y$ to sink $x$ \\
+$S_{\text{anti}}(x, y)$ & Antiquark propagator: $\gamma_5 S_q(x, y)^\dagger \gamma_5$ \\
+$\Gamma_{\text{sink}}$ & Dirac matrix at the pion sink \\
+$\Gamma_{\text{src}}$ & Dirac matrix at the pion source \\
+$\mathcal{O}_b$ & Nonlocal qTMD operator with displacement $b = (b_T, b_z)$ \\
+$\perp$-dir & Transverse direction: 0 for $\hat{x}$, 1 for $\hat{y}$ \\
+$w$ & Gaussian smearing width (\texttt{width}) \\
+$\mathbf{k}_{\text{pos}}$, $\mathbf{k}_{\text{neg}}$ & Momentum boosts for quark/antiquark lines (\texttt{pos\_boost}, \texttt{neg\_boost}) \\
+$\eta$ & Source-sink separation index (always $[0]$ in current implementation) \\
+$p_f$ & Fixed sink momentum \\
+$x_0$ & Source position \\
+$t_{\text{sep}}$ & Source-sink time separation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}

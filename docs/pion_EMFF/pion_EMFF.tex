@@ -1,0 +1,872 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------------------------------------------------------------------------
+% Packages
+% ---------------------------------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{physics}
+\usepackage{braket}
+\usepackage{hyperref}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{listings}
+
+% ---------------------------------------------------------------------------
+% Custom commands
+% ---------------------------------------------------------------------------
+\newcommand{\Gammamatrix}[1]{\Gamma_{#1}}
+\newcommand{\gfive}{\gamma_5}
+\newcommand{\gsrc}{\Gamma_{\text{src}}}
+\newcommand{\gsink}{\Gamma_{\text{sink}}}
+\newcommand{\gseq}{\Gamma_{\text{seq}}}
+\newcommand{\gcur}{\Gamma}
+\newcommand{\Sq}{S_{q}}
+\newcommand{\Santi}{S_{\text{anti}}}
+\newcommand{\Sseq}{S_{\text{seq}}}
+\newcommand{\etaseq}{\eta_{\text{seq}}}
+\newcommand{\einsum}{\texttt{einsum}}
+\newcommand{\pyquda}{\texttt{PyQUDA}}
+\newcommand{\quda}{\texttt{QUDA}}
+\newcommand{\hdfcmd}{\texttt{HDF5}}
+
+\title{\textbf{Pion Electromagnetic Form Factor}\\[4pt]
+\large Physics Note --- \pyquda{} Implementation}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+% ===========================================================================
+\section{Physics Overview}
+% ===========================================================================
+
+The electromagnetic form factor (EMFF) of the pion, \(F_\pi(Q^2)\), parametrizes
+the hadronic matrix element of the electromagnetic current between pion states.
+For a charged pion \(\pi^+\), the matrix element is
+
+\begin{equation}
+\braket{\pi^+(p_f) | J_\mu^{\text{em}}(0) | \pi^+(p_i)}
+  = (p_i + p_f)_\mu \, F_\pi(Q^2) ,
+\qquad Q^2 = -q^2 = -(p_f - p_i)^2 \ge 0 .
+\label{eq:emff_def}
+\end{equation}
+
+The electromagnetic current for a single quark flavor \(f\) with electric charge
+\(e_f\) is \(J_\mu^{\text{em}} = e_f \, \bar\psi \gamma_\mu \psi\).  On the
+lattice this is accessed through the Euclidean three-point correlation function
+
+\begin{equation}
+C_3^\Gamma(\mathbf{q}, \tau; \mathbf{p}_f, t_{\text{sep}})
+  = \sum_{\mathbf{x}} \sum_{\mathbf{y}}
+    e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
+    e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \,
+    \big\langle
+      O_\pi(\mathbf{y}, t_{\text{sep}}) \,
+      J^\Gamma(\mathbf{x}, \tau) \,
+      O_\pi^\dagger(\mathbf{x}_0, 0)
+    \big\rangle ,
+\label{eq:C3_operator}
+\end{equation}
+
+where \(O_\pi = \bar\psi \gsink \psi\) is the pion interpolating operator, and
+\(J^\Gamma = \bar\psi \gcur \psi\) is the local current insertion.  The initial
+pion momentum is fixed by momentum conservation:
+\(\mathbf{p}_i = \mathbf{p}_f - \mathbf{q}\).
+
+The pion interpolators project onto definite three-momentum via Fourier
+transforms at the sink (momentum \(\mathbf{p}_f\)) and the current insertion
+(momentum transfer \(\mathbf{q}\)).  For the EMFF channel we are interested in
+the vector components of the current (\(\gcur = \gamma_\mu\) with \(\mu = X, Y,
+Z, T\)), but the implementation described here scans all 16 Dirac bilinears for
+diagnostic completeness and cross-checking.
+
+After Wick contraction, the connected three-point function takes the trace form
+
+\begin{equation}
+C_3^\Gamma(\mathbf{q}, \tau; \mathbf{p}_f, t_{\text{sep}})
+  = \sum_{\mathbf{x}} \sum_{\mathbf{y}}
+    e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
+    e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \,
+    \tr\Big[
+      \Santi(\mathbf{y}, t_{\text{sep}}; \mathbf{x}_0, 0) \,
+      \gsink \;
+      \Sq(\mathbf{y}, t_{\text{sep}}; \mathbf{x}, \tau) \,
+      \gcur \;
+      \Sq(\mathbf{x}, \tau; \mathbf{x}_0, 0) \,
+      \gsrc
+    \Big] .
+\label{eq:C3_trace}
+\end{equation}
+
+Here \(\Sq(x, y)\) denotes the quark propagator from spacetime point \(y\) to
+\(x\), and \(\Santi(x, y) = \gfive \, \Sq(x, y)^\dagger \, \gfive\) is the
+antiquark propagator obtained via \(\gfive\)-hermiticity.  The trace runs over
+spin and color indices.  Equation~\eqref{eq:C3_trace} is the connected
+contribution; disconnected diagrams (where the current couples to a sea-quark
+loop) are not treated in this module.
+
+
+% ===========================================================================
+\section{Correlation Functions in Detail}
+% ===========================================================================
+
+\subsection{Propagator Layout Convention}
+
+The \pyquda{} \texttt{LatticePropagator} stores data in a nine-dimensional
+array with index layout
+
+\begin{equation}
+\texttt{prop.data} \sim (w, t, z, y, x, \alpha, \beta, c, d) ,
+\label{eq:data_layout}
+\end{equation}
+
+where
+\begin{itemize}[nosep]
+  \item \(w \in \{0,1\}\) is the checkerboard parity (even/odd site);
+  \item \((t, z, y, x)\) are spacetime coordinates (note the fine coordinate
+        \(x\) is the last spatial index, reflecting the checkerboard
+        decomposition);
+  \item \(\alpha\) is the spin index at the sink (final point);
+  \item \(\beta\) is the spin index at the source (initial point);
+  \item \(c\) is the color index at the sink;
+  \item \(d\) is the color index at the source.
+\end{itemize}
+
+In prose indices throughout this note (and in the \einsum{} patterns) we label
+these as \((w, t, z, y, x, \alpha, \beta, a, b)\) with \(\alpha\) = spin\_sink,
+\(\beta\) = spin\_src, \(a\) = color\_sink, \(b\) = color\_src, or with
+equivalent index letters depending on context.
+
+\subsection{Three-Point Function}
+
+The connected three-point function, written with explicit spin and color
+indices, is
+
+\begin{equation}
+\begin{aligned}
+C_3^\Gamma(\mathbf{q}, \tau; \mathbf{p}_f, t_{\text{sep}})
+  = \sum_{\mathbf{x},\mathbf{y}} &
+    e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
+    e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \\
+  &\times \Santi\big|_{\mathbf{y},t_{\text{sep}}}^{\alpha\beta;ab}
+    \; (\gsink)^{\beta\gamma} \;
+    \Sq\big|_{\mathbf{y},t_{\text{sep}};\,\mathbf{x},\tau}^{\gamma\delta;bc}
+    \; (\gcur)^{\delta\epsilon} \;
+    \Sq\big|_{\mathbf{x},\tau;\,\mathbf{x}_0,0}^{\epsilon\zeta;ca}
+    \; (\gsrc)^{\zeta\alpha} ,
+\end{aligned}
+\label{eq:C3_index}
+\end{equation}
+
+where repeated indices are summed over.  The color trace closes because
+\(\Santi\) and \(\Sq\) have opposite color flow directions, yielding
+\({\Santi}_{ab} \, {\Sq}_{bc} \, {\Sq}_{ca}\) --- a proper color singlet.
+
+The intermediate antiquark-to-quark connection at the current insertion point
+\((\mathbf{x}, \tau)\) is given by the standard quark propagator \(\Sq(\mathbf{y},
+t_{\text{sep}}; \mathbf{x}, \tau)\), representing the propagation from the
+current insertion up to the sink.
+
+\subsection{Two-Point Function}
+
+The pion two-point function, serving as a normalization and diagnostic, is
+
+\begin{equation}
+C_2^\Gamma(\mathbf{p}, t)
+  = \sum_{\mathbf{x}}
+    e^{-i\mathbf{p}\cdot(\mathbf{x}-\mathbf{x}_0)} \,
+    \tr\Big[
+      \Santi(\mathbf{x}, t; \mathbf{x}_0, 0) \,
+      \gsink \;
+      \Sq(\mathbf{x}, t; \mathbf{x}_0, 0) \,
+      \gsrc
+    \Big] .
+\label{eq:C2_trace}
+\end{equation}
+
+For the standard pseudoscalar pion with \(\gsrc = \gsink = \gfive\), this
+reduces to
+
+\begin{equation}
+C_2^{\gfive}(\mathbf{p}, t)
+  = \sum_{\mathbf{x}}
+    e^{-i\mathbf{p}\cdot(\mathbf{x}-\mathbf{x}_0)} \,
+    \tr\Big[
+      \gfive \, \Sq(\mathbf{x}, \mathbf{x}_0)^\dagger \, \gfive \;
+      \gfive \;
+      \Sq(\mathbf{x}, \mathbf{x}_0) \;
+      \gfive
+    \Big]
+  = \sum_{\mathbf{x}}
+    e^{-i\mathbf{p}\cdot(\mathbf{x}-\mathbf{x}_0)} \,
+    \tr\Big[ \Sq(\mathbf{x}, \mathbf{x}_0)^\dagger \, \Sq(\mathbf{x}, \mathbf{x}_0) \Big] .
+\label{eq:C2_g5}
+\end{equation}
+
+
+% ===========================================================================
+\section{Sequential Source Method}
+% ===========================================================================
+
+The double sum over sink position \(\mathbf{y}\) in
+Eq.~\eqref{eq:C3_index} is computationally prohibitive if performed by nested
+loops.  The standard solution is the \emph{fixed-sink sequential source method},
+which absorbs the sink sum into a single sequential inversion.
+
+\subsection{Construction of the Sequential Source}
+
+The sequential source is built on time slice \(t_{\text{sep}} = t_{\text{src}} +
+t_{\text{insert}}\) (modulo \(L_t\)).  Starting from the (anti)quark propagator
+\(\Sq^{\text{neg}}(\mathbf{y}, t_{\text{sep}}; \mathbf{x}_0, 0)\) with
+appropriate sink smearing applied, the source is
+
+\begin{equation}
+\etaseq(\mathbf{y}; \mathbf{p}_f, t_{\text{sep}})
+  = \delta_{t_y,\,t_{\text{sep}}} \;
+    e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \;
+    \gseq \;
+    \Sq^{\text{neg}}(\mathbf{y}, t_{\text{sep}}; \mathbf{x}_0, 0) ,
+\label{eq:etaseq}
+\end{equation}
+
+where the sequential gamma structure is
+
+\begin{equation}
+\gseq = \gfive \, \gsink^\dagger \, \gfive .
+\label{eq:gseq}
+\end{equation}
+
+The time-slicing operation \(\delta_{t_y,t_{\text{sep}}}\) is handled by the
+utility function \texttt{sequential12}, which extracts the propagator data
+restricted to the specified time slice.
+
+\subsection{Sequential Inversion}
+
+The sequential propagator \(\Sseq\) is obtained by solving the Dirac equation
+with \(\etaseq\) as the source:
+
+\begin{equation}
+D(x, y) \; \Sseq(y, x_0; \mathbf{p}_f, t_{\text{sep}}) = \etaseq(x; \mathbf{p}_f, t_{\text{sep}}) .
+\label{eq:D_Sseq}
+\end{equation}
+
+This inversion is performed using the same Dirac operator employed for the
+forward propagators.  In the code, the call is
+\(\texttt{core.invertPropagator}(\texttt{dirac}, \texttt{src\_seq}, 1, 0)\).
+
+\subsection{Antiquark Conversion}
+
+After the sequential inversion, the resulting propagator is converted into an
+antiquark backward line using \(\gfive\)-hermiticity, exactly as is done for the
+two-point function:
+
+\begin{equation}
+\Sseq^{\text{anti}}(x, x_0; \mathbf{p}_f, t_{\text{sep}})
+  = \gfive \, \Sseq(x, x_0; \mathbf{p}_f, t_{\text{sep}})^\dagger \, \gfive .
+\label{eq:Sseq_anti}
+\end{equation}
+
+\subsection{Sink-Summed Three-Point Function}
+
+With the sequential antiquark propagator in hand, the double sum over \(\mathbf{y}\)
+has been absorbed into the sequential source construction.  The three-point
+function reduces to a single spatial sum over the current insertion point
+\(\mathbf{x}\):
+
+\begin{equation}
+\boxed{
+C_3^\Gamma(\mathbf{q}, \tau; \mathbf{p}_f, t_{\text{sep}})
+  = \sum_{\mathbf{x}}
+    e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)} \,
+    \tr\Big[
+      \Sseq^{\text{anti}}(\mathbf{x}, \mathbf{x}_0; \mathbf{p}_f, t_{\text{sep}}) \,
+      \gcur \;
+      \Sq(\mathbf{x}, \tau; \mathbf{x}_0, 0) \,
+      \gsrc
+    \Big] .
+}
+\label{eq:C3_seq}
+\end{equation}
+
+This is the expression evaluated by the \texttt{contract\_EMFF} method in the
+code.
+
+
+% ===========================================================================
+\section{Two-Point Function (Implementation)}
+% ===========================================================================
+
+The two-point contraction implemented in \texttt{contract\_2pt\_pion} follows
+Eq.~\eqref{eq:C2_trace}.  The procedure is:
+
+\begin{enumerate}[nosep]
+  \item Apply boosted smearing at the sink to both \(\Sq\) (positive) and
+        \(\Sq^{\text{neg}}\) (negative) propagators.
+  \item Convert the negative propagator to an antiquark backward line:
+        \(\Santi = \gfive (\Sq^{\text{neg}})^\dagger \gfive\).
+  \item Insert the sink gamma on the backward line.
+  \item Contract the backward line, forward line, and source gamma into a
+        spin-color trace.
+  \item Project onto definite momentum \(\mathbf{p}\) using the Fourier phase.
+\end{enumerate}
+
+The contribution from the sink-summed three-point signal is stored alongside
+the two-point correlators in the \hdfcmd{} output tree under
+\(\texttt{data/c2pt/}\).
+
+
+% ===========================================================================
+\section{Source Gamma Conventions}
+\label{sec:src_gamma}
+% ===========================================================================
+
+The source gamma matrix \(\gsrc\) in Eq.~\eqref{eq:C3_trace} can be specified
+through four modes, controlled by the parameter \texttt{src\_gamma}:
+
+\begin{enumerate}[label=\textbf{Mode \arabic*:}, leftmargin=*, nosep]
+  \item \texttt{"fixed\_g5"} --- The source gamma is fixed to \(\gfive\)
+        regardless of the sink gamma.  This is the standard choice for
+        pseudoscalar pion measurements, where \(\gsrc = \gfive\) projects onto
+        the pion's \(\gfive\) quantum numbers from the source.
+
+  \item \texttt{"same\_as\_sink"} --- The source gamma is set equal to the sink
+        gamma for each gamma channel separately:
+        \(\gsrc = \gsink\).  This is useful for exploring the full Dirac
+        structure of the correlation functions across all 16 bilinears.
+
+  \item \texttt{"dagger\_of\_sink"} --- The source gamma is the
+        \(\gfive\)-hermitian conjugate of the sink gamma:
+        \(\gsrc = \gfive \, \gsink^\dagger \, \gfive\).  This mode is
+        motivated by the sequential source construction, where the same
+        transformation appears.
+
+  \item \textbf{Any gamma label} --- A specific gamma matrix label (e.g.,
+        \texttt{"5"}, \texttt{"T"}, \texttt{"X"}, etc.) can be provided directly,
+        fixing \(\gsrc\) to that single gamma structure for all channels.
+\end{enumerate}
+
+The implementation is in the function \texttt{\_source\_gamma\_stack}, which
+takes as input the precomputed stack of 16 sink (or current) gamma matrices and
+returns the corresponding stack of source gamma matrices according to the chosen
+mode.
+
+
+% ===========================================================================
+\section{Gamma Matrix Convention}
+% ===========================================================================
+
+The code scans all 16 independent Dirac bilinears.  The gamma matrices are
+labeled by the following mnemonics, ordered in the standard project convention:
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+\textbf{Index} & \textbf{Label} & \textbf{Dirac Structure} & \textbf{QUDA Bitmask} \\
+\midrule
+0  & 5    & \(\gfive\)                  & 15 \\
+1  & T    & \(\gamma_4\) (temporal)     & 8  \\
+2  & T5   & \(\gamma_4 \gfive\)        & 7  \\
+3  & X    & \(\gamma_1\) (spatial)     & 1  \\
+4  & X5   & \(\gamma_1 \gfive\)        & 14 \\
+5  & Y    & \(\gamma_2\) (spatial)     & 2  \\
+6  & Y5   & \(\gamma_2 \gfive\)        & 13 \\
+7  & Z    & \(\gamma_3\) (spatial)     & 4  \\
+8  & Z5   & \(\gamma_3 \gfive\)        & 11 \\
+9  & I    & \(\mathbb{1}\) (identity)  & 0  \\
+10 & SXT  & \(\sigma_{xt}\)            & 9  \\
+11 & SXY  & \(\sigma_{xy}\)            & 3  \\
+12 & SXZ  & \(\sigma_{xz}\)            & 5  \\
+13 & SYT  & \(\sigma_{yt}\)            & 10 \\
+14 & SYZ  & \(\sigma_{yz}\)            & 6  \\
+15 & SZT  & \(\sigma_{zt}\)            & 12 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The \quda{} bitmask convention uses a 4-bit encoding where bit 0 corresponds to
+\(\gamma_x\), bit 1 to \(\gamma_y\), bit 2 to \(\gamma_z\), and bit 3 to
+\(\gamma_t\).  Gamma products are formed by XOR of the constituent bit patterns.
+For the identity, the bitmask is 0; \(\gfive = \gamma_x \gamma_y \gamma_z
+\gamma_t\) corresponds to \(1+2+4+8 = 15\).  The tensor bilinears
+\(\sigma_{\mu\nu} = \frac{1}{2}[\gamma_\mu, \gamma_\nu]\) correspond to the XOR
+of the individual bitmasks.
+
+In the code, the gamma matrices are instantiated via \(\texttt{gamma.gamma}(n)\)
+where \(n\) is the \quda{} bitmask index, and stored in a stacked array of shape
+\((16, 4, 4)\) by the helper function \texttt{\_gamma\_stack}.
+
+
+% ===========================================================================
+\section{Boosted Smearing}
+% ===========================================================================
+
+To improve the overlap of the interpolating operators with the pion ground state
+at non-zero momentum, the code employs \emph{gauge-covariant Gaussian smearing}
+with momentum injection (boosted smearing).
+
+\subsection{Kernel}
+
+The smearing kernel in position space is
+
+\begin{equation}
+K(\mathbf{r}; w, \mathbf{k})
+  = \exp\!\Big(-\frac{\mathbf{r}^2}{2w^2}\Big) \,
+    \exp\!\Big(2\pi i \, \frac{\mathbf{k}\cdot\mathbf{r}}{L}\Big) ,
+\label{eq:kernel}
+\end{equation}
+
+where \(w\) is the Gaussian width (in lattice units), \(\mathbf{k}\) is the
+injected momentum (integer vector), and \(L\) is the spatial lattice extent.
+The first factor is the standard gauge-covariant Gaussian; the second factor
+imparts momentum to the source or sink.
+
+\subsection{Implementation}
+
+The smearing is implemented in momentum space for efficiency.  The source
+fermion is first Fourier-transformed (using \pyquda's distributed 3D FFT),
+multiplied by the Fourier transform of \(K(\mathbf{r})\), and then
+inverse-transformed back to position space.  This is done independently for each
+spin-color component of the propagator or fermion field.
+
+The smearing assumes the gauge links are in the identity gauge (or sufficiently
+smoothed), so no additional gauge rotation is applied.
+
+\subsection{Independent Boost Parameters}
+
+Pion measurements involve both a quark and an antiquark line, which may require
+different momentum injections.  The code supports four independent boost
+vectors:
+
+\begin{itemize}[nosep]
+  \item \texttt{pos\_boost\_src}: momentum injected at the source for the
+        forward (positive) quark propagator \(\Sq(x, x_0)\).
+  \item \texttt{pos\_boost\_sink}: momentum injected at the sink for the forward
+        quark propagator (relevant for the two-point function).
+  \item \texttt{neg\_boost\_src}: momentum injected at the source for the
+        backward (negative/antiquark) propagator.
+  \item \texttt{neg\_boost\_sink}: momentum injected at the sink for the
+        backward propagator; this is also applied before constructing the
+        sequential source.
+\end{itemize}
+
+If the per-line source/sink boost parameters are not provided, they fall back
+to the global \texttt{pos\_boost} and \texttt{neg\_boost} values.
+
+
+% ===========================================================================
+\section{Code Implementation}
+% ===========================================================================
+
+The contraction module resides in
+\texttt{pyquda\_measurement\_utils/pion\_EMFF\_vibe\_develop.py} and defines
+the class \texttt{pion\_EMFF} with two principal methods.  The sequential source
+is built by \texttt{create\_meson\_bw\_seq\_pyquda} in
+\texttt{pyquda\_measurement\_utils/bw\_seq\_pyquda.py}.
+
+% ---------------------------------------------------------------------------
+\subsection{The Antiquark Backward Line: \texttt{\_meson\_backward\_line}}
+% ---------------------------------------------------------------------------
+
+Given a quark propagator \(S(x, x_0)\), this function computes the antiquark
+line using \(\gfive\)-hermiticity:
+
+\begin{equation}
+\Santi(x, x_0) = \gfive \, S(x, x_0)^\dagger \, \gfive .
+\label{eq:mesh_backward}
+\end{equation}
+
+The corresponding \einsum{} pattern is
+
+\begin{verbatim}
+  xp.einsum("ij, wtzyxilab, kl -> wtzyxkjba",
+            gamma5, prop.data.conj(), gamma5)
+\end{verbatim}
+
+In this pattern:
+\begin{itemize}[nosep]
+  \item \(\texttt{gamma5}_{ij}\) (index \(i\) = row, \(j\) = column) acts from
+        the left on the spin\_sink index of the conjugated propagator.
+  \item \(\texttt{prop.data.conj()}_{\texttt{wtzyxilab}}\) has spin\_sink \(i\)
+        and spin\_src \(l\).
+  \item \(\texttt{gamma5}_{kl}\) (index \(k\) = row, \(l\) = column) acts from
+        the right on the spin\_src index.
+  \item The output has spin\_sink \(k\), spin\_src \(j\), color\_sink \(b\),
+        color\_src \(a\) --- the color indices are swapped relative to the input
+        because conjugation exchanges sink and source.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\subsection{Gamma Matrix Stack: \texttt{\_gamma\_stack}}
+% ---------------------------------------------------------------------------
+
+This function constructs a stacked array of all 16 gamma matrices with shape
+\((16, 4, 4)\), labeled by the index \(g\) in subsequent contractions:
+
+\begin{equation}
+\Gamma_{g;\,ij} = \texttt{gamma\_ls}[g, i, j] .
+\label{eq:gamma_stack}
+\end{equation}
+
+% ---------------------------------------------------------------------------
+\subsection{Source Gamma Stack: \texttt{\_source\_gamma\_stack}}
+% ---------------------------------------------------------------------------
+
+Given the sink/current gamma stack and the \texttt{src\_gamma} mode, this
+function returns the corresponding source gamma stack.  For the four modes
+described in Section~\ref{sec:src_gamma}:
+
+\begin{itemize}[nosep]
+  \item \texttt{"fixed\_g5"}: \(\gsrc = \gfive\) for all \(g\).
+  \item \texttt{"same\_as\_sink"}: \(\gsrc^{(g)} = \gsink^{(g)}\).
+  \item \texttt{"dagger\_of\_sink"}: \(\gsrc^{(g)} = \gfive
+        (\gsink^{(g)})^\dagger \gfive\), implemented via\\
+        \(\texttt{xp.einsum("ab, gbc, cd -> gad", gamma5,}\\
+        \texttt{sink\_gamma\_ls.conj().swapaxes(1,2), gamma5)}\).
+  \item Specific label: \(\gsrc^{(g)} = \Gamma_{\text{label}}\) for all \(g\).
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\subsection{Two-Point Contraction: \texttt{contract\_2pt\_pion}}
+% ---------------------------------------------------------------------------
+
+The contraction proceeds in three tensor steps:
+
+\textbf{Step 1 --- Sink gamma insertion on the backward line:}
+\begin{verbatim}
+  bw_prop = xp.einsum("wtzyxjicf, gim -> gwtzyxjmcf",
+                       bw_prop, sink_gamma_ls)
+\end{verbatim}
+
+Here \(\texttt{bw\_prop} = \Santi(\mathbf{x}, t; \mathbf{x}_0, 0)\) with layout
+\((w, t, z, y, x, \alpha, \beta, c, d)\) where \(\alpha\) = spin\_sink,
+\(\beta\) = spin\_src, \(c\) = color\_sink, \(d\) = color\_src.  The sink gamma
+stack has layout \((g, \alpha, \gamma)\).  The sum over \(\alpha\) inserts the
+sink gamma between the backward line's spin\_src and the forward line:
+
+\begin{equation}
+\big(\Santi \cdot \gsink\big)_{\alpha\gamma; cd}
+  = {\Santi}_{\alpha\beta; cd} \; (\gsink)_{\beta\gamma} .
+\label{eq:sink_insert}
+\end{equation}
+
+\textbf{Step 2 --- Spin-color trace:}
+\begin{verbatim}
+  corr_local = xp.einsum("gwtzyxjiab, wtzyxilba, glj -> gwtzyx",
+                          bw_prop, prop_pos.data, source_gamma_ls)
+\end{verbatim}
+
+The three tensors entering this contraction are:
+\begin{itemize}[nosep]
+  \item \(\texttt{bw\_prop}\) (after Step 1): \((\Santi \cdot \gsink)_{\alpha\beta; cd}\)
+        with indices \((g, w, t, z, y, x, \alpha, \beta, c, d)\).
+  \item \(\texttt{prop\_pos.data}\): \(\Sq(\mathbf{x}, t; \mathbf{x}_0, 0)\)
+        with indices \((w, t, z, y, x, \beta, \gamma, d, c)\) --- note that
+        the color indices are transposed relative to the backward line.
+  \item \(\texttt{source\_gamma\_ls}\): \(\gsrc^{(g)}\) with indices
+        \((g, \gamma, \alpha)\).
+\end{itemize}
+
+The summed indices are:
+\begin{itemize}[nosep]
+  \item \(\beta\) --- spin\_src of backward line with spin\_sink of forward line;
+  \item \(\gamma\) --- spin\_src of forward line with spin\_sink of source gamma;
+  \item \(\alpha\) --- spin\_sink of backward line with spin\_src of source gamma
+        (closing the spin trace);
+  \item \(c\) --- color\_sink of backward line with color\_src of forward line;
+  \item \(d\) --- color\_src of backward line with color\_sink of forward line
+        (closing the color trace).
+\end{itemize}
+
+The output has shape \((g, w, t, z, y, x)\) --- the correlator for each gamma
+channel at each spacetime point.
+
+In physics notation this is precisely:
+
+\begin{equation}
+\operatorname{corr\_local}_{g}(\mathbf{x}, t)
+  = \tr_{\text{spin,color}}\!\Big[
+      \big(\Santi \cdot \gsink^{(g)}\big)(\mathbf{x}, t) \;
+      \Sq(\mathbf{x}, t) \;
+      \gsrc^{(g)}
+    \Big] .
+\label{eq:corr_local}
+\end{equation}
+
+\textbf{Step 3 --- Momentum projection:}
+\begin{verbatim}
+  corr = xp.einsum("qwtzyx, gwtzyx -> gqt", phases, corr_local)
+\end{verbatim}
+
+where \(\texttt{phases}_{q, w, t, z, y, x} = e^{-i\mathbf{p}_q\cdot(\mathbf{x}-\mathbf{x}_0)}\)
+for each momentum mode \(q\) in \texttt{p\_2pt}.  The sum over spatial indices
+\((z, y, x)\) and the checkerboard parity \(w\) is implicit in the \einsum{}
+contraction of the spacetime axes.
+
+% ---------------------------------------------------------------------------
+\subsection{Three-Point Contraction: \texttt{contract\_EMFF}}
+% ---------------------------------------------------------------------------
+
+The three-point contraction follows an identical spin-color trace structure, but
+replaces the backward line from the local propagator with the sequential
+antiquark propagator:
+
+\begin{verbatim}
+  seq_bw_line = _meson_backward_line(seq_bw_prop)
+  current_inserted = xp.einsum(
+      "wtzyxjicf, gim -> gwtzyxjmcf",
+      seq_bw_line, current_gamma_ls)
+  corr_local = xp.einsum(
+      "gwtzyxjiab, wtzyxilba, glj -> gwtzyx",
+      current_inserted, prop_pos.data, source_gamma_ls)
+  corr = xp.einsum("qwtzyx, gwtzyx -> gqt", phases, corr_local)
+\end{verbatim}
+
+The correspondence with the analytic expression
+Eq.~\eqref{eq:C3_seq} is:
+
+\begin{itemize}[nosep]
+  \item \(\texttt{seq\_bw\_line}\) is \(\Sseq^{\text{anti}}(x, x_0;
+        \mathbf{p}_f, t_{\text{sep}})\) from Eq.~\eqref{eq:Sseq_anti}.
+  \item \(\texttt{current\_gamma\_ls}\) is the stack of 16 gamma matrices for
+        the current insertion \(\gcur\).
+  \item The \einsum{} \(\texttt{wtzyxjicf, gim -> gwtzyxjmcf}\) inserts the
+        current gamma \(\gcur\) into the sequential backward line, producing
+        \(\big(\Sseq^{\text{anti}} \cdot \gcur\big)\).
+  \item The second \einsum{} performs the full spin-color trace
+        \(\tr[\Sseq^{\text{anti}} \cdot \gcur \cdot \Sq \cdot \gsrc]\).
+  \item The final \einsum{} projects onto momentum transfer \(\mathbf{q}\) via
+        Fourier phase \(e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}\).
+\end{itemize}
+
+\textbf{Result layout:} After gathering across MPI ranks, the output array has
+shape \((\texttt{nq}, \texttt{ngamma}, L_t)\) or equivalently
+\((g, q, t)\).  In the main application code, the axes are transposed to
+\((\texttt{ngamma}, \texttt{nq}, t_{\text{sep}}+2)\) for storage.
+
+% ---------------------------------------------------------------------------
+\subsection{Sequential Source Construction}
+% ---------------------------------------------------------------------------
+
+The sequential source is built by \texttt{create\_meson\_bw\_seq\_pyquda} in
+\texttt{bw\_seq\_pyquda.py}.  The steps are:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Time slicing:} The input propagator \(S^{\text{neg}}(y, x_0)\)
+        is restricted to time slice \(t_{\text{sink}}\) using
+        \(\texttt{sequential12}(\texttt{prop}, t_{\text{sink}})\).
+  \item \textbf{Momentum phase:} Multiply by
+        \(e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)}\) on the
+        spatial lattice sites at the sink time slice.
+        \begin{verbatim}
+  seq_data = xp.einsum("wtzyx, wtzyxilab -> wtzyxilab",
+                        mom_phase, seq_data)
+        \end{verbatim}
+  \item \textbf{Gamma insertion:} Apply \(\gseq = \gfive \gsink^\dagger \gfive\).
+        \begin{verbatim}
+  gamma_seq = xp.einsum("ab, cb, cd -> ad",
+                         G5, sink_gamma.conj(), G5)
+  seq_data = xp.einsum("ij, wtzyxjlab -> wtzyxilab",
+                        gamma_seq, seq_data)
+        \end{verbatim}
+  \item \textbf{Boosted smearing:} The sequential source is smeared with the
+        same width and boost as the original propagator,
+        \(\texttt{boosted\_smearing}(\texttt{src}, w, \texttt{boost})\).
+  \item \textbf{Inversion:} Solve \(D \, \Sseq = \etaseq\) via
+        \(\texttt{core.invertPropagator}(\texttt{dirac}, \texttt{src\_seq}, 1, 0)\).
+  \item \textbf{Final transformation:} Apply \(\gfive\) from the right to
+        properly close the spin structure:
+        \(\Sseq \to \Sseq \, \gfive\).  (This is a convention for the subsequent
+        antiquark conversion in \texttt{contract\_EMFF}.)
+        \begin{verbatim}
+  final_term = xp.einsum("wtzyxijfc, ik -> wtzyxjkcf",
+                          prop_smeared.data.conj(), G5)
+        \end{verbatim}
+\end{enumerate}
+
+The complete sequential source is thus:
+
+\begin{equation}
+\etaseq(y; \mathbf{p}_f, t_{\text{sep}})
+  = \delta_{t_y,\,t_{\text{sep}}} \;
+    e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \;
+    \big(\gfive \, \gsink^\dagger \, \gfive\big) \;
+    S^{\text{neg}}(y, x_0) .
+\label{eq:etaseq_full}
+\end{equation}
+
+
+% ===========================================================================
+\section{HDF5 Output Structure}
+% ===========================================================================
+
+The two-point and three-point correlators are saved in \hdfcmd{} format under the
+data directory specified by the user (typically \texttt{./data/}).
+
+\subsection{Two-Point Data}
+
+\textbf{Path template:}
+\begin{verbatim}
+  data/c2pt/<lat>.c2pt.<cfg>.<ama>.<src_pos>.<sm_tag>.h5
+\end{verbatim}
+
+\textbf{Internal structure:}
+\begin{verbatim}
+  SS/
+    "5"/
+      PX0PY0PZ0    : array(shape=(Lt,), dtype=complex)
+      PX0PY0PZ1    : ...
+      ...
+    "T"/
+      ...
+    ...
+\end{verbatim}
+
+Under the \texttt{SS} group, each gamma label contains datasets labeled by
+momentum \texttt{PX<px>PY<py>PZ<pz>}.  Each dataset is a 1D complex array over
+time slices, already time-rolled so that the source is at \(t=0\).  The two-point
+function is saved via \(\texttt{save\_proton\_c2pt\_hdf5}\), which also parses
+the source time from the tag to perform the roll.
+
+\subsection{Three-Point (EMFF) Data}
+
+\textbf{Path template:}
+\begin{verbatim}
+  data/pion_EMFF/<lat>.pion_EMFF.<cfg>.<ama>.<src_pos>.<sm_tag>.<pf_tag>.<gamma_label>.h5
+\end{verbatim}
+
+where \(\texttt{<pf\_tag>} = \texttt{PX<px>PY<py>PZ<pz>dt<t\_insert>}\)
+and \(\texttt{<gamma\_label>}\) is one of the 16 gamma labels.
+
+\textbf{Internal structure:}
+\begin{verbatim}
+  SS/
+    "5"/
+      PX0PY0PZ0    : array(shape=(tsep+2,), dtype=complex)
+      PX1PY0PZ0    : ...
+      ...
+\end{verbatim}
+
+Under the \texttt{SS} group, the single gamma label (the file contains one gamma
+channel per file after MPI-distributed writing) contains datasets labeled by
+momentum transfer \texttt{PX<qx>PY<qy>PZ<qz>}.  Each dataset is a 1D complex array
+of length \(t_{\text{sep}}+2\), indexed by the current insertion time slice
+\(\tau\).
+
+The saving is performed by \(\texttt{save\_pion\_EMFF\_hdf5\_noRoll}\), which
+does not apply any time roll (the source-time alignment is handled during
+post-processing).
+
+\subsection{File Naming Convention Summary}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Component} & \textbf{Description} \\
+\midrule
+\(\texttt{<lat>}\)        & Lattice tag (e.g., \texttt{S8T32}) \\
+\(\texttt{<cfg>}\)        & Configuration number \\
+\(\texttt{<ama>}\)        & AMA label (e.g., \texttt{EMFF.ex}) \\
+\(\texttt{<src\_pos>}\)   & Source position
+                          \texttt{x<x>y<y>z<z>t<t>} \\
+\(\texttt{<sm\_tag>}\)     & Smearing tag (HYP steps, source type, width,
+                          boost vectors) \\
+\(\texttt{<pf\_tag>}\)     & Final momentum and time separation \\
+\(\texttt{<gamma\_label>}\) & Gamma matrix label (5, T, T5, ...) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The tag-building helpers are defined in
+\texttt{pyquda\_measurement\_utils/io\_corr.py}:
+\begin{itemize}[nosep]
+  \item \(\texttt{get\_c2pt\_file\_tag}\) --- builds the two-point HDF5 path.
+  \item \(\texttt{get\_pion\_EMFF\_file\_tag}\) --- builds the three-point
+        HDF5 path.
+  \item \(\texttt{save\_proton\_c2pt\_hdf5}\) --- writes two-point data
+        (shared with baryon workflows).
+  \item \(\texttt{save\_pion\_EMFF\_hdf5\_noRoll}\) --- writes three-point
+        EMFF data.
+\end{itemize}
+
+
+% ===========================================================================
+\section{Workflow Summary}
+% ===========================================================================
+
+The complete pion EMFF measurement, as orchestrated by the main application
+script \texttt{Pyquda\_pion\_EMFF.py}, proceeds as follows:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Gauge field preparation:} Read the gauge configuration, apply
+        HYP smearing (1 step, \(\alpha = (0.75, 0.6, 0.3)\)), set antiperiodic
+        temporal boundary conditions.
+  \item \textbf{Dirac operator:} Construct a Wilson-clover Dirac operator with
+        the specified mass, \(c_{\text{SW}}\), and multigrid parameters.
+  \item \textbf{Source creation:} Generate point sources at distributed
+        spacetime positions.
+  \item \textbf{Positive quark propagator:} Apply boosted smearing at the source
+        (\(\texttt{pos\_boost\_src}\)), invert.
+  \item \textbf{Negative quark propagator:} Apply boosted smearing at the source
+        (\(\texttt{neg\_boost\_src}\)) if different from positive; otherwise
+        copy the positive propagator.
+  \item \textbf{Two-point contraction:} Apply sink smearing to both propagators,
+        contract via \(\texttt{contract\_2pt\_pion}\), save to
+        \(\texttt{data/c2pt/}\).
+  \item \textbf{Sequential propagator:} Apply sink smearing to the negative
+        propagator (\(\texttt{neg\_boost\_sink}\)), build the sequential source
+        at \(t_{\text{sink}}\), invert, and post-process.
+  \item \textbf{Three-point contraction:} Contract the sequential propagator
+        with the positive forward propagator and all 16 current gamma
+        structures, project onto momentum transfer, save per-gamma-channel
+        files to \(\texttt{data/pion\_EMFF/}\).
+\end{enumerate}
+
+
+% ===========================================================================
+\section{Code Source Reference}
+% ===========================================================================
+
+The primary source files comprising the pion EMFF measurement are:
+
+\begin{itemize}[nosep]
+  \item \texttt{pyquda\_measurement\_utils/pion\_EMFF\_vibe\_develop.py}
+        --- Defines the \texttt{pion\_EMFF} class with
+        \(\texttt{contract\_2pt\_pion}\) and \(\texttt{contract\_EMFF}\),
+        the gamma matrix stacks, the antiquark backward line conversion, and
+        the source gamma mode logic.
+
+  \item \texttt{pyquda\_measurement\_utils/bw\_seq\_pyquda.py}
+        --- Defines \(\texttt{create\_meson\_bw\_seq\_pyquda}\) for building
+        the fixed-sink meson sequential source, time slicing, and inversion.
+        Also contains \(\texttt{create\_bw\_seq\_pyquda}\) for baryon
+        sequential sources (used in other workflows).
+
+  \item \texttt{pyquda\_measurement\_utils/boosted\_smearing\_pyquda.py}
+        --- Implements gauge-covariant Gaussian smearing with momentum
+        injection via distributed 3D FFT.
+
+  \item \texttt{pyquda\_measurement\_utils/io\_corr.py}
+        --- HDF5 I/O helpers for two-point, three-point, and other
+        correlator output formats.
+
+  \item \texttt{pyquda\_measurement\_utils/tools.py}
+        --- Backend-agnostic utilities (\(\texttt{\_get\_xp\_from\_array}\),
+        \(\texttt{\_asarray\_on\_queue}\), \(\texttt{mpi\_print}\)).
+
+  \item \texttt{application/EMFF\_pion/perlmutter/Pyquda\_pion\_EMFF.py}
+        --- Main application script that orchestrates the full measurement
+        workflow, handling gauge I/O, propagator generation, and HDF5 output.
+\end{itemize}
+
+The sequential source time-slicing utility \(\texttt{sequential12}\) is provided
+by \(\texttt{pyquda\_utils.source}\).  The momentum phase factors are generated
+by \(\texttt{pyquda\_utils.phase.MomentumPhase}\).
+
+\end{document}
