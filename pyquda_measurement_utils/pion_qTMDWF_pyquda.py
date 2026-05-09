@@ -1,3 +1,5 @@
+import numpy as np
+
 from pyquda_utils import core, gamma
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
@@ -9,6 +11,28 @@ my_gammas = ["5", "T", "T5", "X", "X5", "Y", "Y5", "Z", "Z5", "I", "SXT", "SXY",
 my_pyquda_gammas = [gamma.gamma(15), gamma.gamma(8), gamma.gamma(7), gamma.gamma(1), gamma.gamma(14), gamma.gamma(2), gamma.gamma(13), gamma.gamma(4), gamma.gamma(11), gamma.gamma(0), gamma.gamma(9), gamma.gamma(3), gamma.gamma(5), gamma.gamma(10), gamma.gamma(6), gamma.gamma(12)]
 pyquda_gammas_order = [15, 8, 7, 1, 14, 2, 13, 4, 11, 0, 9, 3, 5, 10, 6, 12]
 G5 = gamma.gamma(15)
+
+
+def _gamma_matrix(gamma_like):
+    if hasattr(gamma_like, "matrix"):
+        return gamma_like.matrix
+    return gamma_like
+
+
+def _array_to_numpy(arr):
+    if hasattr(arr, "get"):
+        return arr.get()
+    if type(arr).__module__.split(".")[0] == "cupy":
+        return arr.get()
+    if type(arr).__module__.split(".")[0] == "dpnp":
+        import dpnp
+
+        return dpnp.asnumpy(arr)
+    return np.asarray(arr)
+
+
+def _gamma_on_backend(gamma_like, xp, ref_arr):
+    return _asarray_on_queue(_gamma_matrix(gamma_like), xp, ref_arr)
 
 
 """
@@ -39,48 +63,23 @@ class pion_TMDWF_measurement():
 
         xp = _get_xp_from_array(prop_f.data)
 
-        ###################### prepare gamma list ######################
-        # use the first gamma's dtype and device to allocate the container
-        first_gamma = my_pyquda_gammas[0]
         n_gamma = len(my_pyquda_gammas)
-
-        if xp.__name__ == 'dpnp':
-            pyquda_gamma_ls = xp.empty(
-                (n_gamma,) + first_gamma.shape,
-                dtype=first_gamma.dtype,
-                device=first_gamma.device,
-            )
-        else:
-            pyquda_gamma_ls = xp.empty(
-                (n_gamma,) + first_gamma.shape,
-                dtype=first_gamma.dtype,
-            )    
-        for gamma_idx, gamma_pyq in enumerate(my_pyquda_gammas):
-            pyquda_gamma_ls[gamma_idx] = gamma_pyq
+        G5_backend = _gamma_on_backend(G5, xp, prop_f.data)
+        pyquda_gamma_ls = [_gamma_on_backend(gamma_pyq, xp, prop_f.data) for gamma_pyq in my_pyquda_gammas]
 
         # Source Dirac structure:
         # - fixed_g5: preserve the original pion definition
         # - same_as_sink: use the same Gamma_g on source and sink
         # - dagger_of_sink: use gamma5 * Gamma_g^\dagger * gamma5 on source
         if src_mode == "fixed_g5":
-            src_gamma_ls = xp.empty(
-                (n_gamma,) + first_gamma.shape,
-                dtype=first_gamma.dtype,
-                device=first_gamma.device,
-            ) if xp.__name__ == 'dpnp' else xp.empty(
-                (n_gamma,) + first_gamma.shape,
-                dtype=first_gamma.dtype,
-            )
-            src_gamma_ls[:] = G5
+            src_gamma_ls = [G5_backend] * n_gamma
         elif src_mode == "same_as_sink":
-            src_gamma_ls = pyquda_gamma_ls.copy()
+            src_gamma_ls = pyquda_gamma_ls
         elif src_mode == "dagger_of_sink":
-            src_gamma_ls = xp.einsum(
-                "ab, gbc, cd -> gad",
-                G5,
-                xp.swapaxes(pyquda_gamma_ls.conj(), 1, 2),
-                G5,
-            )
+            src_gamma_ls = [
+                xp.einsum("ab,bc,cd->ad", G5_backend, xp.swapaxes(gamma_g.conj(), 0, 1), G5_backend)
+                for gamma_g in pyquda_gamma_ls
+            ]
         else:
             raise ValueError(
                 f"Invalid src_mode: {src_mode}. "
@@ -88,15 +87,23 @@ class pion_TMDWF_measurement():
             )
 
         phases = _asarray_on_queue(phases, xp, prop_f.data)
-        bw_prop = xp.einsum("ij, wtzyxilab, kl -> wtzyxkjba", G5, prop_b.data.conj(), G5)
-        bw_prop = xp.einsum("wtzyxjicf, gim -> gwtzyxjmcf", bw_prop, pyquda_gamma_ls)
-        temp1 = xp.einsum("gwtzyxjiab, wtzyxilba, glj -> gwtzyx", bw_prop, prop_f.data, src_gamma_ls)
-        #corr = core.gatherLattice(xp.einsum("qwtzyx, gwtzyx -> gqt", phases, temp1).get(), [2, -1, -1, -1])
-        corr = core.gatherLattice(xp.asnumpy(xp.einsum("qwtzyx, gwtzyx -> gqt", phases, temp1)), [2, -1, -1, -1])
+        bw_prop = xp.einsum("ij, wtzyxilab, kl -> wtzyxkjba", G5_backend, prop_b.data.conj(), G5_backend)
+
+        corr_local = xp.zeros(
+            (n_gamma, phases.shape[0], latt_info.global_size[3]),
+            dtype=prop_f.data.dtype,
+        )
+        for gamma_idx, (sink_gamma, src_gamma) in enumerate(zip(pyquda_gamma_ls, src_gamma_ls)):
+            bw_prop_g = xp.einsum("wtzyxjicf, im -> wtzyxjmcf", bw_prop, sink_gamma)
+            temp_g = xp.einsum("wtzyxjiab, wtzyxilba, lj -> wtzyx", bw_prop_g, prop_f.data, src_gamma)
+            corr_local[gamma_idx] = xp.einsum("qwtzyx, wtzyx -> qt", phases, temp_g)
+            del bw_prop_g, temp_g
+
+        corr = core.gatherLattice(_array_to_numpy(corr_local), [2, -1, -1, -1])
         
         if latt_info.mpi_rank == 0:
             save_proton_c2pt_hdf5(corr, tag, my_gammas, self.plist)
-        del corr
+        del corr, corr_local
     
         
     def create_TMD_Wilsonline_index_list_CG(self):
