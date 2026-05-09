@@ -75,81 +75,17 @@ bilinear sink/current gamma structures in the standard project order:
 
 import numpy as np
 
-from pyquda_utils import core, gamma
+from pyquda_utils import core
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
-
-
-my_gammas = ["5", "T", "T5", "X", "X5", "Y", "Y5", "Z", "Z5", "I", "SXT", "SXY", "SXZ", "SYT", "SYZ", "SZT"]
-my_pyquda_gammas = [
-    gamma.gamma(15),
-    gamma.gamma(8),
-    gamma.gamma(7),
-    gamma.gamma(1),
-    gamma.gamma(14),
-    gamma.gamma(2),
-    gamma.gamma(13),
-    gamma.gamma(4),
-    gamma.gamma(11),
-    gamma.gamma(0),
-    gamma.gamma(9),
-    gamma.gamma(3),
-    gamma.gamma(5),
-    gamma.gamma(10),
-    gamma.gamma(6),
-    gamma.gamma(12),
-]
-pyquda_gammas_order = [15, 8, 7, 1, 14, 2, 13, 4, 11, 0, 9, 3, 5, 10, 6, 12]
-
-G5 = gamma.gamma(15)
-
-
-def _gamma_stack(reference_array):
-    xp = _get_xp_from_array(reference_array)
-    first_gamma = my_pyquda_gammas[0]
-    if xp.__name__ == "dpnp":
-        gamma_ls = xp.empty((len(my_pyquda_gammas),) + first_gamma.shape, dtype=first_gamma.dtype, device=first_gamma.device)
-    else:
-        gamma_ls = xp.empty((len(my_pyquda_gammas),) + first_gamma.shape, dtype=first_gamma.dtype)
-
-    for gamma_idx, gamma_matrix in enumerate(my_pyquda_gammas):
-        gamma_ls[gamma_idx] = _asarray_on_queue(gamma_matrix, xp, reference_array)
-    return gamma_ls
-
-
-def _gamma_from_label(label):
-    if label not in my_gammas:
-        raise ValueError(f"Invalid gamma label: {label}. Expected one of {my_gammas}.")
-    return my_pyquda_gammas[my_gammas.index(label)]
-
-
-def _source_gamma_stack(src_gamma, sink_gamma_ls, reference_array):
-    xp = _get_xp_from_array(reference_array)
-    gamma5 = _asarray_on_queue(G5, xp, reference_array)
-
-    if src_gamma == "fixed_g5":
-        source_gamma_ls = sink_gamma_ls.copy()
-        source_gamma_ls[:] = gamma5
-    elif src_gamma == "same_as_sink":
-        source_gamma_ls = sink_gamma_ls.copy()
-    elif src_gamma == "dagger_of_sink":
-        source_gamma_ls = xp.einsum("ab,gbc,cd->gad", gamma5, xp.swapaxes(sink_gamma_ls.conj(), 1, 2), gamma5, optimize=True)
-    elif src_gamma in my_gammas:
-        source_gamma_ls = sink_gamma_ls.copy()
-        source_gamma_ls[:] = _asarray_on_queue(_gamma_from_label(src_gamma), xp, reference_array)
-    else:
-        raise ValueError(
-            f"Invalid src_gamma: {src_gamma}. "
-            "Use a gamma label or one of ['fixed_g5', 'same_as_sink', 'dagger_of_sink']."
-        )
-    return source_gamma_ls
-
-
-def _meson_backward_line(prop):
-    xp = _get_xp_from_array(prop.data)
-    gamma5 = _asarray_on_queue(G5, xp, prop.data)
-    return xp.einsum("ij,wtzyxilab,kl->wtzyxkjba", gamma5, prop.data.conj(), gamma5, optimize=True)
+from pyquda_measurement_utils.pion_utils_vibe_develop import (
+    contract_pion_2pt,
+    gamma_stack,
+    meson_backward_line,
+    my_gammas,
+    source_gamma_stack,
+)
 
 
 class pion_EMFF:
@@ -173,26 +109,18 @@ class pion_EMFF:
         prop_neg = boosted_smearing(prop_neg, w=self.width, boost=self.neg_boost_sink)
         mpi_print(latt_info, "Pion EMFF sink smearing completed")
 
-        xp = _get_xp_from_array(prop_pos.data)
-        sink_gamma_ls = _gamma_stack(prop_pos.data)
-        source_gamma_ls = _source_gamma_stack(src_gamma, sink_gamma_ls, prop_pos.data)
-        phases = _asarray_on_queue(phases, xp, prop_pos.data)
-
-        bw_prop = _meson_backward_line(prop_neg)
-        bw_prop = xp.einsum("wtzyxjicf,gim->gwtzyxjmcf", bw_prop, sink_gamma_ls, optimize=True)
-        corr_local = xp.einsum("gwtzyxjiab,wtzyxilba,glj->gwtzyx", bw_prop, prop_pos.data, source_gamma_ls, optimize=True)
-        corr = core.gatherLattice(xp.asnumpy(xp.einsum("qwtzyx,gwtzyx->gqt", phases, corr_local, optimize=True)), [2, -1, -1, -1])
+        corr = contract_pion_2pt(latt_info, prop_pos, prop_neg, phases, src_gamma=src_gamma)
 
         if latt_info.mpi_rank == 0:
             save_proton_c2pt_hdf5(corr, tag, my_gammas, self.pilist)
-        del corr, corr_local, bw_prop
+        del corr
 
     def contract_EMFF(self, latt_info, prop_pos, seq_bw_prop, phases, src_gamma="fixed_g5"):
         xp = _get_xp_from_array(prop_pos.data)
         phases = _asarray_on_queue(phases, xp, prop_pos.data)
-        current_gamma_ls = _gamma_stack(prop_pos.data)
-        source_gamma_ls = _source_gamma_stack(src_gamma, current_gamma_ls, prop_pos.data)
-        seq_bw_line = _meson_backward_line(seq_bw_prop)
+        current_gamma_ls = gamma_stack(prop_pos.data)
+        source_gamma_ls = source_gamma_stack(src_gamma, current_gamma_ls, prop_pos.data)
+        seq_bw_line = meson_backward_line(seq_bw_prop)
 
         current_inserted = xp.einsum("wtzyxjicf,gim->gwtzyxjmcf", seq_bw_line, current_gamma_ls, optimize=True)
         corr_local = xp.einsum(
