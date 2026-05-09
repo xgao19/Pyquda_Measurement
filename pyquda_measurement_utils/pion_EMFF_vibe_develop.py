@@ -80,7 +80,7 @@ from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
-    contract_pion_2pt,
+    contract_pion_2pt_multi_src_gamma,
     gamma_stack,
     meson_backward_line,
     my_gammas,
@@ -104,31 +104,77 @@ class pion_EMFF:
         self.save_propagators = parameters["save_propagators"]
 
     def contract_2pt_pion(self, latt_info, prop_pos, prop_neg, phases, tag, src_gamma="fixed_g5"):
+        self.contract_2pt_pion_multi_src_gamma(
+            latt_info,
+            prop_pos,
+            prop_neg,
+            phases,
+            {src_gamma: tag},
+        )
+
+    def contract_2pt_pion_multi_src_gamma(self, latt_info, prop_pos, prop_neg, phases, tags_by_src_gamma):
         mpi_print(latt_info, "Begin pion EMFF sink smearing")
         prop_pos = boosted_smearing(prop_pos, w=self.width, boost=self.pos_boost_sink)
         prop_neg = boosted_smearing(prop_neg, w=self.width, boost=self.neg_boost_sink)
         mpi_print(latt_info, "Pion EMFF sink smearing completed")
 
-        corr = contract_pion_2pt(latt_info, prop_pos, prop_neg, phases, src_gamma=src_gamma)
+        corr_by_src = contract_pion_2pt_multi_src_gamma(
+            latt_info,
+            prop_pos,
+            prop_neg,
+            phases,
+            list(tags_by_src_gamma),
+        )
 
         if latt_info.mpi_rank == 0:
-            save_proton_c2pt_hdf5(corr, tag, my_gammas, self.pilist)
-        del corr
+            for src_gamma, tag in tags_by_src_gamma.items():
+                save_proton_c2pt_hdf5(corr_by_src[src_gamma], tag, my_gammas, self.pilist)
+        del corr_by_src
 
     def contract_EMFF(self, latt_info, prop_pos, seq_bw_prop, phases, src_gamma="fixed_g5"):
+        return self.contract_EMFF_multi_src_gamma(
+            latt_info,
+            prop_pos,
+            seq_bw_prop,
+            phases,
+            [src_gamma],
+        )[src_gamma]
+
+    def contract_EMFF_multi_src_gamma(self, latt_info, prop_pos, seq_bw_prop, phases, src_gammas):
         xp = _get_xp_from_array(prop_pos.data)
         phases = _asarray_on_queue(phases, xp, prop_pos.data)
         current_gamma_ls = gamma_stack(prop_pos.data)
-        source_gamma_ls = source_gamma_stack(src_gamma, current_gamma_ls, prop_pos.data)
+        source_gamma_ls_by_src = {
+            src_gamma: source_gamma_stack(src_gamma, current_gamma_ls, prop_pos.data)
+            for src_gamma in src_gammas
+        }
         seq_bw_line = meson_backward_line(seq_bw_prop)
+        corr_local_by_src = {
+            src_gamma: xp.zeros(
+                (len(current_gamma_ls), phases.shape[0], latt_info.global_size[3]),
+                dtype=prop_pos.data.dtype,
+            )
+            for src_gamma in src_gammas
+        }
 
-        current_inserted = xp.einsum("wtzyxjicf,gim->gwtzyxjmcf", seq_bw_line, current_gamma_ls, optimize=True)
-        corr_local = xp.einsum(
-            "gwtzyxjiab,wtzyxilba,glj->gwtzyx",
-            current_inserted,
-            prop_pos.data,
-            source_gamma_ls,
-            optimize=True,
-        )
-        corr = xp.einsum("qwtzyx,gwtzyx->gqt", phases, corr_local, optimize=True)
-        return core.gatherLattice(xp.asnumpy(corr), [2, -1, -1, -1])
+        for gamma_idx, current_gamma in enumerate(current_gamma_ls):
+            current_inserted = xp.einsum("wtzyxjicf,im->wtzyxjmcf", seq_bw_line, current_gamma, optimize=True)
+            for src_gamma in src_gammas:
+                corr_site = xp.einsum(
+                    "wtzyxjiab,wtzyxilba,lj->wtzyx",
+                    current_inserted,
+                    prop_pos.data,
+                    source_gamma_ls_by_src[src_gamma][gamma_idx],
+                    optimize=True,
+                )
+                corr_local_by_src[src_gamma][gamma_idx] = xp.einsum("qwtzyx,wtzyx->qt", phases, corr_site, optimize=True)
+                del corr_site
+            del current_inserted
+
+        corr_by_src = {
+            src_gamma: core.gatherLattice(xp.asnumpy(corr_local), [2, -1, -1, -1])
+            for src_gamma, corr_local in corr_local_by_src.items()
+        }
+
+        del corr_local_by_src, source_gamma_ls_by_src, seq_bw_line
+        return corr_by_src

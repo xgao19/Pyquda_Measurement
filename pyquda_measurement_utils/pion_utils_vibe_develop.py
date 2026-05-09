@@ -91,29 +91,50 @@ def meson_backward_line(prop):
 
 
 def contract_pion_2pt(latt_info, prop_forward, prop_backward, phases, src_gamma="fixed_g5"):
+    return contract_pion_2pt_multi_src_gamma(
+        latt_info,
+        prop_forward,
+        prop_backward,
+        phases,
+        [src_gamma],
+    )[src_gamma]
+
+
+def contract_pion_2pt_multi_src_gamma(latt_info, prop_forward, prop_backward, phases, src_gammas):
     xp = _get_xp_from_array(prop_forward.data)
     sink_gamma_ls = gamma_stack(prop_forward.data)
-    source_gamma_ls = source_gamma_stack(src_gamma, sink_gamma_ls, prop_forward.data)
+    source_gamma_ls_by_src = {
+        src_gamma: source_gamma_stack(src_gamma, sink_gamma_ls, prop_forward.data)
+        for src_gamma in src_gammas
+    }
     phases = _asarray_on_queue(phases, xp, prop_forward.data)
 
     backward_line = meson_backward_line(prop_backward)
-    corr_local = xp.zeros(
-        (len(sink_gamma_ls), phases.shape[0], latt_info.global_size[3]),
-        dtype=prop_forward.data.dtype,
-    )
-
-    for gamma_idx, (sink_gamma, source_gamma) in enumerate(zip(sink_gamma_ls, source_gamma_ls)):
-        sink_inserted = xp.einsum("wtzyxjicf,im->wtzyxjmcf", backward_line, sink_gamma, optimize=True)
-        corr_site = xp.einsum(
-            "wtzyxjiab,wtzyxilba,lj->wtzyx",
-            sink_inserted,
-            prop_forward.data,
-            source_gamma,
-            optimize=True,
+    corr_local_by_src = {
+        src_gamma: xp.zeros(
+            (len(sink_gamma_ls), phases.shape[0], latt_info.global_size[3]),
+            dtype=prop_forward.data.dtype,
         )
-        corr_local[gamma_idx] = xp.einsum("qwtzyx,wtzyx->qt", phases, corr_site, optimize=True)
-        del sink_inserted, corr_site
+        for src_gamma in src_gammas
+    }
 
-    corr = core.gatherLattice(_array_to_numpy(corr_local), [2, -1, -1, -1])
-    del corr_local, backward_line
-    return corr
+    for gamma_idx, sink_gamma in enumerate(sink_gamma_ls):
+        sink_inserted = xp.einsum("wtzyxjicf,im->wtzyxjmcf", backward_line, sink_gamma, optimize=True)
+        for src_gamma in src_gammas:
+            corr_site = xp.einsum(
+                "wtzyxjiab,wtzyxilba,lj->wtzyx",
+                sink_inserted,
+                prop_forward.data,
+                source_gamma_ls_by_src[src_gamma][gamma_idx],
+                optimize=True,
+            )
+            corr_local_by_src[src_gamma][gamma_idx] = xp.einsum("qwtzyx,wtzyx->qt", phases, corr_site, optimize=True)
+            del corr_site
+        del sink_inserted
+
+    corr_by_src = {
+        src_gamma: core.gatherLattice(_array_to_numpy(corr_local), [2, -1, -1, -1])
+        for src_gamma, corr_local in corr_local_by_src.items()
+    }
+    del corr_local_by_src, source_gamma_ls_by_src, backward_line
+    return corr_by_src

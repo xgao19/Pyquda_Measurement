@@ -20,13 +20,14 @@ parser.add_argument("--data_dir", type=str, default=os.environ.get("PION_EMFF_DA
 parser.add_argument("--num_src", type=int, default=int(os.environ.get("PION_EMFF_NUM_SRC", 1)))
 parser.add_argument("--qmax", type=int, default=int(os.environ.get("PION_EMFF_QMAX", 1)))
 parser.add_argument("--pf", type=str, default=os.environ.get("PION_EMFF_PF", "0.0.0"))
-parser.add_argument("--t_insert", type=int, default=int(os.environ.get("PION_EMFF_T_INSERT", 2)))
+parser.add_argument("--t_insert", type=str, default=os.environ.get("PION_EMFF_T_INSERT", "2"))
 parser.add_argument("--width", type=float, default=float(os.environ.get("PION_EMFF_WIDTH", 1.0)))
 parser.add_argument("--pos_boost_src", type=str, default=os.environ.get("PION_EMFF_POS_BOOST_SRC", os.environ.get("PION_EMFF_POS_BOOST", "0.0.0")))
 parser.add_argument("--pos_boost_sink", type=str, default=os.environ.get("PION_EMFF_POS_BOOST_SINK", os.environ.get("PION_EMFF_POS_BOOST", "0.0.0")))
 parser.add_argument("--neg_boost_src", type=str, default=os.environ.get("PION_EMFF_NEG_BOOST_SRC", os.environ.get("PION_EMFF_NEG_BOOST", "0.0.0")))
 parser.add_argument("--neg_boost_sink", type=str, default=os.environ.get("PION_EMFF_NEG_BOOST_SINK", os.environ.get("PION_EMFF_NEG_BOOST", "0.0.0")))
 parser.add_argument("--src_interpolator", type=str, default=os.environ.get("PION_EMFF_SRC_INTERPOLATOR", "fixed_g5"))
+parser.add_argument("--src_interpolators", type=str, default=os.environ.get("PION_EMFF_SRC_INTERPOLATORS", ""))
 parser.add_argument("--sink_interpolator", type=str, default=os.environ.get("PION_EMFF_SINK_INTERPOLATOR", "5"))
 args, unknown = parser.parse_known_args()
 
@@ -81,6 +82,16 @@ def gamma_from_label(label):
     return gamma.gamma(gamma_map[label])
 
 
+def parse_src_interpolators(text, fallback):
+    if not text:
+        return [fallback]
+    return [item for item in text.replace(",", ".").split(".") if item]
+
+
+def parse_int_list(text):
+    return [int(item) for item in str(text).replace(",", ".").split(".") if item]
+
+
 software_root = Path(os.environ.get("SOFTWARE_ROOT", "/global/cfs/cdirs/m3760/xgao/software"))
 script_dir = Path(__file__).resolve().parent
 data_dir = Path(args.data_dir) if args.data_dir else script_dir / "data"
@@ -89,6 +100,9 @@ lat_tag = os.environ.get("PION_EMFF_LAT_TAG", "S8T32")
 conf = args.config_num
 
 pf = parse_boost(args.pf) + [0]
+t_insert_list = parse_int_list(args.t_insert)
+if not t_insert_list:
+    raise ValueError("--t_insert must contain at least one integer, for example 2 or 2.4")
 q_range = range(-args.qmax, args.qmax + 1)
 qext = [[x, y, z, 0] for x in q_range for y in q_range for z in q_range]
 p_2pt = qext
@@ -101,10 +115,9 @@ parameters = {
     "neg_boost_src": parse_boost(args.neg_boost_src),
     "neg_boost_sink": parse_boost(args.neg_boost_sink),
     "width": args.width,
-    "t_insert": args.t_insert,
+    "t_insert": t_insert_list,
     "save_propagators": False,
 }
-pf_tag = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{parameters['t_insert']}"
 boost_tag = (
     f"posSrc{''.join(str(v) for v in parameters['pos_boost_src'])}"
     f"_posSink{''.join(str(v) for v in parameters['pos_boost_sink'])}"
@@ -112,6 +125,7 @@ boost_tag = (
     f"_negSink{''.join(str(v) for v in parameters['neg_boost_sink'])}"
 )
 sm_tag = os.environ.get("PION_EMFF_SM_TAG", f"1HYP_GSRC_W{args.width:g}_k0_{args.sink_interpolator}.{boost_tag}")
+src_interpolators = parse_src_interpolators(args.src_interpolators, args.src_interpolator)
 measurement = pion_EMFF(parameters)
 
 if getMPIComm().Get_rank() == 0:
@@ -125,6 +139,7 @@ if getMPIComm().Get_rank() == 0:
     print(f"--data_dir {data_dir}")
     print(f"--config_num {conf}")
     print(f"--mpi_geometry {args.mpi_geometry}")
+    print(f"--t_insert {t_insert_list}")
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
@@ -148,16 +163,11 @@ src_shift = np.array([0, 0, 0, 0])
 src_origin = np.array([int(conf) % L[i] for i in range(4)]) + src_shift
 src_positions = srcLoc_distri_eq(L, src_origin)[: args.num_src]
 
-sample_log_file = data_dir / "sample_log_emff" / f"{conf}_{sm_tag}_{pf_tag}"
-if latt_info.mpi_rank == 0:
-    sample_log_file.touch(exist_ok=True)
-
 sink_gamma = gamma_from_label(args.sink_interpolator)
 
 for pos in src_positions:
     t0_pos = time.time()
-    sample_log_tag = get_sample_log_tag(str(conf), pos, f"{sm_tag}_{pf_tag}")
-    mpi_print(latt_info, f"START: {sample_log_tag}")
+    mpi_print(latt_info, f"START source: {pos} tseps {t_insert_list}")
 
     t0 = time.time()
     srcD = source.propagator(latt_info, "point", pos)
@@ -180,65 +190,79 @@ for pos in src_positions:
     c2_tag = get_c2pt_file_tag(str(data_dir), lat_tag, conf, "EMFF.ex", pos, sm_tag)
     p_2pt_xyz = [[-v[0], -v[1], -v[2]] for v in parameters["p_2pt"]]
     phases_2pt = MomentumPhase(latt_info).getPhases(p_2pt_xyz, x0=pos)
-    measurement.contract_2pt_pion(latt_info, prop_pos, prop_neg, phases_2pt, c2_tag, src_gamma=args.src_interpolator)
+    c2_tags_by_src = {
+        src_interpolator: f"{c2_tag}.src{src_interpolator}"
+        for src_interpolator in src_interpolators
+    }
+    measurement.contract_2pt_pion_multi_src_gamma(latt_info, prop_pos.copy(), prop_neg.copy(), phases_2pt, c2_tags_by_src)
     mpi_print(latt_info, f"TIME PyQUDA: Pion 2pt contraction {time.time() - t0}s")
 
     t0 = time.time()
     prop_neg_sink = boosted_smearing(prop_neg.copy(), w=parameters["width"], boost=parameters["neg_boost_sink"])
-    seq_bw_prop = create_meson_bw_seq_pyquda(
-        dirac,
-        prop_neg_sink,
-        pos,
-        parameters["pf"],
-        parameters["t_insert"],
-        sink_gamma,
-    )
-    mpi_print(latt_info, f"TIME PyQUDA: Pion EMFF sequential propagator {time.time() - t0}s")
+    mpi_print(latt_info, f"TIME PyQUDA: Pion EMFF sink smearing {time.time() - t0}s")
 
     qext_xyz = [[v[0], v[1], v[2]] for v in parameters["qext"]]
     phases_EMFF = phase.MomentumPhase(latt_info).getPhases(qext_xyz, pos)
 
-    t0 = time.time()
-    pion_EMFFs = measurement.contract_EMFF(
-        latt_info,
-        prop_pos,
-        seq_bw_prop,
-        phases_EMFF,
-        src_gamma=args.src_interpolator,
-    )
-    mpi_print(latt_info, f"contract_EMFF over: pion_EMFFs.shape {np.shape(pion_EMFFs)} {time.time() - t0}s")
+    for t_insert in t_insert_list:
+        pf_tag = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{t_insert}"
+        sample_log_file = data_dir / "sample_log_emff" / f"{conf}_{sm_tag}_{pf_tag}"
+        sample_log_tag = get_sample_log_tag(str(conf), pos, f"{sm_tag}_{pf_tag}")
+        if latt_info.mpi_rank == 0:
+            sample_log_file.touch(exist_ok=True)
+        mpi_print(latt_info, f"START: {sample_log_tag}")
 
-    if latt_info.mpi_rank == 0:
-        pion_EMFFs = np.roll(pion_EMFFs, -pos[3], axis=-1)
-        pion_EMFFs = pion_EMFFs[:, :, : parameters["t_insert"] + 2]
-        pion_EMFFs = np.transpose(pion_EMFFs, (1, 0, 2))
-    pion_EMFFs = getMPIComm().bcast(pion_EMFFs, root=0)
-
-    tasks = list(range(len(my_gammas)))
-    rank = latt_info.mpi_rank
-    size = getMPIComm().Get_size()
-    for gidx in tasks[rank::size]:
-        gm = my_gammas[gidx]
-        tag = get_pion_EMFF_file_tag(
-            str(data_dir),
-            lat_tag,
-            conf,
-            "EMFF.ex",
+        t0_tsep = time.time()
+        t0 = time.time()
+        seq_bw_prop = create_meson_bw_seq_pyquda(
+            dirac,
+            prop_neg_sink.copy(),
             pos,
-            f"{sm_tag}.{pf_tag}.{gm}",
+            parameters["pf"],
+            t_insert,
+            sink_gamma,
         )
-        mpi_print(latt_info, f"Saving pion EMFF gamma {gm}: {tag}")
-        save_pion_EMFF_hdf5_noRoll(
-            pion_EMFFs[:, gidx : gidx + 1, :],
-            tag,
-            [gm],
-            parameters["qext"],
-            parameters["t_insert"],
+        mpi_print(latt_info, f"TIME PyQUDA: Pion EMFF sequential propagator dt{t_insert} {time.time() - t0}s")
+
+        t0 = time.time()
+        pion_EMFFs_by_src = measurement.contract_EMFF_multi_src_gamma(
             latt_info,
+            prop_pos,
+            seq_bw_prop,
+            phases_EMFF,
+            src_interpolators,
         )
+        mpi_print(latt_info, f"contract_EMFF dt{t_insert} over: src_interpolators {src_interpolators} {time.time() - t0}s")
+
+        for src_interpolator in src_interpolators:
+            pion_EMFFs = pion_EMFFs_by_src[src_interpolator]
+            mpi_print(latt_info, f"pion_EMFFs[{src_interpolator}].shape {np.shape(pion_EMFFs)}")
+            if latt_info.mpi_rank == 0:
+                pion_EMFFs = np.roll(pion_EMFFs, -pos[3], axis=-1)
+                pion_EMFFs = pion_EMFFs[:, :, : t_insert + 2]
+                pion_EMFFs = np.transpose(pion_EMFFs, (1, 0, 2))
+                tag = get_pion_EMFF_file_tag(
+                    str(data_dir),
+                    lat_tag,
+                    conf,
+                    "EMFF.ex",
+                    pos,
+                    f"{sm_tag}.src{src_interpolator}.{pf_tag}",
+                )
+                mpi_print(latt_info, f"Saving pion EMFF src {src_interpolator}: {tag}")
+                save_pion_EMFF_hdf5_noRoll(
+                    pion_EMFFs,
+                    tag,
+                    my_gammas,
+                    parameters["qext"],
+                    t_insert,
+                    latt_info,
+                )
+
+        if latt_info.mpi_rank == 0:
+            with sample_log_file.open("a+") as f:
+                f.write(sample_log_tag + "\n")
+        mpi_print(latt_info, f"DONE: {sample_log_tag} total {time.time() - t0_tsep}s")
     sync_backend_array(prop_pos.data)
 
-    if latt_info.mpi_rank == 0:
-        with sample_log_file.open("a+") as f:
-            f.write(sample_log_tag + "\n")
-    mpi_print(latt_info, f"DONE: {sample_log_tag} total {time.time() - t0_pos}s")
+    mpi_print(latt_info, f"DONE source: {pos} total {time.time() - t0_pos}s")
