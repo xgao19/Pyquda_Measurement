@@ -1,0 +1,7 @@
+__pycache__/
+.cupy-cache/
+.quda-cache/
+data/
+legacy_EMT_meson_scripts/
+profile_*.tsv
+profile_*_async.tsv
