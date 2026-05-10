@@ -112,7 +112,7 @@ def contract_pion_2pt_multi_src_gamma(latt_info, prop_forward, prop_backward, ph
     backward_line = meson_backward_line(prop_backward)
     corr_local_by_src = {
         src_gamma: xp.zeros(
-            (len(sink_gamma_ls), phases.shape[0], latt_info.global_size[3]),
+            (len(sink_gamma_ls), phases.shape[0], latt_info.size[3]),
             dtype=prop_forward.data.dtype,
         )
         for src_gamma in src_gammas

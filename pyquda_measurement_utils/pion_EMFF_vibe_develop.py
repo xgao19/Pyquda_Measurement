@@ -151,7 +151,7 @@ class pion_EMFF:
         seq_bw_line = meson_backward_line(seq_bw_prop)
         corr_local_by_src = {
             src_gamma: xp.zeros(
-                (len(current_gamma_ls), phases.shape[0], latt_info.global_size[3]),
+                (len(current_gamma_ls), phases.shape[0], latt_info.size[3]),
                 dtype=prop_pos.data.dtype,
             )
             for src_gamma in src_gammas
