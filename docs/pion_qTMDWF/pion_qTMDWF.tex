@@ -289,7 +289,7 @@ The 16 gamma matrices are stacked into a single array of shape $(16, 4, 4)$. In 
 \label{sec:smearing}
 %==========================================================================
 
-Both the mature and development modules use the same boosted smearing implementation from \texttt{boosted\_smearing\_pyquda.py}. The boosted smearing is a gauge-covariant Gaussian smearing with momentum injection, defined in the continuum as:
+Both the mature and development modules use the same boosted smearing implementation from \texttt{boosted\_smearing\_pyquda.py}. The boosted smearing is a Gaussian smearing with momentum injection, defined schematically as:
 
 \begin{equation}
     \tilde{\psi}(x) = \int d^3y \; e^{-\frac{(\mathbf{x} - \mathbf{y})^2}{2w^2}} \; e^{i \mathbf{k} \cdot (\mathbf{x} - \mathbf{y})} \; \psi(y),
@@ -304,14 +304,39 @@ The boosted smearing is implemented via distributed FFT:
     \item Compute global grid coordinates for the current MPI rank.
     \item Build the real-space kernel:
     \begin{equation}
-        K(\mathbf{x}) = \exp\left(-\frac{x^2 + y^2 + z^2}{2w^2}\right) \,
-        \exp\left(2\pi i \left( \frac{k_x}{L_x} x + \frac{k_y}{L_y} y + \frac{k_z}{L_z} z \right)\right).
+        K_{\mathbf{k}}(\mathbf{r})
+        =
+        \exp\left(-\frac{r_x^2 + r_y^2 + r_z^2}{2w^2}\right) \,
+        \exp\left[
+          2\pi i
+          \left(
+            \frac{k_x r_x}{L_x}
+            + \frac{k_y r_y}{L_y}
+            + \frac{k_z r_z}{L_z}
+          \right)
+        \right].
     \end{equation}
+    The vector \(\mathbf{k}=(k_x,k_y,k_z)\) is the integer \texttt{boost}
+    vector in units of \(2\pi/L_i\), and \(\mathbf{r}\) is the centered
+    periodic global coordinate.
     \item Forward FFT the kernel and the fermion field to momentum space.
     \item Multiply pointwise: $\tilde{\psi}(k) \leftarrow \tilde{\psi}(k) \cdot \tilde{K}(k)$.
     \item Inverse FFT back to position space.
     \item The boosted smearing wrapper applies this operation to all spin-color components of a \texttt{LatticePropagator} via \texttt{getFermion}/\texttt{setFermion} iteration.
 \end{enumerate}
+
+Equivalently,
+\begin{equation}
+  \psi^{\,{\rm smear}}_{\mathbf{k}}(\mathbf{x},t)
+  =
+  \mathcal{F}^{-1}_{3d}
+  \left[
+    \mathcal{F}_{3d}[\psi](\mathbf{p},t)\,
+    \mathcal{F}_{3d}[K_{\mathbf{k}}](\mathbf{p})
+  \right](\mathbf{x},t).
+\end{equation}
+The FFT is three-dimensional and spatial only; the kernel is broadcast over all
+Euclidean time slices.
 
 The current implementation assumes identity gauge (no gauge rotation before/after FFT), which is valid for Coulomb-gauge-fixed configurations.
 

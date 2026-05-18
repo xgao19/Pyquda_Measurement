@@ -247,6 +247,31 @@ The time-slicing operation \(\delta_{t_y,t_{\text{sep}}}\) is handled by the
 utility function \texttt{sequential12}, which extracts the propagator data
 restricted to the specified time slice.
 
+For smeared-smeared three-point functions the code applies the same sink-side
+smearing pattern to the active sequential line before the sequential inversion.
+If \(\mathcal{S}_{w,\mathbf{k}}\) denotes the boosted Gaussian smearing
+operator defined in Sec.~\ref{sec:boosted_smearing}, the actual right-hand side
+used by the current production workflow is
+\begin{equation}
+\etaseq^{SS}(\mathbf{y}; \mathbf{p}_f, t_{\text{sep}})
+  =
+  \mathcal{S}_{w,\mathbf{k}_{\rm pos,sink}}
+  \left[
+    \delta_{t_y,\,t_{\text{sep}}} \;
+    e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \;
+    \gseq \;
+    \Sq^{\text{neg},\,S\to S}
+      (\mathbf{y}, t_{\text{sep}}; \mathbf{x}_0, 0)
+  \right] .
+\label{eq:etaseq_smeared}
+\end{equation}
+Here \(\Sq^{\text{neg},\,S\to S}\) already contains source smearing and the
+spectator-line sink smearing with \(\mathbf{k}_{\rm neg,sink}\), while the
+outer \(\mathcal{S}_{w,\mathbf{k}_{\rm pos,sink}}\) supplies the missing
+sink-side smearing for the active quark line represented by the sequential
+propagator.  This is the meson analogue of the proton fixed-sink sequential
+source convention.
+
 \subsection{Sequential Inversion}
 
 The sequential propagator \(\Sseq\) is obtained by solving the Dirac equation
@@ -405,11 +430,12 @@ where \(n\) is the \quda{} bitmask index, and stored in a stacked array of shape
 
 % ===========================================================================
 \section{Boosted Smearing}
+\label{sec:boosted_smearing}
 % ===========================================================================
 
 To improve the overlap of the interpolating operators with the pion ground state
-at non-zero momentum, the code employs \emph{gauge-covariant Gaussian smearing}
-with momentum injection (boosted smearing).
+at non-zero momentum, the code employs \emph{boosted Gaussian smearing} with
+momentum injection.
 
 \subsection{Kernel}
 
@@ -418,14 +444,23 @@ The smearing kernel in position space is
 \begin{equation}
 K(\mathbf{r}; w, \mathbf{k})
   = \exp\!\Big(-\frac{\mathbf{r}^2}{2w^2}\Big) \,
-    \exp\!\Big(2\pi i \, \frac{\mathbf{k}\cdot\mathbf{r}}{L}\Big) ,
+    \exp\!\left[
+      2\pi i
+      \left(
+        \frac{k_x r_x}{L_x}
+        + \frac{k_y r_y}{L_y}
+        + \frac{k_z r_z}{L_z}
+      \right)
+    \right] ,
 \label{eq:kernel}
 \end{equation}
 
-where \(w\) is the Gaussian width (in lattice units), \(\mathbf{k}\) is the
-injected momentum (integer vector), and \(L\) is the spatial lattice extent.
-The first factor is the standard gauge-covariant Gaussian; the second factor
-imparts momentum to the source or sink.
+where \(w\) is the Gaussian width in lattice units and
+\(\mathbf{k}=(k_x,k_y,k_z)\) is the integer momentum-smearing vector used in the
+code's \texttt{boost} argument.  The coordinates \(\mathbf{r}\) are centered
+periodic global lattice coordinates, e.g. \(r_x\in[-L_x/2,L_x/2)\).  The first
+factor is the Gaussian profile and the second factor injects the momentum
+\(2\pi(k_x/L_x,k_y/L_y,k_z/L_z)\).
 
 \subsection{Implementation}
 
@@ -434,6 +469,20 @@ fermion is first Fourier-transformed (using \pyquda's distributed 3D FFT),
 multiplied by the Fourier transform of \(K(\mathbf{r})\), and then
 inverse-transformed back to position space.  This is done independently for each
 spin-color component of the propagator or fermion field.
+
+Equivalently, for a fermion field \(\psi\),
+\begin{equation}
+  \psi^{\,{\rm smear}}_{\mathbf{k}}(\mathbf{x},t)
+  =
+  \mathcal{F}^{-1}_{3d}
+  \left[
+    \mathcal{F}_{3d}[\psi](\mathbf{p},t)\,
+    \mathcal{F}_{3d}[K_{\mathbf{k}}](\mathbf{p})
+  \right](\mathbf{x},t).
+\label{eq:fft_smearing}
+\end{equation}
+The FFT is purely spatial; the same kernel is broadcast to every Euclidean time
+slice.
 
 The smearing assumes the gauge links are in the identity gauge (or sufficiently
 smoothed), so no additional gauge rotation is applied.
@@ -849,7 +898,7 @@ The primary source files comprising the pion EMFF measurement are:
         sequential sources (used in other workflows).
 
   \item \texttt{pyquda\_measurement\_utils/boosted\_smearing\_pyquda.py}
-        --- Implements gauge-covariant Gaussian smearing with momentum
+        --- Implements the FFT boosted Gaussian smearing kernel with momentum
         injection via distributed 3D FFT.
 
   \item \texttt{pyquda\_measurement\_utils/io\_corr.py}

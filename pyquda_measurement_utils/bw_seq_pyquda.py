@@ -129,6 +129,8 @@ def create_meson_bw_seq_pyquda(
     momentum,
     t_insert,
     sink_gamma,
+    sm_width=None,
+    sm_boost=None,
 ):
     """
     Build and invert the meson fixed-sink backward sequential source.
@@ -158,6 +160,8 @@ def create_meson_bw_seq_pyquda(
 
     src_seq = core.LatticePropagator(latt_info)
     src_seq.data = seq_data
+    if sm_width is not None and sm_boost is not None:
+        src_seq = boosted_smearing(src_seq, w=sm_width, boost=sm_boost)
     return core.invertPropagator(dirac, src_seq, 1, 0)
 
 

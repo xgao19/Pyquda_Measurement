@@ -174,6 +174,8 @@ for pos in src_positions:
         parameters["pf"],
         parameters["t_insert"],
         sink_gamma,
+        parameters["width"],
+        parameters["pos_boost"],
     )
     mpi_print(latt_info, f"TIME PyQUDA: Pion meson sequential propagator {time.time() - t0}s")
 

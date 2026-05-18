@@ -279,12 +279,40 @@ separate boost parameters \texttt{pos\_boost} and \texttt{neg\_boost}:
   \texttt{prop\_b} &\leftarrow \text{boosted\_smearing}(\texttt{prop\_b},
                       w, \texttt{neg\_boost}).
 \end{align}
-Boosted smearing is a gauge-covariant Gaussian convolution in momentum space
-with an injected momentum shift: the fermion field is Fourier-transformed
-(assuming identity gauge, i.e., already fixed to a smooth gauge), multiplied by
-a momentum-shifted Gaussian kernel $\exp\bigl(-\frac{|\mathbf{r}|^2}{2w^2} + i
-\mathbf{k}_{\rm boost}\cdot\mathbf{r}\bigr)$, and inverse-transformed back to
-position space.
+The implementation in \verb|boosted_smearing_pyquda.py| uses a spatial
+FFT convolution with the real-space kernel
+\begin{equation}
+  K_{\mathbf{k}}(\mathbf{r})
+  =
+  \exp\!\left(-\frac{r_x^2+r_y^2+r_z^2}{2w^2}\right)
+  \exp\!\left[
+    2\pi i
+    \left(
+      \frac{k_x r_x}{L_x}
+      + \frac{k_y r_y}{L_y}
+      + \frac{k_z r_z}{L_z}
+    \right)
+  \right].
+  \label{eq:qtmd_smear_kernel}
+\end{equation}
+Here \(\mathbf{k}=(k_x,k_y,k_z)\) is the integer vector supplied by
+\texttt{pos\_boost} or \texttt{neg\_boost}, while \(\mathbf{r}\) is the centered
+periodic global coordinate on the current MPI rank.  For each spin-color column
+of a fermion or propagator the smeared field is
+\begin{equation}
+  \psi^{\,{\rm smear}}_{\mathbf{k}}(\mathbf{x},t)
+  =
+  \mathcal{F}^{-1}_{3d}
+  \left[
+    \mathcal{F}_{3d}[\psi](\mathbf{p},t)\,
+    \mathcal{F}_{3d}[K_{\mathbf{k}}](\mathbf{p})
+  \right](\mathbf{x},t).
+  \label{eq:qtmd_fft_smear}
+\end{equation}
+The FFT is three-dimensional and spatial only; the same kernel is applied on
+each Euclidean time slice.  The current implementation assumes identity gauge
+for this smearing step, i.e. no explicit gauge rotation is applied before or
+after the FFT.
 
 %==========================================================================
 \section{Three-Point qTMD Function (Pre-Sequential-Trick)}
@@ -369,6 +397,27 @@ The phase function $\Phi_{p_f}(\mathbf{r}) = e^{-i\mathbf{p}_f \cdot
 sign convention as the two-point function.  The time slice restriction is
 enforced by \verb|pyquda_utils.source.sequential12|, which masks all time
 slices except $t_{\rm sink}$.
+
+For the smeared-smeared three-point function, the source above is smeared once
+more before the sequential inversion:
+\begin{equation}
+  \eta_{\rm seq}^{SS}
+  =
+  \mathcal{S}_{w,\mathbf{k}_{\rm pos}}
+  \left[
+    \delta_{t_y,\, t_{\rm sink}}\;
+    \Phi_{p_f}(\mathbf{y}-\mathbf{x}_0)\;
+    \Gamma_{\rm seq}\,
+    S_q^{S\to S,\,{\rm neg}}(\mathbf{y},t_{\rm sink};\mathbf{x}_0,0)
+  \right].
+  \label{eq:qtmd_eta_seq_smear}
+\end{equation}
+The input line \(S_q^{S\to S,\,{\rm neg}}\) already carries the spectator-line
+sink smearing with \texttt{neg\_boost}.  The outer
+\(\mathcal{S}_{w,\mathbf{k}_{\rm pos}}\) supplies the active-line sink smearing
+associated with the sequential propagator.  This extra smearing is needed for a
+consistent smeared-smeared three-point function and matches the proton
+fixed-sink sequential-source pattern.
 
 The sequential propagator solves
 \begin{equation}
@@ -552,6 +601,25 @@ contains a jump larger than one lattice unit, the code raises a
 \texttt{ValueError} rather than silently producing an incorrect path.  This
 constraint is satisfied by construction of the Wilson line index list (see
 Sec.~\ref{sec:wilson_lists}).
+
+At zero separation the local limit is common to the qTMD, CG-PDF, GI-PDF, and
+EMFF contractions:
+\begin{equation}
+  b_T = b_z = \eta = 0,\qquad \mathbf{q}=0
+  \quad\Longrightarrow\quad
+  C_3^{\rm qTMD,CG}
+  =
+  C_3^{\rm PDF,CG}
+  =
+  C_3^{\rm PDF,GI}
+  =
+  C_3^{\rm EMFF}
+  \quad\text{for the same local current } \Gamma .
+  \label{eq:qtmd_local_limit}
+\end{equation}
+This is a useful diagnostic of the phase, gamma, and sequential-source
+conventions.  In the S8T32 smoke test the \(\Gamma=\gamma_4\) local-current
+datasets agree with the pion EMFF output at machine precision.
 
 %==========================================================================
 \section{Wilson Line Index Lists}
@@ -880,10 +948,17 @@ for the quark (forward) and antiquark (backward) lines respectively.
 
 In the Gaussian smearing kernel
 \begin{equation}
-  K(\mathbf{r}) = \exp\!\left(
-    -\frac{|\mathbf{r}|^2}{2w^2}
-    + i\,\mathbf{k}_{\rm boost}\cdot\mathbf{r}
-  \right),
+  K_{\mathbf{k}}(\mathbf{r})
+  =
+  \exp\!\left(-\frac{r_x^2+r_y^2+r_z^2}{2w^2}\right)
+  \exp\!\left[
+    2\pi i
+    \left(
+      \frac{k_x r_x}{L_x}
+      + \frac{k_y r_y}{L_y}
+      + \frac{k_z r_z}{L_z}
+    \right)
+  \right],
 \end{equation}
 the boost momentum shifts the peak of the smearing kernel in momentum space,
 effectively selecting quark fields that carry momentum $\mathbf{k}_{\rm boost}$.

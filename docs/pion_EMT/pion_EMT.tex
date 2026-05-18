@@ -195,6 +195,36 @@ where the first line applies all 16 sink gamma matrices via a stacked index \cod
   \item Source smearing uses boost \code{pos\_boost} on the forward source and \code{neg\_boost} on the backward source (when they differ).
   \item Sink smearing is applied during the 2pt contraction with the same \code{pos\_boost} and \code{neg\_boost}.
 \end{itemize}
+The smearing operator used throughout this note is the FFT boosted Gaussian
+operator \(\mathcal{S}_{w,\mathbf{k}}\).  Its real-space kernel is
+\begin{equation}\label{eq:emt_smear_kernel}
+  K_{\mathbf{k}}(\mathbf{r})
+  =
+  \exp\!\left(-\frac{r_x^2+r_y^2+r_z^2}{2w^2}\right)
+  \exp\!\left[
+    2\pi i
+    \left(
+      \frac{k_x r_x}{L_x}
+      + \frac{k_y r_y}{L_y}
+      + \frac{k_z r_z}{L_z}
+    \right)
+  \right],
+\end{equation}
+where \(\mathbf{k}\) is the integer vector supplied by \code{pos\_boost} or
+\code{neg\_boost}.  The current \code{boosted\_smearing\_pyquda.py}
+implementation applies a three-dimensional spatial FFT convolution,
+\begin{equation}\label{eq:emt_fft_smear}
+  \psi^{\,{\rm smear}}_{\mathbf{k}}(\mathbf{x},t)
+  =
+  \mathcal{F}^{-1}_{3d}
+  \left[
+    \mathcal{F}_{3d}[\psi](\mathbf{p},t)\,
+    \mathcal{F}_{3d}[K_{\mathbf{k}}](\mathbf{p})
+  \right](\mathbf{x},t),
+\end{equation}
+to every spin-color source column of a propagator.  The FFT is spatial only and
+the same kernel is used on each Euclidean time slice.  No explicit gauge
+rotation is applied in the current implementation.
 
 \subsection{Connected Three-Point Function (before sequential trick)}
 \label{sec:3pt_pre_seq}
@@ -387,6 +417,26 @@ In the einsum implementation:
   seq_data = einsum("wtzyx, wtzyxilab -> wtzyxilab", mom_phase, seq_data)
   seq_data = einsum("ij, wtzyxjlab -> wtzyxilab", gamma_seq, seq_data)
 \end{verbatim}
+
+\textbf{Step 2b: Smear the active sequential source.}
+
+For a smeared-smeared connected three-point function the code smears the
+sequential source before inversion:
+\begin{equation}\label{eq:eta_seq_smeared}
+  \eta_{\text{seq}}^{SS}
+  =
+  \mathcal{S}_{w,\mathtt{neg\_boost}}
+  \left[
+    \delta_{t_y,\, t_0 + t_{\text{sep}}}\;
+    \Phi_{p_f}(y - x_0)\;
+    \Gamma_{\text{seq}}\;
+    \mathtt{prop\_fw\_SS}(y, x_0)
+  \right].
+\end{equation}
+The input \(\mathtt{prop\_fw\_SS}\) has already received the
+\code{pos\_boost} sink smearing.  The outer
+\(\mathcal{S}_{w,\mathtt{neg\_boost}}\) represents the active line associated
+with the backward sequential propagator in the current pion EMT implementation.
 
 \textbf{Step 3: Invert the Dirac operator.}
 

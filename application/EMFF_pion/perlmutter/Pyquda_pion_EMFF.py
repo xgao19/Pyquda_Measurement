@@ -221,6 +221,8 @@ for pos in src_positions:
             parameters["pf"],
             t_insert,
             sink_gamma,
+            parameters["width"],
+            parameters["pos_boost_sink"],
         )
         mpi_print(latt_info, f"TIME PyQUDA: Pion EMFF sequential propagator dt{t_insert} {time.time() - t0}s")
 

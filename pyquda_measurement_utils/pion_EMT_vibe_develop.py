@@ -584,6 +584,8 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
                 self.pf,
                 t_sep,
                 sink_gamma,
+                self.width if self.CG_GaussSmear else None,
+                self.neg_boost if self.CG_GaussSmear else None,
             )
 
             prop_fw_flow = prop_fw_SP.copy()

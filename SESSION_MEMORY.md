@@ -1,6 +1,6 @@
 # PyQUDA / QUDA Session Memory
 
-Last updated: 2026-05-04
+Last updated: 2026-05-18
 
 This file captures the important state from the current collaboration so the
 next session can resume quickly.
@@ -341,3 +341,184 @@ Read `/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/SESSION_MEMORY.md
 1. Add or adapt PyQUDA-based task scripts.
 2. Add batch job wrappers that reuse the same environment.
 3. Extend smoke tests or add new physics checks using the bundled test gauge.
+
+## 2026-05-18 update: pion sequential-source smearing and docs
+
+Context:
+
+- A pion EMFF production ratio check on the `l48c64a060` ensemble suggested
+  the raw `C3/C2` ratio was too small by a large factor.
+- Tests with artificial volume factors such as `L^3/24` or `L^3/72` were
+  informative but not considered the correct physics explanation because the
+  normalization should not depend on this kind of ad hoc lattice-size factor.
+- Comparing against the known-good proton sequential-source construction showed
+  the key missing ingredient: the meson sequential source also needs sink-side
+  smearing of the active line before the sequential inversion.
+
+Implemented code changes:
+
+- `pyquda_measurement_utils/bw_seq_pyquda.py`
+  - `create_meson_bw_seq_pyquda(...)` now accepts optional `sm_width=None` and
+    `sm_boost=None`.
+  - If both are provided, the code applies:
+    `src_seq = boosted_smearing(src_seq, w=sm_width, boost=sm_boost)`
+    before `core.invertPropagator(...)`.
+  - Default `None` values preserve the old behavior for any caller that does
+    not request active-line sequential-source smearing.
+- `application/EMFF_pion/perlmutter/Pyquda_pion_EMFF.py`
+  - EMFF now passes `parameters["width"]` and
+    `parameters["pos_boost_sink"]` to `create_meson_bw_seq_pyquda(...)`.
+  - Rationale: the input line `prop_neg_sink` already contains the spectator
+    sink smearing with `neg_boost_sink`; the outer sequential-source smearing
+    supplies the active forward-line sink smearing with `pos_boost_sink`.
+- `application/pion_TMD_CG/perlmutter/Pyquda_pion_TMD_CG.py`
+  - pion qTMD now passes `parameters["width"]` and
+    `parameters["pos_boost"]` to `create_meson_bw_seq_pyquda(...)`.
+  - Rationale: the input line has already been sink smeared with `neg_boost`;
+    the sequential-source smearing supplies the active line with `pos_boost`.
+- `pyquda_measurement_utils/pion_EMT_vibe_develop.py`
+  - pion EMT connected 3pt now passes
+    `self.width if self.CG_GaussSmear else None` and
+    `self.neg_boost if self.CG_GaussSmear else None` to
+    `create_meson_bw_seq_pyquda(...)`.
+  - Rationale: in the current EMT implementation `prop_fw_SS` has already been
+    sink smeared with `pos_boost`; the sequential propagator represents the
+    opposite active line and receives `neg_boost`.
+
+Validation for the sequential-source smearing change:
+
+- `python3 -m py_compile` passed for:
+  - `pyquda_measurement_utils/bw_seq_pyquda.py`
+  - `pyquda_measurement_utils/pion_EMT_vibe_develop.py`
+  - `application/EMFF_pion/perlmutter/Pyquda_pion_EMFF.py`
+  - `application/pion_TMD_CG/perlmutter/Pyquda_pion_TMD_CG.py`
+- EMFF S8T32 smoke test on `login32` with test gauge:
+  - `/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0`
+  - `qmax=0`, one source, `src_interpolator=5`, `sink_interpolator=5`,
+    `pf=0.0.0`, `t_insert=2.4`
+  - output was written to `/tmp/pion_emff_main_seqsmear` on `login32`
+  - ratio check after the fix:
+    - `dt=2`: `C3/C2` at `tau=dt` approximately
+      `0.6536689621 + 0.0001869748i`
+    - `dt=2` middle-window average approximately
+      `0.6918008316 + 0.0003120646i`
+    - `dt=4`: `C3/C2` at `tau=dt` approximately
+      `0.6910497146 - 0.0002191994i`
+    - `dt=4` middle-window average approximately
+      `0.7847968233 + 0.0001809609i`
+  - Before this active-line sequential-source smearing diagnosis, the same
+    style of S8T32 test had ratios of order `0.05`; the improvement strongly
+    supports the smearing fix as the real source of the production ratio issue.
+- pion qTMD S8T32 smoke test on `login32` passed:
+  - command used small settings: `qmax=0`, `b_z=0`, `b_T=0`, one source,
+    `t_insert=2`, `src_interpolator=fixed_g5`, `sink_interpolator=5`
+  - output was written to `/tmp/pion_tmd_main_seqsmear`
+  - completed forward inversion, pion 2pt, meson sequential inversion,
+    qTMD CG, GI_PDF, CG_PDF contractions, and HDF5 writing.
+- pion EMT minimal runtime smoke test on `login32` passed:
+  - temporary script wrote to `/tmp/pion_emt_main_seqsmear`
+  - used `qext=[[0,0,0,0]]`, `p_2pt=[[0,0,0,0]]`, `pf=[0,0,0,0]`,
+    `t_separations=[2]`, `flow_steps=0`, `src_interpolator=5`,
+    `sink_interpolator=5`
+  - completed source smearing, 2pt, sequential-source inversion, and step-0
+    connected EMT contraction.
+
+Local-limit consistency check:
+
+- On `login32`, compared the S8T32 smoke outputs:
+  - EMFF dataset: `SS/T/PX0PY0PZ0`
+  - qTMD local CG datasets:
+    - `SS/T/PX0PY0PZ0/b_X/eta0/bT0/bz0`
+    - `SS/T/PX0PY0PZ0/b_Y/eta0/bT0/bz0`
+  - GI_PDF dataset: `SS/T/PX0PY0PZ0/b_X/eta0/bT0/bz0`
+  - CG_PDF dataset: `SS/T/PX0PY0PZ0/b_X/eta0/bT0/bz0`
+- Conditions:
+  - `qext=0`
+  - `pf=0`
+  - `dt=2`
+  - source and sink are `gamma5`
+  - local current is `T` / `gamma_4`
+  - `bT=0`, `bz=0`, `eta=0`
+- Results:
+  - max absolute difference between EMFF and each qTMD/PDF local output:
+    `8.401198274707147e-14`
+  - max relative difference:
+    `7.016753011768688e-16`
+  - qTMD `b_X - b_Y` max absolute difference: `0.0`
+- Conclusion:
+  - At zero displacement and zero momentum transfer,
+    `EMFF = local qTMD CG = GI_PDF = CG_PDF` at machine precision for the
+    tested current/gamma setup.
+
+Production directory update:
+
+- The production run directory:
+  - `/global/cfs/cdirs/m5208/xgao/runs/l48c64a060/pion_EMFF`
+- The active production scripts there are:
+  - `Pyquda_pion_EMFF_pf0.py`
+  - `Pyquda_pion_EMFF_pf3.py`
+- Both scripts were patched to pass:
+  - `parameters["width"]`
+  - `parameters["pos_boost_sink"]`
+  to `create_meson_bw_seq_pyquda(...)`.
+- Only these production Python scripts were edited; data, logs, and submit
+  scripts were not modified.
+- The production `run.sh` and submit scripts set:
+  - `PYQUDA_MEASUREMENT_ROOT=/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement`
+  - `PYTHONPATH` includes this root
+  so they will use the updated repo-side `bw_seq_pyquda.py`.
+- `ast.parse` passed for both production scripts.
+- `py_compile` was not used in that production directory because Python tried
+  to write `__pycache__` and the filesystem rejected the write.
+
+Documentation update:
+
+- Updated the pion-related LaTeX docs:
+  - `docs/pion_EMFF/pion_EMFF.tex`
+  - `docs/pion_qTMD/pion_qTMD.tex`
+  - `docs/pion_EMT/pion_EMT.tex`
+  - `docs/pion_qTMDWF/pion_qTMDWF.tex`
+- Added the smearing kernel matching `boosted_smearing_pyquda.py`:
+
+```tex
+K_{\mathbf{k}}(\mathbf{r})
+=
+\exp\left[-\frac{r_x^2+r_y^2+r_z^2}{2w^2}\right]
+\exp\left[
+  2\pi i
+  \left(
+    \frac{k_x r_x}{L_x}
+    + \frac{k_y r_y}{L_y}
+    + \frac{k_z r_z}{L_z}
+  \right)
+\right].
+```
+
+- Documented that:
+  - `boost=[kx,ky,kz]` is an integer momentum-smearing vector in units of
+    `2*pi/L_i`
+  - smearing is implemented as a three-dimensional spatial FFT convolution
+  - the same kernel is broadcast over all Euclidean time slices
+  - current implementation assumes identity gauge / no explicit gauge rotation
+- Updated EMFF/qTMD/EMT sequential-source formulas to include active-line
+  sequential-source smearing before inversion.
+- Added qTMD local-limit consistency statement:
+  - at `bT=bz=eta=0` and `q=0`, local qTMD CG, CG_PDF, GI_PDF, and EMFF
+    should agree for the same local current.
+- LaTeX equation begin/end counts were checked and balanced for all four edited
+  tex files.
+- No PDF files were regenerated because `pdflatex`, `latexmk`, and `tectonic`
+  were not available in the current environment.
+
+Current uncommitted working tree notes:
+
+- As of this update, the repo has uncommitted changes in:
+  - `application/EMFF_pion/perlmutter/Pyquda_pion_EMFF.py`
+  - `application/pion_TMD_CG/perlmutter/Pyquda_pion_TMD_CG.py`
+  - `docs/pion_EMFF/pion_EMFF.tex`
+  - `docs/pion_EMT/pion_EMT.tex`
+  - `docs/pion_qTMD/pion_qTMD.tex`
+  - `docs/pion_qTMDWF/pion_qTMDWF.tex`
+  - `pyquda_measurement_utils/bw_seq_pyquda.py`
+  - `pyquda_measurement_utils/pion_EMT_vibe_develop.py`
+- Do not revert these unless the user explicitly asks.
