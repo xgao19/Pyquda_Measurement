@@ -18,6 +18,7 @@ The actively maintained workflows are:
 - Pion/meson EMT measurements with flowed quark and gluon observables.
 - Proton EMT connected measurements plus shared quark/gluon one-point outputs.
 - Shared EMT disconnected one-point workflows with optional hierarchical probing.
+- Shared qTMD/PDF disconnected one-point workflows for pion/proton analysis.
 - Existing proton qTMD and pion qTMDWF utilities used as mature references.
 
 The most validated runtime target is currently NERSC Perlmutter with NVIDIA
@@ -45,6 +46,7 @@ io_corr.py                      HDF5 tag helpers and correlator writers.
 pion_EMFF_vibe_develop.py       Pion local-current EMFF contractions.
 pion_EMT_vibe_develop.py        Pion/meson flowed EMT contractions and one-point observables.
 pion_qTMD_vibe_develop.py       Pion qTMD and PDF-style connected contractions.
+Disconnected_1pt_qTMD_vibe_develop.py Shared disconnected qTMD/PDF one-point loops.
 pion_qTMDWF_pyquda.py           Mature pion qTMDWF reference workflow.
 proton_EMT_vibe_develop.py      Proton flowed EMT connected contractions.
 proton_qTMD_pyquda.py           Mature proton qTMD/PDF reference workflow.
@@ -77,6 +79,7 @@ Runnable workflows live under `application/`.
 application/EMT_meson/          Pion/meson EMT workflows.
 application/EMT_proton/         Proton EMT workflows.
 application/EMT_disconnected_1pt/ Shared quark/gluon EMT one-point workflows.
+application/qTMD_disconnected_1pt/ Shared qTMD/PDF one-point workflows.
 application/EMFF_pion/          Pion electromagnetic form factor workflow.
 application/pion_TMD_CG/        Pion qTMD/PDF-style workflow.
 ```
@@ -100,6 +103,9 @@ bash application/EMT_proton/perlmutter/run_proton_gluon_1pt.sh
 # Shared EMT disconnected one-point workflows
 bash application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh
 bash application/EMT_disconnected_1pt/perlmutter/run_gluon_1pt.sh
+
+# Shared qTMD/PDF disconnected one-point workflow
+bash application/qTMD_disconnected_1pt/perlmutter/run_qTMD_1pt.sh
 
 # Pion qTMD and pion EMFF
 bash application/pion_TMD_CG/perlmutter/run_pion_TMD_CG.sh

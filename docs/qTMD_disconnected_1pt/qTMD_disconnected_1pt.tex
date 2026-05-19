@@ -1,0 +1,241 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb}
+\usepackage{physics}
+\usepackage{hyperref}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\Trsc}{\operatorname{Tr}_{sc}}
+
+\title{\textbf{Disconnected qTMD/PDF One-Point Building Blocks}\\[4pt]
+       \large Stochastic Quark Loops for Pion and Proton qTMD Analysis}
+\author{PyQUDA Measurement Notes}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Purpose}
+
+This note documents the first PyQUDA implementation of disconnected qTMD/PDF
+one-point quark loops.  The source file is
+\code{pyquda\_measurement\_utils/Disconnected\_1pt\_qTMD\_vibe\_develop.py},
+and the Perlmutter application is
+\code{application/qTMD\_disconnected\_1pt/perlmutter}.
+
+The loops are hadron independent.  Pion and proton information enters later,
+when the loop is combined with the corresponding hadron two-point function in
+ensemble analysis.
+
+\section{Disconnected qTMD Loop}
+
+For a stochastic source \(\xi_r\), define
+\begin{equation}
+  \eta_r = D^{-1}\xi_r,
+\end{equation}
+where \(D\) is the same clover Dirac operator used by the connected qTMD
+measurements.  The implemented disconnected qTMD/PDF loop is
+\begin{equation}
+  L_{\Gamma,b}(q,\tau)
+  =
+  \frac{1}{N_r}
+  \sum_{r=1}^{N_r}
+  \sum_{\mathbf{x}}
+  e^{i\mathbf{q}\cdot\mathbf{x}}\,
+  \Trsc\!\left[
+    \eta_r^\dagger(x)\,
+    \Gamma\,
+    O_b\,\xi_r(x)
+  \right],
+\end{equation}
+where \(x=(\mathbf{x},\tau)\), \(\Gamma\) is one of the 16 bilinear gamma
+matrices, and \(O_b\) is a nonlocal displacement or Wilson-line operator.
+
+The current code convention is therefore
+\begin{equation}
+  \boxed{
+  \mathrm{loop\ convention}
+  =
+  \eta^\dagger \Gamma O_b \xi
+  }.
+\end{equation}
+The nonlocal operator \(O_b\) acts on the stochastic source side.  This choice
+is intentionally minimal and makes the first implementation easy to compare
+against connected PDF and local-current limits.
+
+\section{Supported Operators}
+
+The first implementation supports three operator kinds:
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\code{operator\_kind} & Operator & Status \\
+\midrule
+\code{GI\_PDF} & Straight-\(z\) gauge-invariant PDF Wilson line & Implemented \\
+\code{CG\_PDF} & Straight-\(z\) coordinate-gauge displacement & Implemented \\
+\code{CG\_qTMD} & qTMD-style coordinate-gauge displacement & Implemented \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Straight-\(z\) PDF Operators}
+
+For PDF operators,
+\begin{equation}
+  b = b_z \hat{z}.
+\end{equation}
+The coordinate-gauge version is a plain lattice shift:
+\begin{equation}
+  O_b^{\mathrm{CG\_PDF}}\xi(x) = \xi(x + b_z\hat{z}).
+\end{equation}
+The gauge-invariant version applies the straight Wilson line through repeated
+covariant shifts:
+\begin{equation}
+  O_b^{\mathrm{GI\_PDF}}\xi(x)
+  =
+  U_z(x)U_z(x+\hat{z})\cdots
+  \xi(x+b_z\hat{z}),
+\end{equation}
+with the corresponding backward-link product for negative \(b_z\).  In code
+this is implemented by repeated calls to \code{gauge.pure\_gauge.covDev}.
+
+\subsection{Coordinate-Gauge qTMD Operator}
+
+The current qTMD operator follows the connected qTMD diagnostic convention:
+\begin{equation}
+  O_b^{\mathrm{CG\_qTMD}}\xi(x)
+  =
+  \xi(x + b_T \hat{e}_{\perp} + b_z\hat{z}),
+\end{equation}
+where \(\hat{e}_{\perp}\) is either \(\hat{x}\) or \(\hat{y}\).  The two
+transverse directions are stored as \(\code{b\_X}\) and \(\code{b\_Y}\) in the
+HDF5 output.
+
+\paragraph{Current limitation.}
+A fully gauge-invariant staple qTMD Wilson line is not implemented yet.  The
+first production-quality disconnected qTMD extension should add the staple path
+explicitly rather than relying on the coordinate-gauge displacement.
+
+\section{Momentum Convention}
+
+The loop momentum is the current momentum transfer,
+\begin{equation}
+  q = p_f - p_i.
+\end{equation}
+The one-point loop itself has no hadron source or sink momentum.  Those labels
+enter when the loop is combined with a pion or proton two-point function.
+
+\section{Combination with Hadron Two-Point Functions}
+
+For a hadron two-point correlator \(C_2^H(p_f,t)\), the disconnected qTMD
+three-point building block is formed as
+\begin{equation}
+  C^{H,\mathrm{disc}}_{3,\Gamma,b}
+  (p_f,p_i;t,\tau)
+  =
+  \left\langle
+    C_2^H(p_f,t)\,
+    L_{\Gamma,b}(q,\tau)
+  \right\rangle_{\mathrm{cfg}}
+  -
+  \left\langle C_2^H(p_f,t)\right\rangle_{\mathrm{cfg}}
+  \left\langle L_{\Gamma,b}(q,\tau)\right\rangle_{\mathrm{cfg}},
+\end{equation}
+with
+\begin{equation}
+  q = p_f - p_i.
+\end{equation}
+The corresponding ratio is typically
+\begin{equation}
+  R^{H,\mathrm{disc}}_{\Gamma,b}(t,\tau)
+  =
+  \frac{
+    C^{H,\mathrm{disc}}_{3,\Gamma,b}(p_f,p_i;t,\tau)
+  }{
+    C_2^H(p_f,t)
+  },
+\end{equation}
+before applying the qTMD/PDF renormalization and soft-factor analysis.
+
+The vacuum-subtraction term is essential because the one-point loop is hadron
+independent.
+
+\section{Stochastic Sources and Hierarchical Probing}
+
+The source scheme is controlled by
+\begin{equation}
+  \code{noise\_scheme}
+  \in
+  \{\code{zn},\code{hierarchical\_probing}\}.
+\end{equation}
+For hierarchical probing, a base source \(\xi_b\) is multiplied by Rademacher
+probing vectors \(h_k(x)=\pm 1\):
+\begin{equation}
+  \xi_{b,k}(x) = h_k(x)\xi_b(x).
+\end{equation}
+The number of effective inversions is
+\begin{equation}
+  N_{\mathrm{eff}}
+  =
+  N_{\mathrm{base}}\,
+  N_{\mathrm{HP}}.
+\end{equation}
+
+The implemented HP ordering choices are
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Ordering & Meaning \\
+\midrule
+\code{global\_xyzt\_gray\_projected\_to\_evenodd}
+& Gray code the full \(x,y,z,t\) site id. \\
+\code{spatial\_xyz\_then\_t\_gray\_projected\_to\_evenodd}
+& Gray code spatial sites first, then append time bits. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Spin-color dilution and time dilution are not currently implemented.
+
+\section{HDF5 Layout}
+
+The output tag helper is
+\code{get\_disconnected\_qTMD\_1pt\_file\_tag}.  The writer stores:
+\begin{equation}
+  \code{raw/loop\_pervec}
+  \quad\mathrm{with\ shape}\quad
+  [N_{\mathrm{eff}}, N_W, N_\Gamma, N_q, N_t].
+\end{equation}
+The raw bookkeeping datasets are
+\begin{equation}
+  \code{raw/source\_index},\quad
+  \code{raw/base\_noise\_index},\quad
+  \code{raw/hp\_index}.
+\end{equation}
+
+The averaged data are divided by the spatial volume and stored in a qTMD-like
+layout:
+\begin{equation}
+  \code{avg/SS/<gamma>/PX...PY...PZ.../b\_X/eta0/bT.../bz...}.
+\end{equation}
+For \(y\)-direction transverse displacements the group is \(\code{b\_Y}\).
+
+\section{Validation Status}
+
+The first implementation has been checked with:
+\begin{itemize}
+  \item Python syntax compilation.
+  \item A Perlmutter login-node smoke test for \(\code{GI\_PDF}\) at \(b_z=0\).
+  \item A Perlmutter login-node smoke test for \(\code{GI\_PDF}\) at \(b_z=1\).
+  \item A Perlmutter login-node smoke test for \(\code{CG\_qTMD}\) at
+        \(b_T=1,b_z=1\).
+\end{itemize}
+
+The next physics validation should compare the local/PDF limits against the
+connected pion and proton qTMD workflows after constructing the disconnected
+ratio with matched two-point functions.
+
+\end{document}

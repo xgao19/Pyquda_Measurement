@@ -45,6 +45,18 @@ def get_qTMD_file_tag(data_dir, lat, cfg, ama,src, sm):
     return data_dir + "/qTMD/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag
 
 
+# Build the standard disconnected qTMD one-point output tag.
+def get_disconnected_qTMD_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
+
+    cfg_tag = str(cfg)
+    lat_tag = str(lat) + ".qTMD1pt"
+    ama_tag = str(ama)
+    src_tag = "x"+str(src[0]) + "y"+str(src[1]) + "z"+str(src[2]) + "t"+str(src[3])
+    sm_tag  = str(sm)
+
+    return data_dir + "/qTMD1pt/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag
+
+
 # Build the standard qTMDWF output tag.
 def get_qTMDWF_file_tag(data_dir, lat, cfg, ama, src, sm):
 
@@ -314,6 +326,33 @@ def save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep
 # Save pion qTMD/PDF data using the same HDF5 layout as the proton writer.
 def save_qTMD_pion_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info):
     save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info)
+
+
+# Save disconnected qTMD/PDF one-point loops.
+def save_disconnected_qTMD_1pt_hdf5(tag, loop_pervec, loop_avg, gammalist, plist, W_index_list, attrs=None, source_bookkeeping=None):
+    save_h5 = tag + ".h5"
+    with _prepare_h5_file(save_h5, attrs) as f:
+        raw = f.require_group("raw")
+        raw.create_dataset("loop_pervec", data=loop_pervec)
+        if source_bookkeeping is not None:
+            for name, values in source_bookkeeping.items():
+                raw.create_dataset(name, data=np.asarray(values, dtype=np.int32))
+
+        f.create_dataset("gamma_list", data=np.asarray(gammalist, dtype="S"))
+        f.create_dataset("momentum_list", data=np.asarray(plist, dtype=np.int32))
+        f.create_dataset("W_index_list", data=np.asarray(W_index_list, dtype=np.int32))
+
+        bT_list = ["b_X", "b_Y"]
+        sm = f.require_group("avg").require_group("SS")
+        for ig, gm in enumerate(gammalist):
+            g_gm = sm.require_group(gm)
+            for ip, p in enumerate(plist):
+                p_tag = "PX" + str(p[0]) + "PY" + str(p[1]) + "PZ" + str(p[2])
+                g_p = g_gm.require_group(p_tag)
+                for i, idx in enumerate(W_index_list):
+                    path = bT_list[idx[3]] + "/" + "eta" + str(idx[2]) + "/" + "bT" + str(idx[0])
+                    g_data = g_p.require_group(path)
+                    g_data.create_dataset("bz" + str(idx[1]), data=loop_avg[i, ig, ip])
 
 
 # -----------------------------------------------------------------------------
