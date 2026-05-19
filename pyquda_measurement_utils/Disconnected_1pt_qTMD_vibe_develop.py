@@ -254,6 +254,9 @@ class DisconnectedQuarkqTMD1pt:
                 if operator_kind == "CG_PDF" and W_index[1] in {0, -1}:
                     shifted_xi = xi.copy()
                     W_index_previous = [0, 0, 0, 0]
+                if operator_kind == "CG_qTMD" and W_index[3] != W_index_previous[3]:
+                    shifted_xi = xi.copy()
+                    W_index_previous = [0, 0, 0, W_index[3]]
                 shifted_xi = self.create_fermion_TMD_CG(shifted_xi, W_index, W_index_previous)
             elif operator_kind == "GI_PDF":
                 if W_index[1] in {0, -1}:

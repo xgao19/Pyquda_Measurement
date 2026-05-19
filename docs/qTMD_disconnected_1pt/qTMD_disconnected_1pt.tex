@@ -234,6 +234,116 @@ The first implementation has been checked with:
         \(b_T=1,b_z=1\).
 \end{itemize}
 
+\subsection{Local/PDF Limit Sanity Checks}
+
+At zero displacement and zero momentum transfer, the different disconnected
+operator implementations should collapse to the same local bilinear loop:
+\begin{equation}
+  O^{\mathrm{GI\_PDF}}_{b_z=0}
+  =
+  O^{\mathrm{CG\_PDF}}_{b_z=0}
+  =
+  O^{\mathrm{CG\_qTMD}}_{b_T=0,b_z=0}
+  =
+  1 .
+\end{equation}
+Therefore, for the same gauge field, stochastic source, gamma matrix, and
+momentum \(q=0\), the expected equality is
+\begin{equation}
+  L^{\mathrm{GI\_PDF}}_{\Gamma,b_z=0}(0,\tau)
+  =
+  L^{\mathrm{CG\_PDF}}_{\Gamma,b_z=0}(0,\tau)
+  =
+  L^{\mathrm{CG\_qTMD}}_{\Gamma,b_T=0,b_z=0,\hat{x}}(0,\tau)
+  =
+  L^{\mathrm{CG\_qTMD}}_{\Gamma,b_T=0,b_z=0,\hat{y}}(0,\tau).
+\end{equation}
+This check is useful because it tests the HDF5 bookkeeping, Wilson-index
+ordering, gamma loop ordering, and the coordinate-gauge/GI local limits without
+requiring a hadron two-point function.
+
+The current S8T32 Perlmutter login-node check used one stochastic vector with
+matched random seed and found exact agreement:
+\begin{equation}
+  \max\left|
+  L^{\mathrm{GI\_PDF}}
+  -
+  L^{\mathrm{CG\_PDF}}
+  \right|
+  =
+  \max\left|
+  L^{\mathrm{GI\_PDF}}
+  -
+  L^{\mathrm{CG\_qTMD}}_{\hat{x}}
+  \right|
+  =
+  \max\left|
+  L^{\mathrm{GI\_PDF}}
+  -
+  L^{\mathrm{CG\_qTMD}}_{\hat{y}}
+  \right|
+  =
+  0 .
+\end{equation}
+The same equality was verified for both \(\code{raw/loop\_pervec}\) and the
+averaged \(\Gamma=\gamma_5\) HDF5 path
+\(\code{avg/SS/5/PX0PY0PZ0/b\_X/eta0/bT0/bz0}\), with the \(y\)-direction
+branch stored under \(\code{b\_Y}\) for \(\code{CG\_qTMD}\).
+
+The regression helper is
+\code{tests/test\_qtmd\_disconnected\_local\_pdf\_limit.py}.  It skips
+automatically if the local HDF5 smoke-test files are not present, and otherwise
+requires exact equality for the local/PDF limit above.
+
+\subsection{Nonzero-\(b_z\) Shift Sanity Check}
+
+A second check probes the straight-\(z\) displacement convention at nonzero
+separation.  For the coordinate-gauge operators, the PDF path at \(b_T=0\)
+should be exactly the \(b_T=0\) limit of the qTMD coordinate shift:
+\begin{equation}
+  O^{\mathrm{CG\_PDF}}_{b_z=\pm 1}
+  =
+  O^{\mathrm{CG\_qTMD}}_{b_T=0,b_z=\pm 1,\hat{x}}
+  =
+  O^{\mathrm{CG\_qTMD}}_{b_T=0,b_z=\pm 1,\hat{y}} .
+\end{equation}
+This equality checks the sign of the \(z\)-shift, the Wilson-index ordering,
+and the transverse-branch bookkeeping.  The corresponding S8T32 check found
+exact agreement for both \(b_z=+1\) and \(b_z=-1\):
+\begin{equation}
+  \max\left|
+  L^{\mathrm{CG\_PDF}}_{\Gamma,b_z=\pm1}
+  -
+  L^{\mathrm{CG\_qTMD}}_{\Gamma,b_T=0,b_z=\pm1,\hat{x}/\hat{y}}
+  \right|
+  =
+  0 .
+\end{equation}
+
+The gauge-invariant PDF loop uses the same Wilson-index labels,
+\([0,0,0,0]\), \([0,+1,0,0]\), and \([0,-1,0,0]\), but it is not expected to
+equal the coordinate-gauge loop on a nontrivial gauge field because the
+straight Wilson line is active:
+\begin{equation}
+  O^{\mathrm{GI\_PDF}}_{b_z=\pm1}
+  =
+  U_z \cdots \xi(x\pm\hat{z})
+  \ne
+  \xi(x\pm\hat{z})
+  =
+  O^{\mathrm{CG\_PDF}}_{b_z=\pm1}.
+\end{equation}
+The nonzero difference between \(\code{GI\_PDF}\) and \(\code{CG\_PDF}\)
+therefore confirms that the GI path is not accidentally falling back to the
+plain coordinate shift.
+
+The regression helper is
+\code{tests/test\_qtmd\_disconnected\_nonzero\_bz.py}.  During this check it
+also exposed and fixed a transverse-branch bug in the \(\code{CG\_qTMD}\)
+operator: when switching from the \(\hat{x}\) branch to the \(\hat{y}\) branch,
+the shifted stochastic source must be reset to the local source before applying
+the new branch displacement.
+
 The next physics validation should compare the local/PDF limits against the
 connected pion and proton qTMD workflows after constructing the disconnected
 ratio with matched two-point functions.

@@ -523,3 +523,51 @@ Current uncommitted working tree notes:
   - `pyquda_measurement_utils/bw_seq_pyquda.py`
   - `pyquda_measurement_utils/pion_EMT_vibe_develop.py`
 - Do not revert these unless the user explicitly asks.
+
+Disconnected qTMD 1pt local/PDF sanity check:
+
+- Added a small regression helper:
+  - `tests/test_qtmd_disconnected_local_pdf_limit.py`
+- The test compares the S8T32 login-node smoke outputs:
+  - `GI_PDF` at `bz=0`, `q=0`
+  - `CG_PDF` at `bz=0`, `q=0`
+  - `CG_qTMD` at `bT=0`, `bz=0`, `q=0`
+- Expected local-limit identity:
+  - `O_GI_PDF(bz=0) = O_CG_PDF(bz=0) = O_CG_qTMD(bT=0,bz=0) = 1`
+  - therefore the corresponding disconnected loops should agree for the same
+    gauge field, stochastic source, gamma matrix, and momentum.
+- Verified exact equality on the current S8T32 smoke files:
+  - `GI_PDF vs CG_PDF raw maxdiff = 0.0`
+  - `GI_PDF vs CG_qTMD b_X raw maxdiff = 0.0`
+  - `GI_PDF vs CG_qTMD b_Y raw maxdiff = 0.0`
+  - the averaged `gamma5` HDF5 paths also agree exactly.
+- Documented this in:
+  - `docs/qTMD_disconnected_1pt/qTMD_disconnected_1pt.tex`
+- The test helper skips automatically when the ignored smoke-test HDF5 files
+  are absent, so it is safe for normal source-only environments.
+
+Disconnected qTMD 1pt nonzero-bz sanity check:
+
+- Added a second small regression helper:
+  - `tests/test_qtmd_disconnected_nonzero_bz.py`
+- The test compares:
+  - `CG_PDF` at `bz=+/-1`, `q=0`
+  - `CG_qTMD` at `bT=0`, `bz=+/-1`, `q=0`, for both `b_X` and `b_Y`
+  - `GI_PDF` at `bz=+/-1`, `q=0`
+- Expected coordinate-gauge identity:
+  - `O_CG_PDF(bz=+/-1) = O_CG_qTMD(bT=0,bz=+/-1,b_X)`
+  - `O_CG_PDF(bz=+/-1) = O_CG_qTMD(bT=0,bz=+/-1,b_Y)`
+- The first HDF5 comparison exposed a real `CG_qTMD` bug:
+  - the `b_Y` branch was continuing from the final shifted source of the `b_X`
+    branch instead of restarting from the local stochastic source.
+- Fixed this in:
+  - `pyquda_measurement_utils/Disconnected_1pt_qTMD_vibe_develop.py`
+  by resetting `shifted_xi` when the `CG_qTMD` transverse direction changes.
+- After rerunning the S8T32 `CG_qTMD_bz1bt1` smoke output:
+  - `bz=+1 CG_PDF vs CG_qTMD b_X raw maxdiff = 0.0`
+  - `bz=+1 CG_PDF vs CG_qTMD b_Y raw maxdiff = 0.0`
+  - `bz=-1 CG_PDF vs CG_qTMD b_X raw maxdiff = 0.0`
+  - `bz=-1 CG_PDF vs CG_qTMD b_Y raw maxdiff = 0.0`
+- `GI_PDF` and `CG_PDF` use matching Wilson-index labels but differ at
+  nonzero `bz` on the nontrivial test gauge, as expected because the GI Wilson
+  line is active.
