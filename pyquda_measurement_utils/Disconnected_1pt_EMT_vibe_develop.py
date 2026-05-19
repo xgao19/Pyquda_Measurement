@@ -20,13 +20,15 @@ from pyquda_comm.array import arrayIdentity, arrayZeros
 
 from pyquda_measurement_utils.io_corr import save_emt_quark_1pt_hdf5, save_emt_gluon_1pt_hdf5
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
+    effective_n_inversions,
+    iter_noise_sources,
+    normalize_noise_scheme,
+    source_bookkeeping_arrays,
+    validate_hierarchical_probing_options,
+)
 
 _VALID_FLOW_TYPES = {"wilson", "symanzik"}
-_VALID_NOISE_SCHEMES = {"zn", "hierarchical_probing"}
-_VALID_HP_ORDERINGS = {
-    "global_xyzt_gray_projected_to_evenodd",
-    "spatial_xyz_then_t_gray_projected_to_evenodd",
-}
 my_gammas = ["5", "T", "T5", "X", "X5", "Y", "Y5", "Z", "Z5", "I", "SXT", "SXY", "SXZ", "SYT", "SYZ", "SZT"]
 pyquda_gammas_order = [15, 8, 7, 1, 14, 2, 13, 4, 11, 0, 9, 3, 5, 10, 6, 12]
 my_pyquda_gammas = [gamma.gamma(idx) for idx in pyquda_gammas_order]
@@ -67,23 +69,6 @@ def _flow_times(flow_epsilon, flow_steps):
     return np.arange(flow_steps + 1, dtype=np.float64) * float(flow_epsilon)
 
 
-def _normalize_noise_scheme(noise_scheme: str) -> str:
-    scheme = str(noise_scheme).strip().lower()
-    if scheme not in _VALID_NOISE_SCHEMES:
-        raise ValueError(f"noise_scheme should be one of {_VALID_NOISE_SCHEMES}, got {noise_scheme!r}")
-    return scheme
-
-
-def _is_power_of_two(value: int) -> bool:
-    return value > 0 and (value & (value - 1)) == 0
-
-
-def _ceil_log2(value: int) -> int:
-    if value <= 1:
-        return 0
-    return int(value - 1).bit_length()
-
-
 class EMTDisconnectedQuark1pt:
     """Hadron-independent stochastic flowed quark EMT loop measurement."""
 
@@ -100,13 +85,10 @@ class EMTDisconnectedQuark1pt:
         self.flow_type = _normalize_flow_type(parameters["flow_type"])
         self.flow_epsilon = parameters["flow_epsilon"]
         self.flow_steps = parameters["flow_steps"]
-        self.noise_scheme = _normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
+        self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
         self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
         self.hp_ordering = parameters.get("hp_ordering", "global_xyzt_gray_projected_to_evenodd")
-        if self.hp_ordering not in _VALID_HP_ORDERINGS:
-            raise ValueError(f"hp_ordering should be one of {_VALID_HP_ORDERINGS}, got {self.hp_ordering!r}")
-        if not _is_power_of_two(self.hp_num_vectors):
-            raise ValueError(f"hp_num_vectors should be a positive power of two, got {self.hp_num_vectors}")
+        validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
 
     @staticmethod
     def _gamma5_for(ref_arr):
@@ -125,75 +107,6 @@ class EMTDisconnectedQuark1pt:
         if interpolator not in my_gammas:
             raise ValueError(f"Unsupported interpolator {interpolator!r}. Expected one of {my_gammas}.")
         return _array_on_backend(_gamma_matrix(my_pyquda_gammas[my_gammas.index(interpolator)]), ref_arr)
-
-    @staticmethod
-    def make_zn_noise_fermion(latt_info, n: int = 2) -> LatticeFermion:
-        """Create a single stochastic fermion source with Z_n phases."""
-        xi = LatticeFermion(latt_info)
-        xp = _get_xp_from_array(xi.data)
-        r = xp.random.randint(0, n, size=xi.data.shape)
-        xi.data[:] = xp.exp(2j * xp.pi * r / n).astype(xi.data.dtype)
-        return xi
-
-    @staticmethod
-    def _hierarchical_gray_index(latt_info, hp_ordering: str):
-        coords = latt_info.coordinate()
-        x, y, z, t = [np.asarray(coords[mu], dtype=np.int64) for mu in range(4)]
-        Gx, Gy, Gz, _Gt = latt_info.global_size
-
-        if hp_ordering == "global_xyzt_gray_projected_to_evenodd":
-            site_id = x + Gx * (y + Gy * (z + Gz * t))
-            return site_id ^ (site_id >> 1)
-
-        if hp_ordering == "spatial_xyz_then_t_gray_projected_to_evenodd":
-            spatial_id = x + Gx * (y + Gy * z)
-            spatial_gray = spatial_id ^ (spatial_id >> 1)
-            time_gray = t ^ (t >> 1)
-            spatial_bits = _ceil_log2(Gx * Gy * Gz)
-            return spatial_gray | (time_gray << spatial_bits)
-
-        raise ValueError(f"Unsupported hp_ordering {hp_ordering!r}")
-
-    @classmethod
-    def _hierarchical_probe_pattern(cls, latt_info, hp_idx: int, hp_ordering: str):
-        """Build a site-only Rademacher probing vector in even-odd layout."""
-        if hp_idx == 0:
-            return np.ones_like(latt_info.coordinate(0), dtype=np.float64)
-
-        gray_id = cls._hierarchical_gray_index(latt_info, hp_ordering)
-        parity = np.zeros_like(gray_id, dtype=bool)
-        mask = int(hp_idx)
-        bit = 1
-        while bit <= mask:
-            if mask & bit:
-                parity ^= (gray_id & bit) != 0
-            bit <<= 1
-        return np.where(parity, -1.0, 1.0)
-
-    @classmethod
-    def apply_hierarchical_probe(cls, xi: LatticeFermion, hp_idx: int, hp_ordering: str) -> LatticeFermion:
-        """Multiply a base stochastic source by one hierarchical probing vector."""
-        if hp_idx == 0:
-            return xi.copy()
-
-        probed = xi.copy()
-        pattern = cls._hierarchical_probe_pattern(xi.latt_info, hp_idx, hp_ordering)
-        pattern = _array_on_backend(pattern, xi.data)
-        probed.data[:] *= pattern[..., None, None]
-        return probed
-
-    def _iter_noise_sources(self, latt_info, n_vec: int, n_zn: int):
-        """Yield effective stochastic sources with optional hierarchical probing."""
-        if self.noise_scheme == "zn":
-            for base_idx in range(n_vec):
-                yield base_idx, base_idx, 0, self.make_zn_noise_fermion(latt_info, n=n_zn)
-            return
-
-        for base_idx in range(n_vec):
-            base_noise = self.make_zn_noise_fermion(latt_info, n=n_zn)
-            for hp_idx in range(self.hp_num_vectors):
-                effective_idx = base_idx * self.hp_num_vectors + hp_idx
-                yield effective_idx, base_idx, hp_idx, self.apply_hierarchical_probe(base_noise, hp_idx, self.hp_ordering)
 
     @staticmethod
     def _impose_P_Breit_slice(U: LatticeGauge, complex_field, phases_3pt):
@@ -275,18 +188,16 @@ class EMTDisconnectedQuark1pt:
         xp = _get_xp_from_array(rng_probe.data)
         xp.random.seed(randseed)
 
-        effective_n_inversions = n_vec * self.hp_num_vectors if self.noise_scheme == "hierarchical_probing" else n_vec
-        Tmunu = np.zeros([effective_n_inversions, 4, 4, len(self.qlist), Nsteps + 1, Nt], dtype=np.complex128)
-        CHI = np.zeros([effective_n_inversions, 2, len(self.qlist), Nsteps + 1, Nt], dtype=np.complex128)
-        source_index = np.arange(effective_n_inversions, dtype=np.int32)
-        base_noise_index = np.zeros(effective_n_inversions, dtype=np.int32)
-        hp_index = np.zeros(effective_n_inversions, dtype=np.int32)
+        n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
+        Tmunu = np.zeros([n_eff, 4, 4, len(self.qlist), Nsteps + 1, Nt], dtype=np.complex128)
+        CHI = np.zeros([n_eff, 2, len(self.qlist), Nsteps + 1, Nt], dtype=np.complex128)
+        source_bookkeeping = source_bookkeeping_arrays(n_eff)
         qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
         phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, [0, 0, 0, 0])
-        for vec_picked, base_idx, hp_idx, xi in self._iter_noise_sources(latt_info, n_vec, n_zn):
+        for vec_picked, base_idx, hp_idx, xi in iter_noise_sources(latt_info, n_vec, n_zn, self.noise_scheme, self.hp_num_vectors, self.hp_ordering):
             mpi_print(U.latt_info, f"vec {vec_picked} base {base_idx} hp {hp_idx}")
-            base_noise_index[vec_picked] = base_idx
-            hp_index[vec_picked] = hp_idx
+            source_bookkeeping["base_noise_index"][vec_picked] = base_idx
+            source_bookkeeping["hp_index"][vec_picked] = hp_idx
             dirac.loadGauge(U)
             eta = dirac.invert(xi)
 
@@ -329,7 +240,7 @@ class EMTDisconnectedQuark1pt:
             "maxiter": maxiter,
             "n_vec": n_vec,
             "n_base_noise": n_vec,
-            "effective_n_inversions": effective_n_inversions,
+            "effective_n_inversions": n_eff,
             "n_zn": n_zn,
             "rand_seed": randseed,
             "noise_scheme": self.noise_scheme,
@@ -338,11 +249,6 @@ class EMTDisconnectedQuark1pt:
         }
         Tmunu_avg = np.mean(Tmunu, axis=0) / Ns3
         CHI_avg = np.mean(CHI, axis=0) / Ns3
-        source_bookkeeping = {
-            "source_index": source_index,
-            "base_noise_index": base_noise_index,
-            "hp_index": hp_index,
-        }
         save_emt_quark_1pt_hdf5(
             tag,
             Tmunu,
