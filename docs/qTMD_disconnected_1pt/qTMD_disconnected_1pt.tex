@@ -404,27 +404,64 @@ overall phase, not the selected momentum magnitude.
 
 The current \(\code{CG\_qTMD}\) operator is only a coordinate-gauge diagnostic.
 The production gauge-invariant qTMD operator should replace the plain shift by
-a staple Wilson line.  A convenient target convention is
+a staple Wilson line.  The target convention is the fixed-staple-length
+convention used by the legacy GPT proton qTMD workflow.  In the current
+notation, \(b_z\) is the physical final longitudinal separation and must be an
+even integer:
 \begin{equation}
   O_{b,\eta,\perp}^{\mathrm{GI\_qTMD}}\xi(x)
   =
   U_{\mathcal{C}(x;b,\eta,\perp)}
   \xi(x+b_T\hat{e}_{\perp}+b_z\hat{z}),
 \end{equation}
-with a three-segment path
+with
+\begin{equation}
+  b_z \in 2\mathbb{Z}, \qquad
+  \eta \geq \frac{|b_z|}{2}.
+\end{equation}
+The three-segment staple path is
 \begin{equation}
   \mathcal{C}(x;b,\eta,\perp):
   x
   \rightarrow
-  x+\eta\hat{z}
+  x+\left(\eta+\frac{b_z}{2}\right)\hat{z}
   \rightarrow
-  x+\eta\hat{z}+b_T\hat{e}_{\perp}
+  x+\left(\eta+\frac{b_z}{2}\right)\hat{z}
+    +b_T\hat{e}_{\perp}
   \rightarrow
   x+b_z\hat{z}+b_T\hat{e}_{\perp}.
 \end{equation}
-The last segment has signed length \(b_z-\eta\).  With \(b_T=0\) and
-\(\eta=b_z\), this reduces to the straight \(\code{GI\_PDF}\) Wilson line.  At
-\(b_T=b_z=\eta=0\), it reduces to the local operator.
+The signed segment lengths are
+\begin{equation}
+  \left[
+    \left(z,\eta+\frac{b_z}{2}\right),
+    (\perp,b_T),
+    \left(z,\frac{b_z}{2}-\eta\right)
+  \right].
+\end{equation}
+For \(\eta \geq |b_z|/2\), the geometric Wilson-line length is independent of
+\(b_z\):
+\begin{equation}
+  \left|\eta+\frac{b_z}{2}\right|
+  + b_T
+  + \left|\eta-\frac{b_z}{2}\right|
+  =
+  2\eta+b_T.
+\end{equation}
+This fixed length is useful for renormalization because Wilson-line
+self-energy effects are matched across different \(b_z\) at fixed \(\eta\) and
+\(b_T\).  With \(b_T=0\) and \(\eta=|b_z|/2\), the staple reduces to the
+straight \(\code{GI\_PDF}\) Wilson line.  At \(b_T=b_z=\eta=0\), it reduces to
+the local operator.
+
+The legacy GPT implementation used an equivalent convention with
+\(b_z^{\mathrm{legacy}}\) denoting half of the final longitudinal separation:
+\begin{equation}
+  b_z^{\mathrm{current}} = 2 b_z^{\mathrm{legacy}}.
+\end{equation}
+Its path comments and implementation correspond to
+\((\eta+b_z^{\mathrm{legacy}})+b_T-(\eta-b_z^{\mathrm{legacy}})\), which is the
+same fixed-length staple after this relabeling.
 
 Implementation should proceed in small validated steps:
 \begin{enumerate}
@@ -438,7 +475,7 @@ Implementation should proceed in small validated steps:
         \(b_z\), or \(\eta\) path cannot be reached by a nearest-neighbor
         incremental update from the previous Wilson index.
   \item Validate the limits:
-        \(\code{GI\_qTMD}(b_T=0,\eta=b_z)=\code{GI\_PDF}(b_z)\),
+        \(\code{GI\_qTMD}(b_T=0,\eta=|b_z|/2)=\code{GI\_PDF}(b_z)\),
         \(\code{GI\_qTMD}(0,0,0)=\) local loop, and identity-gauge
         \(\code{GI\_qTMD}=\code{CG\_qTMD}\).
 \end{enumerate}
@@ -448,15 +485,16 @@ The first code-side design hook is
 \([b_T,b_z,\eta,\perp]\) to the signed path segments
 \begin{equation}
   \left[
-    (z,\eta),
+    \left(z,\eta+\frac{b_z}{2}\right),
     (\perp,b_T),
-    (z,b_z-\eta)
+    \left(z,\frac{b_z}{2}-\eta\right)
   \right].
 \end{equation}
 The helper is covered by
 \code{tests/test\_disconnected\_gi\_qtmd\_staple\_design.py}; it fixes the
-local, straight-PDF, and generic three-segment path conventions before the
-covariant-shift implementation is wired into production contractions.
+local, straight-PDF, fixed-length generic path, and invalid-index conventions
+before the covariant-shift implementation is wired into production
+contractions.
 
 The next physics validation should compare the local/PDF limits against the
 connected pion and proton qTMD workflows after constructing the disconnected

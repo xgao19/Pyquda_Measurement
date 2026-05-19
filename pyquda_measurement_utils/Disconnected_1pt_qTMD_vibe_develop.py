@@ -49,15 +49,27 @@ def gi_qtmd_staple_segments(W_index):
     """Return signed nearest-neighbor path segments for a future GI qTMD staple.
 
     Each segment is ``(direction, signed_steps)`` with direction ``0, 1, 2``
-    corresponding to x, y, z.  The path convention is
-    z(eta), transverse(b_T), z(b_z - eta).  The actual covariant-shift
-    implementation is intentionally not enabled yet.
+    corresponding to x, y, z.  The fixed-staple-length convention is
+    z(eta + b_z / 2), transverse(b_T), z(b_z / 2 - eta).  The actual
+    covariant-shift implementation is intentionally not enabled yet.
     """
     b_T, b_z, eta, transverse_direction = [int(round(v)) for v in W_index]
+    if b_T < 0:
+        raise ValueError("GI_qTMD requires non-negative b_T")
+    if b_z % 2 != 0:
+        raise ValueError("GI_qTMD requires even b_z in the fixed-staple-length convention")
+    if eta < 0:
+        raise ValueError("GI_qTMD requires non-negative eta")
+    if eta < abs(b_z) // 2:
+        raise ValueError("GI_qTMD requires eta >= abs(b_z) / 2")
+    if transverse_direction not in {0, 1}:
+        raise ValueError("GI_qTMD transverse_direction should be 0 or 1")
+
+    half_bz = b_z // 2
     return [
-        (2, eta),
+        (2, eta + half_bz),
         (transverse_direction, b_T),
-        (2, b_z - eta),
+        (2, half_bz - eta),
     ]
 
 
