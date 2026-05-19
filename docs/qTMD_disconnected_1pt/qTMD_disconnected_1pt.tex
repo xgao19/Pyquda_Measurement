@@ -128,6 +128,38 @@ The loop momentum is the current momentum transfer,
 The one-point loop itself has no hadron source or sink momentum.  Those labels
 enter when the loop is combined with a pion or proton two-point function.
 
+The code uses \code{pyquda\_utils.phase.MomentumPhase}, whose convention is
+\begin{equation}
+  \Phi_q(x;x_0)
+  =
+  \exp\left[
+    +2\pi i
+    \sum_{j=x,y,z}
+    \frac{q_j(x_j-x_{0,j})}{L_j}
+  \right].
+\end{equation}
+The disconnected loop is projected as
+\begin{equation}
+  L_{\Gamma,b}(q,\tau)
+  =
+  \sum_{\mathbf{x}}
+  \Phi_q(\mathbf{x};\mathbf{x}_0)\,
+  \ell_{\Gamma,b}(\mathbf{x},\tau),
+\end{equation}
+so a local test field with plane-wave dependence
+\begin{equation}
+  \ell_{\Gamma,b}(\mathbf{x},\tau)
+  \propto
+  \exp\left[
+    -2\pi i
+    \sum_{j=x,y,z}
+    \frac{q_j(x_j-x_{0,j})}{L_j}
+  \right]
+\end{equation}
+is selected by the \(+q\) projection.  This is the same Fourier sign used in
+the connected qTMD/EMT application layers; the physical transfer label remains
+\(q=p_f-p_i\).
+
 \section{Combination with Hadron Two-Point Functions}
 
 For a hadron two-point correlator \(C_2^H(p_f,t)\), the disconnected qTMD
@@ -343,6 +375,88 @@ also exposed and fixed a transverse-branch bug in the \(\code{CG\_qTMD}\)
 operator: when switching from the \(\hat{x}\) branch to the \(\hat{y}\) branch,
 the shifted stochastic source must be reset to the local source before applying
 the new branch displacement.
+
+\subsection{Nonzero-\(q\) Phase Sanity Check}
+
+The regression helper
+\code{tests/test\_disconnected\_momentum\_phase.py} uses a pure NumPy toy field
+to check the nonzero-momentum Fourier sign.  For a tiny lattice and
+\(q=(1,-2,3)\), it verifies
+\begin{equation}
+  \sum_{\mathbf{x}}
+  \Phi_q(\mathbf{x};0)\,
+  \Phi_q^\ast(\mathbf{x};0)
+  =
+  L_xL_yL_z,
+\end{equation}
+while the opposite projection vanishes:
+\begin{equation}
+  \sum_{\mathbf{x}}
+  \Phi_{-q}(\mathbf{x};0)\,
+  \Phi_q^\ast(\mathbf{x};0)
+  =
+  0 .
+\end{equation}
+The same test also checks that changing \(x_0\) only changes the expected
+overall phase, not the selected momentum magnitude.
+
+\section{Gauge-Invariant Staple qTMD Design}
+
+The current \(\code{CG\_qTMD}\) operator is only a coordinate-gauge diagnostic.
+The production gauge-invariant qTMD operator should replace the plain shift by
+a staple Wilson line.  A convenient target convention is
+\begin{equation}
+  O_{b,\eta,\perp}^{\mathrm{GI\_qTMD}}\xi(x)
+  =
+  U_{\mathcal{C}(x;b,\eta,\perp)}
+  \xi(x+b_T\hat{e}_{\perp}+b_z\hat{z}),
+\end{equation}
+with a three-segment path
+\begin{equation}
+  \mathcal{C}(x;b,\eta,\perp):
+  x
+  \rightarrow
+  x+\eta\hat{z}
+  \rightarrow
+  x+\eta\hat{z}+b_T\hat{e}_{\perp}
+  \rightarrow
+  x+b_z\hat{z}+b_T\hat{e}_{\perp}.
+\end{equation}
+The last segment has signed length \(b_z-\eta\).  With \(b_T=0\) and
+\(\eta=b_z\), this reduces to the straight \(\code{GI\_PDF}\) Wilson line.  At
+\(b_T=b_z=\eta=0\), it reduces to the local operator.
+
+Implementation should proceed in small validated steps:
+\begin{enumerate}
+  \item Add a new \(\code{GI\_qTMD}\) operator kind without changing the
+        existing \(\code{CG\_qTMD}\), \(\code{CG\_PDF}\), and
+        \(\code{GI\_PDF}\) outputs.
+  \item Build the staple by repeated covariant shifts acting on the stochastic
+        source side, matching the current loop convention
+        \(\eta^\dagger\Gamma O_b\xi\).
+  \item Reset the shifted source whenever the transverse direction, \(b_T\),
+        \(b_z\), or \(\eta\) path cannot be reached by a nearest-neighbor
+        incremental update from the previous Wilson index.
+  \item Validate the limits:
+        \(\code{GI\_qTMD}(b_T=0,\eta=b_z)=\code{GI\_PDF}(b_z)\),
+        \(\code{GI\_qTMD}(0,0,0)=\) local loop, and identity-gauge
+        \(\code{GI\_qTMD}=\code{CG\_qTMD}\).
+\end{enumerate}
+
+The first code-side design hook is
+\(\code{gi\_qtmd\_staple\_segments(W\_index)}\), which maps
+\([b_T,b_z,\eta,\perp]\) to the signed path segments
+\begin{equation}
+  \left[
+    (z,\eta),
+    (\perp,b_T),
+    (z,b_z-\eta)
+  \right].
+\end{equation}
+The helper is covered by
+\code{tests/test\_disconnected\_gi\_qtmd\_staple\_design.py}; it fixes the
+local, straight-PDF, and generic three-segment path conventions before the
+covariant-shift implementation is wired into production contractions.
 
 The next physics validation should compare the local/PDF limits against the
 connected pion and proton qTMD workflows after constructing the disconnected

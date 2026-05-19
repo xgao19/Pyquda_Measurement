@@ -45,6 +45,22 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
 _VALID_OPERATOR_KINDS = {"CG_qTMD", "CG_PDF", "GI_PDF"}
 
 
+def gi_qtmd_staple_segments(W_index):
+    """Return signed nearest-neighbor path segments for a future GI qTMD staple.
+
+    Each segment is ``(direction, signed_steps)`` with direction ``0, 1, 2``
+    corresponding to x, y, z.  The path convention is
+    z(eta), transverse(b_T), z(b_z - eta).  The actual covariant-shift
+    implementation is intentionally not enabled yet.
+    """
+    b_T, b_z, eta, transverse_direction = [int(round(v)) for v in W_index]
+    return [
+        (2, eta),
+        (transverse_direction, b_T),
+        (2, b_z - eta),
+    ]
+
+
 class DisconnectedQuarkqTMD1pt:
     """Hadron-independent stochastic disconnected qTMD/PDF loop measurement."""
 
