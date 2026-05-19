@@ -166,9 +166,10 @@ The Perlmutter application copy now lives in:
 
 - `/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/application/EMT_meson/perlmutter`
 
-The original measurement logic lives in:
+The original legacy measurement source was removed after migration.  If needed,
+recover it from Git history:
 
-- `/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/pyquda_measurement_utils/EMT_meson.py`
+- `pyquda_measurement_utils/EMT_meson.py`
 
 The active pion/meson EMT development copy is:
 

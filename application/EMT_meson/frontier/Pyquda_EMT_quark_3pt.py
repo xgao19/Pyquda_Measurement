@@ -8,7 +8,7 @@ from pyquda import init
 from pyquda.field import LatticeInfo, LatticeGauge, LatticeMom
 from pyquda_utils import core, gamma, io
 # from pyquda_measurement_utils import EMT_quark_3pt
-from pyquda_measurement_utils.EMT_meson import QuarkEMT, GluonEMT
+from pyquda_measurement_utils.pion_EMT_vibe_develop import QuarkEMT, GluonEMT
 from pyquda_measurement_utils.tools import mpi_print
 
 import argparse
@@ -47,7 +47,7 @@ parameters = {
     "width" : 1.0, # Gaussian smearing width
 
     "flow_type": "wilson", # type of flow: wilson, symanzik
-    "flow_epsion": 0.207936, # flow time step size
+    "flow_epsilon": 0.207936, # flow time step size
     "flow_steps": 10, # number of flow steps
 }
 

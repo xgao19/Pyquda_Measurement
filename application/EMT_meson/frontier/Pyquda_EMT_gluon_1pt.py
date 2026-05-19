@@ -8,7 +8,7 @@ from pyquda import init
 from pyquda_utils import core, gamma, io
 import subprocess
 # from pyquda_measurement_utils import EMT_gluon_1pt
-from pyquda_measurement_utils.EMT_meson import QuarkEMT, GluonEMT
+from pyquda_measurement_utils.pion_EMT_vibe_develop import QuarkEMT, GluonEMT
 from pyquda_measurement_utils.tools import mpi_print
 
 import argparse
@@ -46,7 +46,7 @@ parameters = {
     "width" : 1.0, # Gaussian smearing width
 
     "flow_type": "Wilson", # type of flow: Wilson, Zeuthen, Symanzik
-    "flow_epsion": 0.1, # flow time step size
+    "flow_epsilon": 0.1, # flow time step size
     "flow_steps": 10, # number of flow steps
 }
 

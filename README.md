@@ -57,7 +57,8 @@ Naming convention:
   meson EMT development file.
 - `proton_EMT_vibe_develop.py` reuses the shared quark/gluon one-point EMT
   utilities from `pion_EMT_vibe_develop.py`.
-- `EMT_meson.py` is retained as the older source/reference implementation.
+- The older legacy `EMT_meson.py` source was removed after migration to
+  `pion_EMT_vibe_develop.py`; recover it from Git history if needed.
 
 Validation status:
 
