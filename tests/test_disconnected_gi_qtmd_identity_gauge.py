@@ -16,7 +16,11 @@ def _run_identity_gauge_check():
     try:
         from pyquda import init
         from pyquda.field import LatticeFermion, LatticeGauge, LatticeInfo
-        from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import create_fermion_TMD_GI
+        from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+            build_gi_qtmd_staple_link,
+            create_fermion_TMD_GI,
+            create_fermion_TMD_GI_from_link,
+        )
         from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
     except Exception as err:
         raise SkipTest(f"PyQUDA environment is not available: {err}") from err
@@ -44,8 +48,11 @@ def _run_identity_gauge_check():
     ]
     for b_T, b_z, eta, transverse_direction in cases:
         actual = create_fermion_TMD_GI(gauge, fermion, [b_T, b_z, eta, transverse_direction])
+        staple_link = build_gi_qtmd_staple_link(gauge, [b_T, b_z, eta, transverse_direction])
+        actual_from_link = create_fermion_TMD_GI_from_link(staple_link, fermion, [b_T, b_z, eta, transverse_direction])
         expected = fermion.shift(b_T, transverse_direction).shift(b_z, 2)
         np.testing.assert_allclose(array_to_numpy(actual.data), array_to_numpy(expected.data), atol=1e-12, rtol=1e-12)
+        np.testing.assert_allclose(array_to_numpy(actual_from_link.data), array_to_numpy(actual.data), atol=1e-12, rtol=1e-12)
 
 
 def test_gi_qtmd_identity_gauge_matches_coordinate_shift():

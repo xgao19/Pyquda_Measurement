@@ -33,8 +33,9 @@ eta >= abs(b_z) / 2.
 import numpy as np
 
 from pyquda import getMPIComm
-from pyquda.field import LatticeFermion, LatticeGauge
+from pyquda.field import LatticeFermion, LatticeGauge, LatticeLink
 from pyquda_utils import core, phase
+from pyquda_utils.convert import fermionToLink, linkToFermion
 
 from pyquda_measurement_utils.io_corr import save_disconnected_qTMD_1pt_hdf5
 from pyquda_measurement_utils.pion_utils_vibe_develop import gamma_stack, my_gammas
@@ -49,6 +50,7 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
 )
 
 _VALID_OPERATOR_KINDS = {"CG_qTMD", "CG_PDF", "GI_PDF", "GI_qTMD"}
+_VALID_GI_QTMD_STAPLE_MODES = {"link_cache", "direct_covdev"}
 
 
 def gi_qtmd_staple_segments(W_index):
@@ -98,6 +100,29 @@ def create_fermion_TMD_GI(gauge: LatticeGauge, fermion: LatticeFermion, W_index)
     return shifted
 
 
+def build_gi_qtmd_staple_link(gauge: LatticeGauge, W_index):
+    """Build a gauge-only staple transporter matching direct covDev convention."""
+    link = LatticeLink(gauge.latt_info)
+    link_as_fermion = linkToFermion(link)
+    transported = create_fermion_TMD_GI(gauge, link_as_fermion, W_index)
+    return fermionToLink(transported)
+
+
+def build_gi_qtmd_staple_links(gauge: LatticeGauge, W_index_list):
+    """Build reusable gauge-only staple transporters for a Wilson-index list."""
+    return {tuple(W_index): build_gi_qtmd_staple_link(gauge, W_index) for W_index in W_index_list}
+
+
+def create_fermion_TMD_GI_from_link(staple_link: LatticeLink, fermion: LatticeFermion, W_index):
+    """Apply a cached GI qTMD staple transporter to the endpoint fermion."""
+    b_T, b_z, _eta, transverse_direction = [int(round(v)) for v in W_index]
+    endpoint = fermion.shift(b_T, transverse_direction).shift(b_z, 2)
+    shifted = LatticeFermion(fermion.latt_info)
+    xp = _get_xp_from_array(fermion.data)
+    shifted.data[:] = xp.einsum("wtzyxab,wtzyxib->wtzyxia", staple_link.data, endpoint.data, optimize=True)
+    return shifted
+
+
 class DisconnectedQuarkqTMD1pt:
     """Hadron-independent stochastic disconnected qTMD/PDF loop measurement."""
 
@@ -111,6 +136,9 @@ class DisconnectedQuarkqTMD1pt:
         self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
         self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
         self.hp_ordering = parameters.get("hp_ordering", "global_xyzt_gray_projected_to_evenodd")
+        self.gi_qtmd_staple_mode = parameters.get("gi_qtmd_staple_mode", "link_cache")
+        if self.gi_qtmd_staple_mode not in _VALID_GI_QTMD_STAPLE_MODES:
+            raise ValueError(f"gi_qtmd_staple_mode should be one of {_VALID_GI_QTMD_STAPLE_MODES}, got {self.gi_qtmd_staple_mode!r}")
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
 
     def create_TMD_Wilsonline_index_list_CG(self):
@@ -214,7 +242,7 @@ class DisconnectedQuarkqTMD1pt:
             return gauge.pure_gauge.covDev(fermion, 6)
         raise ValueError("Invalid shift for PDF Wilson line")
 
-    def _contract_one_operator_list(self, latt_info, gauge, eta, xi, phases, W_index_list, operator_kind):
+    def _contract_one_operator_list(self, latt_info, gauge, eta, xi, phases, W_index_list, operator_kind, staple_links=None):
         xp = _get_xp_from_array(xi.data)
         phases = _asarray_on_queue(phases, xp, xi.data)
         gamma_ls = gamma_stack(xi.data)
@@ -239,7 +267,10 @@ class DisconnectedQuarkqTMD1pt:
                     W_index_previous = [0, 0, 0, 0]
                 shifted_xi = self.create_fermion_PDF_GI(gauge, shifted_xi, W_index, W_index_previous)
             elif operator_kind == "GI_qTMD":
-                shifted_xi = create_fermion_TMD_GI(gauge, xi, W_index)
+                if staple_links is None:
+                    shifted_xi = create_fermion_TMD_GI(gauge, xi, W_index)
+                else:
+                    shifted_xi = create_fermion_TMD_GI_from_link(staple_links[tuple(W_index)], xi, W_index)
             else:
                 raise ValueError(f"Unsupported operator_kind {operator_kind!r}")
 
@@ -296,6 +327,10 @@ class DisconnectedQuarkqTMD1pt:
             W_index_list = self.create_PDF_Wilsonline_index_list()
         if len(W_index_list) == 0:
             raise ValueError(f"No Wilson-line indices were generated for operator_kind {operator_kind!r}")
+        staple_links = None
+        if operator_kind == "GI_qTMD" and self.gi_qtmd_staple_mode == "link_cache":
+            mpi_print(latt_info, f"Build {len(W_index_list)} GI_qTMD staple transporters.")
+            staple_links = build_gi_qtmd_staple_links(U, W_index_list)
 
         n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
         source_bookkeeping = source_bookkeeping_arrays(n_eff)
@@ -308,7 +343,7 @@ class DisconnectedQuarkqTMD1pt:
             dirac.loadGauge(U)
             eta = dirac.invert(xi)
 
-            loops = self._contract_one_operator_list(latt_info, U, eta, xi, phases_q, W_index_list, operator_kind)
+            loops = self._contract_one_operator_list(latt_info, U, eta, xi, phases_q, W_index_list, operator_kind, staple_links=staple_links)
             loops = getMPIComm().bcast(loops, root=0)
             if loop_pervec is None:
                 loop_pervec = np.zeros(
@@ -340,6 +375,7 @@ class DisconnectedQuarkqTMD1pt:
             "noise_scheme": self.noise_scheme,
             "hp_num_vectors": self.hp_num_vectors,
             "hp_ordering": self.hp_ordering,
+            "gi_qtmd_staple_mode": self.gi_qtmd_staple_mode,
             "loop_convention": "eta_dagger_Gamma_O_b_xi",
         }
         save_disconnected_qTMD_1pt_hdf5(

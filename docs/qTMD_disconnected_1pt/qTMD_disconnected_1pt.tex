@@ -404,12 +404,11 @@ overall phase, not the selected momentum magnitude.
 
 \section{Gauge-Invariant Staple qTMD Design}
 
-The current \(\code{CG\_qTMD}\) operator is only a coordinate-gauge diagnostic.
-The production gauge-invariant qTMD operator should replace the plain shift by
-a staple Wilson line.  The target convention is the fixed-staple-length
-convention used by the legacy GPT proton qTMD workflow.  In the current
-notation, \(b_z\) is the physical final longitudinal separation and must be an
-even integer:
+The \(\code{CG\_qTMD}\) operator is only a coordinate-gauge diagnostic.  The
+production \(\code{GI\_qTMD}\) operator replaces the plain shift by a staple
+Wilson line.  The convention is the fixed-staple-length convention used by the
+legacy GPT proton qTMD workflow.  In the current notation, \(b_z\) is the
+physical final longitudinal separation and must be an even integer:
 \begin{equation}
   O_{b,\eta,\perp}^{\mathrm{GI\_qTMD}}\xi(x)
   =
@@ -465,24 +464,9 @@ Its path comments and implementation correspond to
 \((\eta+b_z^{\mathrm{legacy}})+b_T-(\eta-b_z^{\mathrm{legacy}})\), which is the
 same fixed-length staple after this relabeling.
 
-Implementation should proceed in small validated steps:
-\begin{enumerate}
-  \item Add a new \(\code{GI\_qTMD}\) operator kind without changing the
-        existing \(\code{CG\_qTMD}\), \(\code{CG\_PDF}\), and
-        \(\code{GI\_PDF}\) outputs.
-  \item Build the staple by repeated covariant shifts acting on the stochastic
-        source side, matching the current loop convention
-        \(\eta^\dagger\Gamma O_b\xi\).
-  \item Reset the shifted source whenever the transverse direction, \(b_T\),
-        \(b_z\), or \(\eta\) path cannot be reached by a nearest-neighbor
-        incremental update from the previous Wilson index.
-  \item Validate the limits:
-        \(\code{GI\_qTMD}(b_T=0,\eta=|b_z|/2)=\code{GI\_PDF}(b_z)\),
-        \(\code{GI\_qTMD}(0,0,0)=\) local loop, and identity-gauge
-        \(\code{GI\_qTMD}=\code{CG\_qTMD}\).
-\end{enumerate}
-
-The first code-side design hook is
+The \(\code{GI\_qTMD}\) implementation keeps the existing
+\(\code{CG\_qTMD}\), \(\code{CG\_PDF}\), and \(\code{GI\_PDF}\) outputs
+unchanged.  The first code-side helper is
 \(\code{gi\_qtmd\_staple\_segments(W\_index)}\), which maps
 \([b_T,b_z,\eta,\perp]\) to the signed path segments
 \begin{equation}
@@ -494,18 +478,35 @@ The first code-side design hook is
 \end{equation}
 The helper is covered by
 \code{tests/test\_disconnected\_gi\_qtmd\_staple\_design.py}; it fixes the
-local, straight-PDF, fixed-length generic path, and invalid-index conventions
-before the covariant-shift implementation is wired into production
-contractions.
+local, straight-PDF, fixed-length generic path, and invalid-index conventions.
 
-The second code-side hook is
+The reference code-side helper is
 \(\code{create\_fermion\_TMD\_GI(gauge, fermion, W\_index)}\).  It applies
 the full staple path from the original local fermion field for each
-\(W\)-index, using repeated \(\code{gauge.pure\_gauge.covDev}\) calls.  The
-first version intentionally avoids incremental path reuse, because correctness
-of the Wilson-line geometry is more important than performance at this stage.
-The helper is tested with a fake gauge object that records the signed covariant
-shift sequence and by an optional identity-gauge PyQUDA check.
+\(W\)-index, using repeated \(\code{gauge.pure\_gauge.covDev}\) calls.
+
+For production, the default \(\code{QTMD\_1PT\_GI\_STAPLE\_MODE=link\_cache}\)
+first builds gauge-only staple transporters with
+\(\code{build\_gi\_qtmd\_staple\_links}\).  The construction converts an
+identity color matrix field into color-column fermions, applies the same
+\(\code{covDev}\) path, and converts the result back to a link field.  This
+keeps the transporter convention identical to the reference direct-covariant
+derivative path while allowing all stochastic sources on the same gauge
+configuration to reuse the same staple links.  The debug mode
+\(\code{QTMD\_1PT\_GI\_STAPLE\_MODE=direct\_covdev}\) keeps the older
+source-by-source reference implementation.
+
+The link-cache implementation is tested by:
+\begin{enumerate}
+  \item identity-gauge equality with coordinate shifts;
+  \item nontrivial S8T32 test-gauge equality between cached links and direct
+        \(\code{covDev}\);
+  \item the PDF limit
+        \(\code{GI\_qTMD}(b_T=0,\eta=|b_z|/2)=\code{GI\_PDF}(b_z)\);
+  \item a nonzero-transverse-staple HDF5 comparison at
+        \((b_T,b_z,\eta)=(1,2,1)\), where \(\code{link\_cache}\) and
+        \(\code{direct\_covdev}\) agree at the floating-point roundoff level.
+\end{enumerate}
 
 The next physics validation should compare the local/PDF limits against the
 connected pion and proton qTMD workflows after constructing the disconnected

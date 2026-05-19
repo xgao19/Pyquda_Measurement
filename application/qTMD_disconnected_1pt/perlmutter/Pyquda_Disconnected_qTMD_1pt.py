@@ -47,6 +47,7 @@ parameters = {
     "noise_scheme": os.environ.get("QTMD_1PT_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("QTMD_1PT_HP_NUM_VECTORS", "1")),
     "hp_ordering": os.environ.get("QTMD_1PT_HP_ORDERING", "global_xyzt_gray_projected_to_evenodd"),
+    "gi_qtmd_staple_mode": os.environ.get("QTMD_1PT_GI_STAPLE_MODE", "link_cache"),
 }
 tag = get_disconnected_qTMD_1pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
 
