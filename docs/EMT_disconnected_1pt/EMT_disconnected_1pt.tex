@@ -1,0 +1,230 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb}
+\usepackage{physics}
+\usepackage{hyperref}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\Trsc}{\operatorname{Tr}_{sc}}
+
+\title{\textbf{EMT Disconnected One-Point Building Blocks}\\[4pt]
+       \large Flowed Quark/Gluon Loops, HDF5 Metadata, and Hierarchical Probing}
+\author{PyQUDA Measurement Notes}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Purpose}
+
+This note documents the hadron-independent one-point functions used to build
+disconnected contributions to pion and proton energy-momentum tensor (EMT)
+matrix elements.  The corresponding source file is
+\code{pyquda\_measurement\_utils/Disconnected\_1pt\_EMT\_vibe\_develop.py}.
+
+The one-point workflows do not form a hadron three-point function by themselves.
+Instead, they provide flowed quark and gluon loop observables that are combined
+with hadron two-point functions in ensemble analysis.
+
+\section{Flowed One-Point Observables}
+
+Let \(t_f\) denote the gradient-flow time.  The flowed gluonic building block is
+schematically
+\begin{equation}
+  L^g_{\mu\nu}(q,t_f)
+  =
+  \sum_{\mathbf{x}}
+  e^{i\mathbf{q}\cdot\mathbf{x}}\,
+  O^g_{\mu\nu}(\mathbf{x},\tau;t_f),
+\end{equation}
+where \(O^g_{\mu\nu}\) is the chosen flowed gluonic EMT operator.
+
+The flowed quark loop is estimated stochastically.  For a noise vector
+\(\xi_r\) and solution \(\eta_r = D^{-1}\xi_r\), the measured loop has the
+form
+\begin{equation}
+  L^q_{\mu\nu}(q,\tau;t_f)
+  =
+  \frac{1}{N_r}
+  \sum_{r=1}^{N_r}
+  \sum_{\mathbf{x}}
+  e^{i\mathbf{q}\cdot\mathbf{x}}\,
+  \Trsc\!\left[
+    \xi_r^\dagger(x,t_f)\,
+    \Gamma_{\mu\nu}[U(t_f),D]\,
+    \eta_r(x,t_f)
+  \right].
+\end{equation}
+The operator \(\Gamma_{\mu\nu}\) includes the symmetrized covariant derivative
+structure used by the EMT kernel.  The code stores only the upper triangle
+\(\mu \leq \nu\), and downstream analysis reconstructs the lower triangle by
+symmetry when needed.
+
+\section{Disconnected Combination with Hadron Two-Point Functions}
+
+For a hadron two-point function \(C_2^H(p_f,t)\), the disconnected three-point
+building block is
+\begin{equation}
+  C^{H,\mathrm{disc}}_{3,\mu\nu}
+  (p_f,p_i;t,\tau;t_f)
+  =
+  \left\langle
+    C_2^H(p_f,t)\,
+    L_{\mu\nu}(q,\tau;t_f)
+  \right\rangle_{\mathrm{cfg}}
+  -
+  \left\langle C_2^H(p_f,t)\right\rangle_{\mathrm{cfg}}
+  \left\langle L_{\mu\nu}(q,\tau;t_f)\right\rangle_{\mathrm{cfg}},
+\end{equation}
+with
+\begin{equation}
+  q = p_f - p_i.
+\end{equation}
+The associated ratio is typically
+\begin{equation}
+  R^{H,\mathrm{disc}}_{\mu\nu}(t,\tau;t_f)
+  =
+  \frac{
+    C^{H,\mathrm{disc}}_{3,\mu\nu}(p_f,p_i;t,\tau;t_f)
+  }{
+    C_2^H(p_f,t)
+  },
+\end{equation}
+before applying kinematic projections, vacuum-subtracted gradient-flow matching,
+and the perturbative mixing coefficients required for the renormalized EMT.
+
+The subtraction term is essential: the one-point loop is hadron independent and
+contains a vacuum expectation value.  The subtraction should be done at the
+ensemble-analysis level using the same gauge-configuration sample as the hadron
+two-point function.
+
+\section{Ringed-Fermion Diagnostics}
+
+The quark workflow also writes \(\chi\)-type flowed-fermion diagnostics.  These
+outputs are useful for monitoring or reconstructing ringed-fermion normalization
+factors.  The standard kinetic normalization is not the raw \(\chi\) dataset by
+itself; it should be reconstructed from the appropriate flowed kinetic
+expectation values, especially the zero-momentum diagonal EMT components.
+
+\section{Hierarchical Probing}
+
+The quark loop supports two source schemes:
+\begin{equation}
+  \code{noise\_scheme} \in
+  \{\code{zn},\code{hierarchical\_probing}\}.
+\end{equation}
+For ordinary \(Z_n\) noise, each stochastic source corresponds to one inversion.
+For hierarchical probing, a base noise vector \(\xi_b\) is multiplied by a set of
+site-only Rademacher vectors \(h_k(x)=\pm 1\):
+\begin{equation}
+  \xi_{b,k}(x) = h_k(x)\,\xi_b(x).
+\end{equation}
+The effective number of inversions is therefore
+\begin{equation}
+  N_{\mathrm{eff}}
+  =
+  N_{\mathrm{base}}\,
+  N_{\mathrm{HP}}.
+\end{equation}
+In the application this is
+\begin{equation}
+  \code{effective\_n\_inversions}
+  =
+  \code{EMT\_1PT\_N\_VEC}
+  \times
+  \code{EMT\_1PT\_HP\_NUM\_VECTORS}.
+\end{equation}
+\code{EMT\_1PT\_HP\_NUM\_VECTORS} must be a positive power of two.
+
+\subsection{Ordering Choices}
+
+Two Gray-code ordering choices are implemented:
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Ordering & Meaning \\
+\midrule
+\code{global\_xyzt\_gray\_projected\_to\_evenodd}
+& Gray code the full \(x,y,z,t\) site id. \\
+\code{spatial\_xyz\_then\_t\_gray\_projected\_to\_evenodd}
+& Gray code spatial sites first, then append time bits. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The global ordering is the default to preserve the previously validated
+behavior.  The spatial-first ordering is intended for studies where the leading
+noise correlations are expected to be dominated by spatial locality and where
+time dilution is not yet being used.
+
+Spin-color dilution and time dilution are not part of the current short-term
+workflow.
+
+\section{HDF5 Output}
+
+The quark HDF5 file stores metadata attributes:
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Attribute & Meaning \\
+\midrule
+\code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{flow\_times}
+& Gradient-flow schedule. \\
+\code{qext}, \code{pf}, \code{p\_2pt}
+& Momentum labels used by downstream analysis. \\
+\code{volume\_norm}
+& Spatial volume normalization used in the averaged datasets. \\
+\code{upper\_triangle\_only}
+& Only \(\mu \leq \nu\) components are written. \\
+\code{noise\_scheme}, \code{hp\_num\_vectors}, \code{hp\_ordering}
+& Source-generation scheme. \\
+\code{n\_base\_noise}, \code{effective\_n\_inversions}
+& Stochastic source counting. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The raw quark datasets are:
+\begin{equation}
+  \code{raw/Tmunu\_pervec},\quad
+  \code{raw/CHI\_pervec},\quad
+  \code{raw/source\_index},\quad
+  \code{raw/base\_noise\_index},\quad
+  \code{raw/hp\_index}.
+\end{equation}
+The bookkeeping datasets allow analysis code to group effective HP sources back
+to the original base noise:
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Dataset & Meaning \\
+\midrule
+\code{source\_index}
+& Effective source index after HP expansion. \\
+\code{base\_noise\_index}
+& Original stochastic base-noise index. \\
+\code{hp\_index}
+& Hierarchical-probing vector index for that base noise. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Current Validation Status}
+
+The current implementation has been checked with:
+\begin{itemize}
+  \item Python syntax compilation.
+  \item A CPU/numpy backend check that \(\mathrm{HP}=1\) leaves the base source
+        unchanged.
+  \item A Perlmutter login-node GPU smoke test with
+        \(\code{hp\_num\_vectors}=2\) and spatial-first ordering.
+\end{itemize}
+
+Before production analysis, the recommended next validation is a scaling study
+comparing \(Z_n\), \(\mathrm{HP}=1\), \(\mathrm{HP}=2,4,8,16\) at fixed gauge,
+flow time, and momentum.
+
+\end{document}

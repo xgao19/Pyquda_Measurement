@@ -204,16 +204,20 @@ def _prepare_h5_file(path, attrs=None):
 # -----------------------------------------------------------------------------
 
 # Save flowed quark EMT one-point data and ringed-fermion CHI building blocks.
-def save_emt_quark_1pt_hdf5(tag, Tmunu_pervec, CHI_pervec, Tmunu, CHI, attrs=None):
+def save_emt_quark_1pt_hdf5(tag, Tmunu_pervec, CHI_pervec, Tmunu, CHI, attrs=None, source_bookkeeping=None):
     save_h5 = f"{tag}.h5"
     with _prepare_h5_file(save_h5, attrs) as f:
         raw = f.require_group("raw")
         raw.create_dataset("Tmunu_pervec", data=Tmunu_pervec)
         raw.create_dataset("CHI_pervec", data=CHI_pervec)
+        if source_bookkeeping is not None:
+            for name, values in source_bookkeeping.items():
+                raw.create_dataset(name, data=np.asarray(values, dtype=np.int32))
 
         avg = f.require_group("avg")
         avg.create_dataset("CHI", data=CHI)
         g_t = avg.require_group("Tmunu")
+        g_t.attrs["upper_triangle_only"] = True
         for mu in range(4):
             for nu in range(mu, 4):
                 g_t.create_dataset(f"T{mu+1}{nu+1}", data=Tmunu[mu, nu])
@@ -244,6 +248,7 @@ def save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=None):
     save_h5 = f"{tag}.h5"
     with _prepare_h5_file(save_h5, attrs) as f:
         g_t = f.require_group("Tmunu")
+        g_t.attrs["upper_triangle_only"] = True
         for mu in range(4):
             for nu in range(mu, 4):
                 g_t.create_dataset(f"T{mu+1}{nu+1}", data=Tmunu_t[mu, nu])

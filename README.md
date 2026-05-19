@@ -17,6 +17,7 @@ The actively maintained workflows are:
 - Pion electromagnetic form-factor connected measurements.
 - Pion/meson EMT measurements with flowed quark and gluon observables.
 - Proton EMT connected measurements plus shared quark/gluon one-point outputs.
+- Shared EMT disconnected one-point workflows with optional hierarchical probing.
 - Existing proton qTMD and pion qTMDWF utilities used as mature references.
 
 The most validated runtime target is currently NERSC Perlmutter with NVIDIA
@@ -74,6 +75,7 @@ Runnable workflows live under `application/`.
 ```text
 application/EMT_meson/          Pion/meson EMT workflows.
 application/EMT_proton/         Proton EMT workflows.
+application/EMT_disconnected_1pt/ Shared quark/gluon EMT one-point workflows.
 application/EMFF_pion/          Pion electromagnetic form factor workflow.
 application/pion_TMD_CG/        Pion qTMD/PDF-style workflow.
 ```
@@ -93,6 +95,10 @@ bash application/EMT_meson/perlmutter/run_gluon_1pt.sh
 bash application/EMT_proton/perlmutter/run_proton_quark_3pt.sh
 bash application/EMT_proton/perlmutter/run_proton_quark_1pt.sh
 bash application/EMT_proton/perlmutter/run_proton_gluon_1pt.sh
+
+# Shared EMT disconnected one-point workflows
+bash application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh
+bash application/EMT_disconnected_1pt/perlmutter/run_gluon_1pt.sh
 
 # Pion qTMD and pion EMFF
 bash application/pion_TMD_CG/perlmutter/run_pion_TMD_CG.sh
@@ -190,6 +196,12 @@ For pion/meson EMT:
 For quark/gluon one-point data:
 
 - Quark 1pt stores stochastic `Tmunu` and `CHI` outputs.
+- Quark 1pt can use either ordinary `zn` noise or `hierarchical_probing`.
+- For hierarchical probing, `effective_n_inversions = n_base_noise * hp_num_vectors`.
+- Raw quark 1pt files store `source_index`, `base_noise_index`, and `hp_index`
+  bookkeeping datasets.
+- Current HP ordering choices are `global_xyzt_gray_projected_to_evenodd` and
+  `spatial_xyz_then_t_gray_projected_to_evenodd`.
 - The ringed-fermion kinetic normalization can be reconstructed at q=0 from
   `avg/Tmunu/T11`, `T22`, `T33`, and `T44`.
 - `CHI` is a scalar trace/noise diagnostic, not the standard ringed-fermion

@@ -4,7 +4,7 @@ import os
 from pyquda import init
 from pyquda_utils import io
 
-from pyquda_measurement_utils.EMT_disconnected_1pt_vibe_develop import EMTDisconnectedQuark1pt
+from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import EMTDisconnectedQuark1pt
 from pyquda_measurement_utils.io_corr import get_emt_quark_1pt_file_tag
 
 
@@ -44,6 +44,9 @@ parameters = {
     "flow_type": os.environ.get("EMT_1PT_FLOW_TYPE", "wilson"),
     "flow_epsilon": float(os.environ.get("EMT_1PT_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_1PT_FLOW_STEPS", "1")),
+    "noise_scheme": os.environ.get("EMT_1PT_NOISE_SCHEME", "zn"),
+    "hp_num_vectors": int(os.environ.get("EMT_1PT_HP_NUM_VECTORS", "1")),
+    "hp_ordering": os.environ.get("EMT_1PT_HP_ORDERING", "global_xyzt_gray_projected_to_evenodd"),
 }
 quark_1pt_tag = get_emt_quark_1pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
 
@@ -72,4 +75,3 @@ quark_1pt.flowed_fermionic_1pt(
     randPara,
     tag=os.environ.get("EMT_1PT_QUARK_OUT", quark_1pt_tag),
 )
-

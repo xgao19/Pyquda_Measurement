@@ -66,7 +66,7 @@ One-point and gradient-flow data
 --------------------------------
 The stochastic quark 1pt, ringed-fermion kinetic normalization, and gluon 1pt
 building blocks are inherited from the shared
-``EMT_disconnected_1pt_vibe_develop.py`` implementation.  The quark 1pt output
+``Disconnected_1pt_EMT_vibe_develop.py`` implementation.  The quark 1pt output
 contains ``avg/Tmunu/T11`` through ``T44`` for reconstructing the zero-momentum
 ``bar_chi overleftrightarrow{not D} chi`` normalization, and the gluon 1pt
 output provides the flowed gluonic EMT building block.  The final renormalized
@@ -85,7 +85,7 @@ Future upgrade targets
 The proton connected 3pt contractions use sequential propagators, while the
 disconnected quark EMT contribution is inherited from the shared stochastic
 quark 1pt loop estimator.  The next variance-reduction upgrades should
-therefore target ``EMT_disconnected_1pt_vibe_develop.py``:
+therefore target ``Disconnected_1pt_EMT_vibe_develop.py``:
 
 1. Hierarchical probing, following arXiv:1302.4018.  Structured probing vectors
    on the toroidal lattice can reduce the stochastic variance of trace
@@ -110,7 +110,7 @@ from pyquda import getMPIComm
 from pyquda.field import LatticePropagator
 from pyquda_utils import core, gamma, source, phase
 
-from pyquda_measurement_utils.EMT_disconnected_1pt_vibe_develop import (
+from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedGluon1pt,
     EMTDisconnectedQuark1pt,
 )

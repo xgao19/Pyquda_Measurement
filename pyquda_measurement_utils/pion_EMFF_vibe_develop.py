@@ -1,9 +1,22 @@
 """
 Pion connected electromagnetic form-factor contractions in PyQUDA.
 
-This module is a local-current specialization of the pion qTMD workflow.  The
-connected pion electromagnetic three-point function starts from a source at x0,
-a current insertion at x = (tau, x), and a fixed sink at y = (tsep, y):
+This module is a local-current specialization of the pion qTMD workflow.  It
+computes connected pion electromagnetic three-point functions with a source at
+x0, a current insertion at x = (tau, x), and a fixed sink at
+y = (tsep, y).  The intended momentum convention is
+
+    pf   = final pion momentum projected at the sink,
+    q    = qext = momentum injected by the current,
+    pi   = initial pion momentum at the source,
+    q    = pf - pi,
+    pi   = pf - q.
+
+For example, in a Breit-frame setup with pf = +Pz and pi = -Pz, the current
+momentum is q = +2Pz.  In the production application this corresponds to
+pf = [0, 0, 3, 0] and qext = [0, 0, 6, 0], so pi = [0, 0, -3, 0].
+
+With these labels, the connected three-point function is
 
     C3_g(q, tau; pf, tsep) =
         sum_x sum_y
@@ -14,10 +27,20 @@ a current insertion at x = (tau, x), and a fixed sink at y = (tsep, y):
         ].
 
 The final-state pion momentum is set by ``parameters["pf"]``.  Momentum
-transfer values are set by ``parameters["qext"]``.  The initial momentum is
-therefore pi = pf - q in the usual three-point convention.  The physical EMFF
-current is selected from the vector gamma choices, while the code scans all 16
-gamma structures for diagnostics and reuse.
+transfer values are set by ``parameters["qext"]``.  The two-point momenta used
+for normalization and ratio construction are set by ``parameters["p_2pt"]``.
+For each saved three-point dataset at a given qext, the analysis should combine
+it with two-point functions at both
+
+    pf,
+    pi = pf - qext.
+
+If only the opposite sign of a pion momentum was saved in the two-point file,
+the analysis may use parity symmetry, C2(p) = C2(-p), after confirming the
+same smearing and source/sink convention.  The physical EMFF baseline usually
+uses Gamma_sink = gamma5, Gamma_src = gamma5, and the temporal vector current
+Gamma_g = gamma_T, labeled as ``T`` in ``my_gammas``.  The code still scans all
+16 gamma structures for diagnostics and reuse.
 
 Fixed-sink sequential source
 ----------------------------

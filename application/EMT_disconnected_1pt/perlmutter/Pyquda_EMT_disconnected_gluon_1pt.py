@@ -4,7 +4,7 @@ import os
 from pyquda import init
 from pyquda_utils import io
 
-from pyquda_measurement_utils.EMT_disconnected_1pt_vibe_develop import EMTDisconnectedGluon1pt
+from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import EMTDisconnectedGluon1pt
 from pyquda_measurement_utils.io_corr import get_emt_gluon_1pt_file_tag
 from pyquda_measurement_utils.tools import mpi_print
 
@@ -65,4 +65,3 @@ gluon_1pt.flowed_1pt(
     gauge,
     tag=os.environ.get("EMT_1PT_GLUON_OUT", gluon_1pt_tag),
 )
-

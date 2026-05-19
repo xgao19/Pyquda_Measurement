@@ -23,6 +23,9 @@ export EMT_1PT_CONFIG_NUM="${EMT_1PT_CONFIG_NUM:-0}"
 export EMT_1PT_MPI_GEOMETRY="${EMT_1PT_MPI_GEOMETRY:-1.1.1.1}"
 export EMT_1PT_QMAX="${EMT_1PT_QMAX:-0}"
 export EMT_1PT_FLOW_STEPS="${EMT_1PT_FLOW_STEPS:-1}"
+export EMT_1PT_NOISE_SCHEME="${EMT_1PT_NOISE_SCHEME:-zn}"
+export EMT_1PT_HP_NUM_VECTORS="${EMT_1PT_HP_NUM_VECTORS:-1}"
+export EMT_1PT_HP_ORDERING="${EMT_1PT_HP_ORDERING:-global_xyzt_gray_projected_to_evenodd}"
 
 mkdir -p "$QUDA_RESOURCE_PATH" "$CUPY_CACHE_DIR" "$EMT_1PT_DATA_DIR"
 
@@ -30,4 +33,3 @@ echo "Running disconnected quark EMT 1pt"
 python3 -u "$script_dir/Pyquda_EMT_disconnected_quark_1pt.py" \
   --config_num "$EMT_1PT_CONFIG_NUM" \
   --mpi_geometry "$EMT_1PT_MPI_GEOMETRY"
-

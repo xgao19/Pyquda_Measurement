@@ -243,7 +243,7 @@ intended to correspond to flow time ``step * flow_epsilon``.
 Future upgrade targets
 ----------------------
 The shared stochastic quark 1pt estimator in
-``EMT_disconnected_1pt_vibe_develop.py`` uses plain Z_n noise.  Two natural
+``Disconnected_1pt_EMT_vibe_develop.py`` uses plain Z_n noise.  Two natural
 variance-reduction upgrades should be considered before large production runs:
 
 1. Hierarchical probing, following arXiv:1302.4018.  The EMT 1pt trace
@@ -279,7 +279,7 @@ from pyquda_measurement_utils.io_corr import (
     save_emt_quark_3pt_hdf5,
     save_emt_meson_2pt_hdf5,
 )
-from pyquda_measurement_utils.EMT_disconnected_1pt_vibe_develop import (
+from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedGluon1pt,
     EMTDisconnectedQuark1pt,
     my_gammas,
