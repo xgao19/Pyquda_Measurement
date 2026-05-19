@@ -496,6 +496,16 @@ local, straight-PDF, fixed-length generic path, and invalid-index conventions
 before the covariant-shift implementation is wired into production
 contractions.
 
+The second code-side hook is
+\(\code{create\_fermion\_TMD\_GI(gauge, fermion, W\_index)}\).  It applies
+the full staple path from the original local fermion field for each
+\(W\)-index, using repeated \(\code{gauge.pure\_gauge.covDev}\) calls.  The
+first version intentionally avoids incremental path reuse, because correctness
+of the Wilson-line geometry is more important than performance at this stage.
+The helper is tested with a fake gauge object that records the signed covariant
+shift sequence; it is not yet exposed as a production
+\(\code{operator\_kind=GI\_qTMD}\).
+
 The next physics validation should compare the local/PDF limits against the
 connected pion and proton qTMD workflows after constructing the disconnected
 ratio with matched two-point functions.

@@ -73,6 +73,26 @@ def gi_qtmd_staple_segments(W_index):
     ]
 
 
+def apply_signed_covariant_shift(gauge: LatticeGauge, fermion: LatticeFermion, direction: int, steps: int):
+    """Apply signed nearest-neighbor covariant shifts to a fermion field."""
+    shifted = fermion
+    if steps > 0:
+        for _ in range(steps):
+            shifted = gauge.pure_gauge.covDev(shifted, direction)
+    elif steps < 0:
+        for _ in range(-steps):
+            shifted = gauge.pure_gauge.covDev(shifted, direction + 4)
+    return shifted
+
+
+def create_fermion_TMD_GI(gauge: LatticeGauge, fermion: LatticeFermion, W_index):
+    """Apply the future fixed-length gauge-invariant qTMD staple to a fermion."""
+    shifted = fermion.copy()
+    for direction, steps in gi_qtmd_staple_segments(W_index):
+        shifted = apply_signed_covariant_shift(gauge, shifted, direction, steps)
+    return shifted
+
+
 class DisconnectedQuarkqTMD1pt:
     """Hadron-independent stochastic disconnected qTMD/PDF loop measurement."""
 

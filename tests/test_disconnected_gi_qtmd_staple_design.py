@@ -1,4 +1,7 @@
-from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import gi_qtmd_staple_segments
+from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+    create_fermion_TMD_GI,
+    gi_qtmd_staple_segments,
+)
 
 
 def _path_length(segments):
@@ -41,10 +44,45 @@ def test_gi_qtmd_staple_invalid_indices():
         raise AssertionError(f"Expected ValueError for W_index={W_index}")
 
 
+class _FakeFermion:
+    def __init__(self, path=None):
+        self.path = list(path or [])
+
+    def copy(self):
+        return _FakeFermion(self.path)
+
+
+class _FakePureGauge:
+    def covDev(self, fermion, direction):
+        return _FakeFermion(fermion.path + [direction])
+
+
+class _FakeGauge:
+    pure_gauge = _FakePureGauge()
+
+
+def test_create_fermion_tmd_gi_applies_covariant_path():
+    shifted = create_fermion_TMD_GI(_FakeGauge(), _FakeFermion(), [3, 4, 3, 0])
+    assert shifted.path == [2, 2, 2, 2, 2, 0, 0, 0, 6]
+
+    shifted = create_fermion_TMD_GI(_FakeGauge(), _FakeFermion(), [2, -4, 3, 1])
+    assert shifted.path == [2, 1, 1, 6, 6, 6, 6, 6]
+
+
+def test_create_fermion_tmd_gi_pdf_limit_path():
+    shifted = create_fermion_TMD_GI(_FakeGauge(), _FakeFermion(), [0, 2, 1, 0])
+    assert shifted.path == [2, 2]
+
+    shifted = create_fermion_TMD_GI(_FakeGauge(), _FakeFermion(), [0, -2, 1, 1])
+    assert shifted.path == [6, 6]
+
+
 if __name__ == "__main__":
     test_gi_qtmd_staple_local_limit()
     test_gi_qtmd_staple_straight_pdf_limit()
     test_gi_qtmd_staple_fixed_length_path()
     test_gi_qtmd_staple_invalid_indices()
+    test_create_fermion_tmd_gi_applies_covariant_path()
+    test_create_fermion_tmd_gi_pdf_limit_path()
     print("[GI qTMD staple design sanity check]")
     print("path = z(eta + b_z/2), transverse(b_T), z(b_z/2 - eta)")
