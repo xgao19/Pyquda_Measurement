@@ -114,10 +114,12 @@ where \(\hat{e}_{\perp}\) is either \(\hat{x}\) or \(\hat{y}\).  The two
 transverse directions are stored as \(\code{b\_X}\) and \(\code{b\_Y}\) in the
 HDF5 output.
 
-\paragraph{Current limitation.}
-A fully gauge-invariant staple qTMD Wilson line is not implemented yet.  The
-first production-quality disconnected qTMD extension should add the staple path
-explicitly rather than relying on the coordinate-gauge displacement.
+\subsection{Gauge-Invariant qTMD Staple Operator}
+
+The production code also supports a fixed-length gauge-invariant staple
+operator, \(\code{operator\_kind=GI\_qTMD}\).  Its Wilson index is
+\([b_T,b_z,\eta,\perp]\), with even physical \(b_z\), non-negative \(\eta\),
+and \(\eta\ge |b_z|/2\).
 
 \section{Momentum Convention}
 
@@ -503,8 +505,7 @@ the full staple path from the original local fermion field for each
 first version intentionally avoids incremental path reuse, because correctness
 of the Wilson-line geometry is more important than performance at this stage.
 The helper is tested with a fake gauge object that records the signed covariant
-shift sequence; it is not yet exposed as a production
-\(\code{operator\_kind=GI\_qTMD}\).
+shift sequence and by an optional identity-gauge PyQUDA check.
 
 The next physics validation should compare the local/PDF limits against the
 connected pion and proton qTMD workflows after constructing the disconnected

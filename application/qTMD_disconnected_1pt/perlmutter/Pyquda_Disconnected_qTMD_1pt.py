@@ -12,6 +12,10 @@ def parse_site(text):
     return [int(v) for v in text.split(".")]
 
 
+def parse_int_list(text):
+    return [int(v) for v in text.replace(",", ".").split(".") if v]
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, default=int(os.environ.get("QTMD_1PT_CONFIG_NUM", "0")))
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("QTMD_1PT_MPI_GEOMETRY", "1.1.1.1"))
@@ -35,7 +39,7 @@ operator_kind = os.environ.get("QTMD_1PT_OPERATOR_KIND", "GI_PDF")
 sm_tag = os.environ.get("QTMD_1PT_SM_TAG", f"1HYP_{operator_kind}_BZ{os.environ.get('QTMD_1PT_BZ', '0')}_BT{os.environ.get('QTMD_1PT_BT', '0')}")
 
 parameters = {
-    "eta": [0],
+    "eta": parse_int_list(os.environ.get("QTMD_1PT_ETA", "0")),
     "b_z": int(os.environ.get("QTMD_1PT_BZ", "0")),
     "b_T": int(os.environ.get("QTMD_1PT_BT", "0")),
     "qext": qext,

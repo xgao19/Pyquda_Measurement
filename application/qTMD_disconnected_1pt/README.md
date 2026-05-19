@@ -14,9 +14,12 @@ The first implementation supports:
 GI_PDF
 CG_PDF
 CG_qTMD
+GI_qTMD
 ```
 
-It does not yet implement a fully gauge-invariant staple qTMD Wilson line.
+For `GI_qTMD`, `b_z` is the physical final z separation and must be even in
+the fixed-staple-length convention.  The staple legs are
+`eta + b_z / 2` and `eta - b_z / 2`, so use `eta >= abs(b_z) / 2`.
 
 ## Perlmutter Smoke Test
 
@@ -30,6 +33,7 @@ Useful environment variables:
 ```text
 QTMD_1PT_OPERATOR_KIND=GI_PDF
 QTMD_1PT_QMAX=0
+QTMD_1PT_ETA=0
 QTMD_1PT_BZ=0
 QTMD_1PT_BT=0
 QTMD_1PT_N_VEC=1

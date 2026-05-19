@@ -1,4 +1,5 @@
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+    DisconnectedQuarkqTMD1pt,
     create_fermion_TMD_GI,
     gi_qtmd_staple_segments,
 )
@@ -44,6 +45,27 @@ def test_gi_qtmd_staple_invalid_indices():
         raise AssertionError(f"Expected ValueError for W_index={W_index}")
 
 
+def test_gi_qtmd_production_wilson_index_list():
+    measurement = DisconnectedQuarkqTMD1pt(
+        {
+            "eta": [0, 1, 2],
+            "b_z": 4,
+            "b_T": 1,
+            "qext": [[0, 0, 0, 0]],
+        }
+    )
+    dir0, dir1 = measurement.create_TMD_Wilsonline_index_list_GI()
+
+    assert [0, 0, 0, 0] in dir0
+    assert [0, 2, 1, 0] in dir0
+    assert [0, -2, 1, 0] in dir0
+    assert [1, 4, 2, 0] in dir0
+    assert [1, -4, 2, 0] in dir0
+    assert [0, 4, 1, 0] not in dir0
+    assert all(idx[3] == 0 for idx in dir0)
+    assert all(idx[3] == 1 for idx in dir1)
+
+
 class _FakeFermion:
     def __init__(self, path=None):
         self.path = list(path or [])
@@ -82,6 +104,7 @@ if __name__ == "__main__":
     test_gi_qtmd_staple_straight_pdf_limit()
     test_gi_qtmd_staple_fixed_length_path()
     test_gi_qtmd_staple_invalid_indices()
+    test_gi_qtmd_production_wilson_index_list()
     test_create_fermion_tmd_gi_applies_covariant_path()
     test_create_fermion_tmd_gi_pdf_limit_path()
     print("[GI qTMD staple design sanity check]")

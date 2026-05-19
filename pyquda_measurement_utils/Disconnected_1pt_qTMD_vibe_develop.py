@@ -12,16 +12,22 @@ choices already used in ``pion_qTMD_vibe_develop.py``:
     CG_qTMD: coordinate-gauge style spatial displacement, no explicit links.
     CG_PDF:  straight-z displacement, no explicit links.
     GI_PDF:  straight-z covariant displacement through gauge links.
+    GI_qTMD: fixed-length staple covariant displacement through gauge links.
 
 The stochastic estimator uses eta = D^{-1} xi and the loop convention
 
     L_Gamma,b(q,tau) =
         sum_x exp(i q.x) eta^\dagger(x) Gamma O_b xi(x).
 
-The nonlocal operator O_b acts on the source/noise side.  This convention is
-minimal and keeps the first disconnected implementation easy to compare against
-the connected PDF/local limits.  A fully gauge-invariant staple qTMD operator is
-not implemented here yet.
+The nonlocal operator O_b acts on the source/noise side.  The GI qTMD staple
+uses the fixed-total-length convention
+
+    x -> x + (eta + b_z / 2) zhat
+      -> x + (eta + b_z / 2) zhat + b_T e_perp
+      -> x + b_z zhat + b_T e_perp,
+
+so the staple length is 2 * eta + b_T for every even b_z with
+eta >= abs(b_z) / 2.
 """
 
 import numpy as np
@@ -42,16 +48,15 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     validate_hierarchical_probing_options,
 )
 
-_VALID_OPERATOR_KINDS = {"CG_qTMD", "CG_PDF", "GI_PDF"}
+_VALID_OPERATOR_KINDS = {"CG_qTMD", "CG_PDF", "GI_PDF", "GI_qTMD"}
 
 
 def gi_qtmd_staple_segments(W_index):
-    """Return signed nearest-neighbor path segments for a future GI qTMD staple.
+    """Return signed nearest-neighbor path segments for a GI qTMD staple.
 
     Each segment is ``(direction, signed_steps)`` with direction ``0, 1, 2``
     corresponding to x, y, z.  The fixed-staple-length convention is
-    z(eta + b_z / 2), transverse(b_T), z(b_z / 2 - eta).  The actual
-    covariant-shift implementation is intentionally not enabled yet.
+    z(eta + b_z / 2), transverse(b_T), z(b_z / 2 - eta).
     """
     b_T, b_z, eta, transverse_direction = [int(round(v)) for v in W_index]
     if b_T < 0:
@@ -86,7 +91,7 @@ def apply_signed_covariant_shift(gauge: LatticeGauge, fermion: LatticeFermion, d
 
 
 def create_fermion_TMD_GI(gauge: LatticeGauge, fermion: LatticeFermion, W_index):
-    """Apply the future fixed-length gauge-invariant qTMD staple to a fermion."""
+    """Apply the fixed-length gauge-invariant qTMD staple to a fermion."""
     shifted = fermion.copy()
     for direction, steps in gi_qtmd_staple_segments(W_index):
         shifted = apply_signed_covariant_shift(gauge, shifted, direction, steps)
@@ -162,6 +167,26 @@ class DisconnectedQuarkqTMD1pt:
 
         return index_list
 
+    def create_TMD_Wilsonline_index_list_GI(self):
+        """Create the fixed-length gauge-invariant qTMD staple list."""
+        index_list_trans0 = []
+        index_list_trans1 = []
+
+        for eta in self.eta:
+            eta = int(eta)
+            for current_bz in range(0, self.b_z + 1, 2):
+                if eta < current_bz // 2:
+                    continue
+                for current_b_T in range(0, self.b_T + 1):
+                    index_list_trans0.append([current_b_T, current_bz, eta, 0])
+                    index_list_trans1.append([current_b_T, current_bz, eta, 1])
+
+                    if current_bz != 0:
+                        index_list_trans0.append([current_b_T, -current_bz, eta, 0])
+                        index_list_trans1.append([current_b_T, -current_bz, eta, 1])
+
+        return index_list_trans0, index_list_trans1
+
     @staticmethod
     def create_fermion_TMD_CG(fermion, W_index, W_index_previous):
         """Apply the coordinate-gauge qTMD displacement to a fermion field."""
@@ -213,6 +238,8 @@ class DisconnectedQuarkqTMD1pt:
                     shifted_xi = xi.copy()
                     W_index_previous = [0, 0, 0, 0]
                 shifted_xi = self.create_fermion_PDF_GI(gauge, shifted_xi, W_index, W_index_previous)
+            elif operator_kind == "GI_qTMD":
+                shifted_xi = create_fermion_TMD_GI(gauge, xi, W_index)
             else:
                 raise ValueError(f"Unsupported operator_kind {operator_kind!r}")
 
@@ -256,14 +283,19 @@ class DisconnectedQuarkqTMD1pt:
         dirac.loadGauge(U)
         mpi_print(latt_info, "Disconnected qTMD inverter ready.")
 
-        qlist = self.qlist if operator_kind == "CG_qTMD" else self.qlist_PDF
+        qlist = self.qlist if operator_kind in {"CG_qTMD", "GI_qTMD"} else self.qlist_PDF
         qext_xyz = [[q[0], q[1], q[2]] for q in qlist]
         phases_q = phase.MomentumPhase(latt_info).getPhases(qext_xyz, [0, 0, 0, 0])
         if operator_kind == "CG_qTMD":
             W_index_list_dir0, W_index_list_dir1 = self.create_TMD_Wilsonline_index_list_CG()
             W_index_list = W_index_list_dir0 + W_index_list_dir1
+        elif operator_kind == "GI_qTMD":
+            W_index_list_dir0, W_index_list_dir1 = self.create_TMD_Wilsonline_index_list_GI()
+            W_index_list = W_index_list_dir0 + W_index_list_dir1
         else:
             W_index_list = self.create_PDF_Wilsonline_index_list()
+        if len(W_index_list) == 0:
+            raise ValueError(f"No Wilson-line indices were generated for operator_kind {operator_kind!r}")
 
         n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
         source_bookkeeping = source_bookkeeping_arrays(n_eff)
