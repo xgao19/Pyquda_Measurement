@@ -139,6 +139,7 @@ from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
     create_fermion_TMD_GI,
     create_fermion_TMD_GI_from_link,
 )
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import create_gi_qtmd_wilsonline_index_lists
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
@@ -293,23 +294,7 @@ class pion_TMD:
         return self._reorder_wilson_indices(index_list_trans0), self._reorder_wilson_indices(index_list_trans1)
 
     def create_TMD_Wilsonline_index_list_GI(self):
-        index_list_trans0 = []
-        index_list_trans1 = []
-
-        for eta in self.eta:
-            eta = int(eta)
-            for current_bz in range(0, self.b_z + 1, 2):
-                if eta < current_bz // 2:
-                    continue
-                for current_b_T in range(0, self.b_T + 1):
-                    index_list_trans0.append([current_b_T, current_bz, eta, 0])
-                    index_list_trans1.append([current_b_T, current_bz, eta, 1])
-
-                    if current_bz != 0:
-                        index_list_trans0.append([current_b_T, -current_bz, eta, 0])
-                        index_list_trans1.append([current_b_T, -current_bz, eta, 1])
-
-        return index_list_trans0, index_list_trans1
+        return create_gi_qtmd_wilsonline_index_lists(self.eta, self.b_z, self.b_T)
 
     def _reorder_wilson_indices(self, index_list):
         sorted_list = sorted(index_list, key=lambda x: (x[0], x[1]))

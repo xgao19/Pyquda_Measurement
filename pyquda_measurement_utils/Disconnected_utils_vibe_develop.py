@@ -2,8 +2,6 @@
 
 import numpy as np
 
-from pyquda.field import LatticeFermion
-
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array
 
 
@@ -69,8 +67,29 @@ def source_bookkeeping_arrays(n_eff: int):
     }
 
 
-def make_zn_noise_fermion(latt_info, n: int = 2) -> LatticeFermion:
+def create_gi_qtmd_wilsonline_index_lists(eta_list, max_b_z: int, max_b_T: int):
+    """Create fixed-length GI qTMD Wilson-index lists for transverse x/y."""
+    index_list_trans0 = []
+    index_list_trans1 = []
+    for eta in eta_list:
+        eta = int(eta)
+        for current_bz in range(0, int(max_b_z) + 1, 2):
+            if eta < current_bz // 2:
+                continue
+            for current_b_T in range(0, int(max_b_T) + 1):
+                index_list_trans0.append([current_b_T, current_bz, eta, 0])
+                index_list_trans1.append([current_b_T, current_bz, eta, 1])
+
+                if current_bz != 0:
+                    index_list_trans0.append([current_b_T, -current_bz, eta, 0])
+                    index_list_trans1.append([current_b_T, -current_bz, eta, 1])
+    return index_list_trans0, index_list_trans1
+
+
+def make_zn_noise_fermion(latt_info, n: int = 2):
     """Create one stochastic fermion source with Z_n phases."""
+    from pyquda.field import LatticeFermion
+
     xi = LatticeFermion(latt_info)
     xp = _get_xp_from_array(xi.data)
     r = xp.random.randint(0, n, size=xi.data.shape)
@@ -114,7 +133,7 @@ def hierarchical_probe_pattern(latt_info, hp_idx: int, hp_ordering: str):
     return np.where(parity, -1.0, 1.0)
 
 
-def apply_hierarchical_probe(xi: LatticeFermion, hp_idx: int, hp_ordering: str) -> LatticeFermion:
+def apply_hierarchical_probe(xi, hp_idx: int, hp_ordering: str):
     """Multiply a base stochastic source by one hierarchical probing vector."""
     if hp_idx == 0:
         return xi.copy()

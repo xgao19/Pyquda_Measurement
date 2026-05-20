@@ -4,6 +4,15 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit title and the main changes.  Keep reusable tips,
 cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## Pending Commit: Validate connected GI qTMD cache/direct consistency
+
+- Added connected GI qTMD bookkeeping and HDF5 cache/direct consistency tests.
+- Validated pion and nucleon nonzero-staple GI-only smoke outputs on `login32`
+  with `qmax=0`, `bz=2`, `bT=1`, `eta=1`.
+- Added README files for the new connected pion/nucleon TMD applications.
+- Updated reusable session memory with connected TMD toggles and validation
+  notes.
+
 ## 2026-05-19: Add connected GI qTMD workflows and docs
 
 - Split `SESSION_MEMORY.md` into reusable tips/baselines and this work log.

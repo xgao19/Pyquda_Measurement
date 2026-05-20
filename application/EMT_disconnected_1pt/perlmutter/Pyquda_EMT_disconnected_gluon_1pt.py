@@ -21,6 +21,8 @@ args, unknown = parser.parse_known_args()
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 
+# Production knobs: ensemble paths, output tags, source position,
+# momentum grid, and gradient-flow schedule.
 data_dir = os.environ.get("EMT_1PT_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 gauge_path = os.environ.get(
     "EMT_1PT_GAUGE_PATH",

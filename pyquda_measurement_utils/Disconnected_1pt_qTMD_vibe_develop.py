@@ -45,6 +45,7 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     effective_n_inversions,
     iter_noise_sources,
     normalize_noise_scheme,
+    create_gi_qtmd_wilsonline_index_lists,
     source_bookkeeping_arrays,
     validate_hierarchical_probing_options,
 )
@@ -197,23 +198,7 @@ class DisconnectedQuarkqTMD1pt:
 
     def create_TMD_Wilsonline_index_list_GI(self):
         """Create the fixed-length gauge-invariant qTMD staple list."""
-        index_list_trans0 = []
-        index_list_trans1 = []
-
-        for eta in self.eta:
-            eta = int(eta)
-            for current_bz in range(0, self.b_z + 1, 2):
-                if eta < current_bz // 2:
-                    continue
-                for current_b_T in range(0, self.b_T + 1):
-                    index_list_trans0.append([current_b_T, current_bz, eta, 0])
-                    index_list_trans1.append([current_b_T, current_bz, eta, 1])
-
-                    if current_bz != 0:
-                        index_list_trans0.append([current_b_T, -current_bz, eta, 0])
-                        index_list_trans1.append([current_b_T, -current_bz, eta, 1])
-
-        return index_list_trans0, index_list_trans1
+        return create_gi_qtmd_wilsonline_index_lists(self.eta, self.b_z, self.b_T)
 
     @staticmethod
     def create_fermion_TMD_CG(fermion, W_index, W_index_previous):

@@ -20,6 +20,8 @@ args, unknown = parser.parse_known_args()
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 
+# Production knobs: ensemble paths, output tags, source position,
+# momentum grid, gradient-flow schedule, and stochastic estimator.
 data_dir = os.environ.get("EMT_1PT_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 gauge_path = os.environ.get(
     "EMT_1PT_GAUGE_PATH",
@@ -56,12 +58,14 @@ gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
 gauge.latt_info.t_boundary = -1
 
+# Inverter knobs: mass, clover coefficient, tolerance, max iterations.
 invPara = [
     float(os.environ.get("EMT_1PT_MASS", "0.236")),
     float(os.environ.get("EMT_1PT_CSW", "1.0372")),
     float(os.environ.get("EMT_1PT_TOL", "1e-15")),
     int(os.environ.get("EMT_1PT_MAXITER", "300")),
 ]
+# Stochastic-source knobs: number of vectors, Z_n, RNG seed.
 randPara = [
     int(os.environ.get("EMT_1PT_N_VEC", "1")),
     int(os.environ.get("EMT_1PT_N_ZN", "2")),

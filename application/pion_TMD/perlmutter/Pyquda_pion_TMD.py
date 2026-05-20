@@ -24,6 +24,7 @@ parser.add_argument("--src_interpolator", type=str, default=os.environ.get("PION
 parser.add_argument("--sink_interpolator", type=str, default=os.environ.get("PION_TMD_SINK_INTERPOLATOR", "5"))
 parser.add_argument("--run_cg_qtmd", type=int, default=int(os.environ.get("PION_TMD_RUN_CG_QTMD", 1)))
 parser.add_argument("--run_gi_qtmd", type=int, default=int(os.environ.get("PION_TMD_RUN_GI_QTMD", 1)))
+parser.add_argument("--run_pdf", type=int, default=int(os.environ.get("PION_TMD_RUN_PDF", 1)))
 parser.add_argument("--gi_staple_mode", type=str, default=os.environ.get("PION_TMD_GI_STAPLE_MODE", "link_cache"))
 args, unknown = parser.parse_known_args()
 
@@ -78,6 +79,9 @@ def gamma_from_label(label):
     return gamma.gamma(gamma_map[label])
 
 
+# ============================================================
+# Production parameters
+# ============================================================
 software_root = Path(os.environ.get("SOFTWARE_ROOT", "/global/cfs/cdirs/m3760/xgao/software"))
 script_dir = Path(__file__).resolve().parent
 data_dir = Path(args.data_dir) if args.data_dir else script_dir / "data"
@@ -85,6 +89,9 @@ gauge_path = args.gauge_path or str(software_root / "Pyquda_Measurement/test_gau
 lat_tag = os.environ.get("PION_TMD_LAT_TAG", "S8T32")
 sm_tag = os.environ.get("PION_TMD_SM_TAG", f"1HYP_GSRC_W{args.width:g}_k0_{args.sink_interpolator}")
 conf = args.config_num
+run_cg_qtmd = bool(args.run_cg_qtmd)
+run_gi_qtmd = bool(args.run_gi_qtmd)
+run_pdf = bool(args.run_pdf)
 
 q_range = range(-args.qmax, args.qmax + 1)
 qext = [[x, y, 0, 0] for x in q_range for y in q_range]
@@ -119,6 +126,10 @@ if getMPIComm().Get_rank() == 0:
     print(f"--data_dir {data_dir}")
     print(f"--config_num {conf}")
     print(f"--mpi_geometry {args.mpi_geometry}")
+    print(f"--run_cg_qtmd {int(run_cg_qtmd)}")
+    print(f"--run_gi_qtmd {int(run_gi_qtmd)}")
+    print(f"--run_pdf {int(run_pdf)}")
+    print(f"--gi_staple_mode {args.gi_staple_mode}")
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
@@ -197,7 +208,7 @@ for pos in src_positions:
     rank = latt_info.mpi_rank
     size = getMPIComm().Get_size()
 
-    if args.run_cg_qtmd:
+    if run_cg_qtmd:
         t0 = time.time()
         pion_TMDs = measurement.contract_qTMD_CG(
             latt_info,
@@ -237,7 +248,7 @@ for pos in src_positions:
                 latt_info,
             )
 
-    if args.run_gi_qtmd:
+    if run_gi_qtmd:
         t0 = time.time()
         pion_TMDs = measurement.contract_qTMD_GI(
             latt_info,
@@ -279,46 +290,47 @@ for pos in src_positions:
                 latt_info,
             )
 
-    for pdf_kind, gauge_invariant in [("GI_PDF", True), ("CG_PDF", False)]:
-        t0 = time.time()
-        pion_PDFs = measurement.contract_PDF(
-            latt_info,
-            gauge,
-            prop_fw,
-            seq_bw_prop,
-            phases_PDF,
-            W_index_list_PDF,
-            src_gamma=args.src_interpolator,
-            gauge_invariant=gauge_invariant,
-        )
-        mpi_print(latt_info, f"contract_{pdf_kind} over: pion_PDFs.shape {np.shape(pion_PDFs)} {time.time() - t0}s")
-
-        if latt_info.mpi_rank == 0:
-            pion_PDFs = np.roll(pion_PDFs, -pos[3], axis=-1)
-            pion_PDFs = pion_PDFs[:, :, :, : parameters["t_insert"] + 2]
-            pion_PDFs = np.transpose(pion_PDFs, (0, 2, 1, 3))
-        pion_PDFs = getMPIComm().bcast(pion_PDFs, root=0)
-
-        for gidx in tasks[rank::size]:
-            gm = my_gammas[gidx]
-            tag = get_qTMD_file_tag(
-                str(data_dir),
-                lat_tag,
-                conf,
-                f"{pdf_kind}.ex",
-                pos,
-                f"{sm_tag}.{pf_tag}.{gm}",
-            )
-            mpi_print(latt_info, f"Saving pion {pdf_kind} gamma {gm}: {tag}")
-            save_qTMD_pion_hdf5_noRoll(
-                pion_PDFs[:, :, gidx : gidx + 1, :],
-                tag,
-                [gm],
-                parameters["qext_PDF"],
-                W_index_list_PDF,
-                parameters["t_insert"],
+    if run_pdf:
+        for pdf_kind, gauge_invariant in [("GI_PDF", True), ("CG_PDF", False)]:
+            t0 = time.time()
+            pion_PDFs = measurement.contract_PDF(
                 latt_info,
+                gauge,
+                prop_fw,
+                seq_bw_prop,
+                phases_PDF,
+                W_index_list_PDF,
+                src_gamma=args.src_interpolator,
+                gauge_invariant=gauge_invariant,
             )
+            mpi_print(latt_info, f"contract_{pdf_kind} over: pion_PDFs.shape {np.shape(pion_PDFs)} {time.time() - t0}s")
+
+            if latt_info.mpi_rank == 0:
+                pion_PDFs = np.roll(pion_PDFs, -pos[3], axis=-1)
+                pion_PDFs = pion_PDFs[:, :, :, : parameters["t_insert"] + 2]
+                pion_PDFs = np.transpose(pion_PDFs, (0, 2, 1, 3))
+            pion_PDFs = getMPIComm().bcast(pion_PDFs, root=0)
+
+            for gidx in tasks[rank::size]:
+                gm = my_gammas[gidx]
+                tag = get_qTMD_file_tag(
+                    str(data_dir),
+                    lat_tag,
+                    conf,
+                    f"{pdf_kind}.ex",
+                    pos,
+                    f"{sm_tag}.{pf_tag}.{gm}",
+                )
+                mpi_print(latt_info, f"Saving pion {pdf_kind} gamma {gm}: {tag}")
+                save_qTMD_pion_hdf5_noRoll(
+                    pion_PDFs[:, :, gidx : gidx + 1, :],
+                    tag,
+                    [gm],
+                    parameters["qext_PDF"],
+                    W_index_list_PDF,
+                    parameters["t_insert"],
+                    latt_info,
+                )
     sync_backend_array(prop_fw.data)
 
     if latt_info.mpi_rank == 0:

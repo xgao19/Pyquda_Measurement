@@ -20,6 +20,8 @@ mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 # ============================================================
 # Shared configuration
 # ============================================================
+# Production knobs: ensemble paths, output tags, source position,
+# momentum grid, and gradient-flow schedule.
 data_dir = os.environ.get("EMT_DATA_DIR", "/global/cfs/cdirs/m3760/xgao/software/EMT_meson/data")
 gauge_path = os.environ.get(
     "EMT_GAUGE_PATH",

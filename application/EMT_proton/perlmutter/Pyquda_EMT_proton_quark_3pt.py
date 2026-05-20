@@ -32,6 +32,8 @@ args, unknown = parser.parse_known_args()
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 
+# Production knobs: ensemble paths, output tags, source position,
+# momentum grid, sink separations, smearing, and gradient-flow schedule.
 data_dir = os.environ.get("EMT_PROTON_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 gauge_path = os.environ.get(
     "EMT_PROTON_GAUGE_PATH",
@@ -82,6 +84,7 @@ gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
 gauge.latt_info.t_boundary = -1
 
+# Inverter knobs: mass, clover coefficient, tolerance, max iterations.
 invPara = [
     float(os.environ.get("EMT_PROTON_MASS", "0.236")),
     float(os.environ.get("EMT_PROTON_CSW", "1.0372")),

@@ -25,6 +25,7 @@ parser.add_argument("--pol", type=str, default=os.environ.get("NUCLEON_TMD_POL",
 parser.add_argument("--run_cg_qtmd", type=int, default=int(os.environ.get("NUCLEON_TMD_RUN_CG_QTMD", 1)))
 parser.add_argument("--run_gi_qtmd", type=int, default=int(os.environ.get("NUCLEON_TMD_RUN_GI_QTMD", 1)))
 parser.add_argument("--run_pdf", type=int, default=int(os.environ.get("NUCLEON_TMD_RUN_PDF", 1)))
+parser.add_argument("--gi_staple_mode", type=str, default=os.environ.get("NUCLEON_TMD_GI_STAPLE_MODE", "link_cache"))
 args, unknown = parser.parse_known_args()
 
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -75,6 +76,7 @@ def contract_nucleon_operator_list(
     phases,
     W_index_list,
     operator_kind,
+    staple_mode="link_cache",
 ):
     xp = _get_xp_from_array(prop_f.data)
     phases = _asarray_on_queue(phases, xp, prop_f.data)
@@ -83,9 +85,11 @@ def contract_nucleon_operator_list(
     shifted_prop = prop_f.copy()
     staple_links = None
 
-    if operator_kind == "GI_qTMD":
+    if operator_kind == "GI_qTMD" and staple_mode == "link_cache":
         mpi_print(latt_info, f"Build {len(W_index_list)} connected nucleon GI_qTMD staple transporters.")
         staple_links = build_gi_qtmd_staple_links(gauge, W_index_list)
+    elif operator_kind == "GI_qTMD" and staple_mode != "direct_covdev":
+        raise ValueError(f"Unsupported GI_qTMD staple_mode {staple_mode!r}")
 
     for iW, W_index in enumerate(W_index_list):
         mpi_print(latt_info, f"Contract nucleon {operator_kind} {iW + 1}/{len(W_index_list)} {W_index}")
@@ -234,6 +238,9 @@ def save_nucleon_pdf(
         )
 
 
+# ============================================================
+# Production parameters
+# ============================================================
 software_root = Path(os.environ.get("SOFTWARE_ROOT", "/global/cfs/cdirs/m3760/xgao/software"))
 script_dir = Path(__file__).resolve().parent
 data_dir = Path(args.data_dir) if args.data_dir else script_dir / "data"
@@ -243,6 +250,9 @@ conf = args.config_num
 interpolator = args.interpolator
 pol_list = [args.pol]
 sm_tag = os.environ.get("NUCLEON_TMD_SM_TAG", f"1HYP_GSRC_W{args.width:g}_k0_{interpolator}")
+run_cg_qtmd = bool(args.run_cg_qtmd)
+run_gi_qtmd = bool(args.run_gi_qtmd)
+run_pdf = bool(args.run_pdf)
 
 q_range = range(-args.qmax, args.qmax + 1)
 qext = [[x, y, 0, 0] for x in q_range for y in q_range]
@@ -279,6 +289,10 @@ if getMPIComm().Get_rank() == 0:
     print(f"--data_dir {data_dir}")
     print(f"--config_num {conf}")
     print(f"--mpi_geometry {args.mpi_geometry}")
+    print(f"--run_cg_qtmd {int(run_cg_qtmd)}")
+    print(f"--run_gi_qtmd {int(run_gi_qtmd)}")
+    print(f"--run_pdf {int(run_pdf)}")
+    print(f"--gi_staple_mode {args.gi_staple_mode}")
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
@@ -366,7 +380,7 @@ for pos in src_positions:
     W_index_list_GI = W_index_list_GI_dir0 + W_index_list_GI_dir1
     W_index_list_PDF = measurement.create_PDF_Wilsonline_index_list()
 
-    if args.run_cg_qtmd:
+    if run_cg_qtmd:
         t0 = time.time()
         corr_down, corr_up = contract_nucleon_operator_list(
             latt_info,
@@ -385,7 +399,7 @@ for pos in src_positions:
         corr_up = roll_trim_bcast(corr_up, pos[3], parameters["t_insert"])
         save_nucleon_qtmd_by_gamma(latt_info, data_dir, lat_tag, conf, "CG", pos, sm_pf_pol_tag, corr_down, corr_up, parameters["qext"], W_index_list_CG, parameters["t_insert"])
 
-    if args.run_gi_qtmd:
+    if run_gi_qtmd:
         t0 = time.time()
         corr_down, corr_up = contract_nucleon_operator_list(
             latt_info,
@@ -398,13 +412,14 @@ for pos in src_positions:
             phases_TMD,
             W_index_list_GI,
             "GI_qTMD",
+            staple_mode=args.gi_staple_mode,
         )
         mpi_print(latt_info, f"contract_GI_qTMD over: {np.shape(corr_down)} {time.time() - t0}s")
         corr_down = roll_trim_bcast(corr_down, pos[3], parameters["t_insert"])
         corr_up = roll_trim_bcast(corr_up, pos[3], parameters["t_insert"])
         save_nucleon_qtmd_by_gamma(latt_info, data_dir, lat_tag, conf, "GI_qTMD", pos, sm_pf_pol_tag, corr_down, corr_up, parameters["qext"], W_index_list_GI, parameters["t_insert"])
 
-    if args.run_pdf:
+    if run_pdf:
         for operator_kind, operator_tag in [("GI_PDF", "GI_PDF"), ("CG_PDF", "CG_PDF")]:
             t0 = time.time()
             corr_down, corr_up = contract_nucleon_operator_list(

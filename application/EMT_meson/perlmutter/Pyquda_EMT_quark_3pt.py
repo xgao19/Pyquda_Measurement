@@ -21,6 +21,8 @@ mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 # ============================================================
 # Shared configuration
 # ============================================================
+# Production knobs: ensemble paths, output tags, source position,
+# momentum grid, sink separations, smearing, and gradient-flow schedule.
 data_dir = os.environ.get("EMT_DATA_DIR", "/global/cfs/cdirs/m3760/xgao/software/EMT_meson/data")
 gauge_path = os.environ.get(
     "EMT_GAUGE_PATH",
@@ -60,6 +62,7 @@ gauge.latt_info.t_boundary = -1
 # ============================================================
 # Measurement
 # ============================================================
+# Inverter knobs: mass, clover coefficient, tolerance, max iterations.
 invPara = [0.236, 1.0372, 1e-15, 300]  # mf, csw, prec, cgMax
 
 quark_emt = QuarkEMT(parameters)

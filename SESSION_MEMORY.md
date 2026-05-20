@@ -217,6 +217,18 @@ module load texlive/2024
 - Pion connected GI qTMD S8T32 smoke passed on `login32`.
 - Nucleon connected GI qTMD Perlmutter smoke passed on `login32` with
   `qmax=0`, `bz=0`, `bT=0`, `eta=0`, GI-only enabled.
+- Connected GI qTMD nonzero-staple cache/direct consistency passed on
+  `login32` with `qmax=0`, `bz=2`, `bT=1`, `eta=1`, GI-only enabled:
+  `link_cache` and `direct_covdev` agree within `1e-12` for pion and nucleon.
+- Optional regression test:
+  `tests/test_connected_gi_qtmd_link_cache_consistency.py`.
+  It compares paired HDF5 outputs under
+  `/tmp/pyquda_connected_gi_qtmd_consistency`.
+- Useful connected TMD toggles:
+  - pion: `PION_TMD_RUN_CG_QTMD`, `PION_TMD_RUN_GI_QTMD`,
+    `PION_TMD_RUN_PDF`, `PION_TMD_GI_STAPLE_MODE`
+  - nucleon: `NUCLEON_TMD_RUN_CG_QTMD`, `NUCLEON_TMD_RUN_GI_QTMD`,
+    `NUCLEON_TMD_RUN_PDF`, `NUCLEON_TMD_GI_STAPLE_MODE`
 
 ## Disconnected qTMD 1pt
 
