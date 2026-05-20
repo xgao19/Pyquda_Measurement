@@ -124,6 +124,10 @@ the current connected contraction path.
 
 from pyquda_utils import core, gamma
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
+from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+    create_fermion_TMD_GI,
+    create_fermion_TMD_GI_from_link,
+)
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.tools import _get_xp_from_array, mpi_print, _asarray_on_queue
 
@@ -465,6 +469,25 @@ class proton_TMD():
         index_list_trans1 = reorder_indices(index_list_trans1)
                 
         return index_list_trans0, index_list_trans1
+
+    def create_TMD_Wilsonline_index_list_GI(self):
+        index_list_trans0 = []
+        index_list_trans1 = []
+
+        for eta in self.eta:
+            eta = int(eta)
+            for current_bz in range(0, self.b_z + 1, 2):
+                if eta < current_bz // 2:
+                    continue
+                for current_b_T in range(0, self.b_T + 1):
+                    index_list_trans0.append([current_b_T, current_bz, eta, 0])
+                    index_list_trans1.append([current_b_T, current_bz, eta, 1])
+
+                    if current_bz != 0:
+                        index_list_trans0.append([current_b_T, -current_bz, eta, 0])
+                        index_list_trans1.append([current_b_T, -current_bz, eta, 1])
+
+        return index_list_trans0, index_list_trans1
                     
     #! PyQUDA: create forward propagator for CG TMD, support +- shift
     def create_fw_prop_TMD_CG(self, prop_f, W_index, WL_indices_previous):
@@ -477,6 +500,21 @@ class proton_TMD():
         previous_bz = WL_indices_previous[1]
         
         prop_shift = prop_f.shift(round(current_b_T - previous_b_T), transverse_direction).shift(round(current_bz - previous_bz), Zdir)
+
+        return prop_shift
+
+    def create_fw_prop_TMD_GI(self, gauge, prop_f, W_index, staple_links=None):
+        prop_shift = prop_f.copy()
+        staple_link = None if staple_links is None else staple_links[tuple(W_index)]
+
+        for spin in range(4):
+            for color in range(3):
+                fermion = prop_f.getFermion(spin, color)
+                if staple_link is None:
+                    fermion_shift = create_fermion_TMD_GI(gauge, fermion, W_index)
+                else:
+                    fermion_shift = create_fermion_TMD_GI_from_link(staple_link, fermion, W_index)
+                prop_shift.setFermion(fermion_shift, spin, color)
 
         return prop_shift
     

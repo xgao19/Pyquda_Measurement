@@ -1,0 +1,6 @@
+log/
+logs/
+.cache/
+hostfile/
+*.o
+*.e

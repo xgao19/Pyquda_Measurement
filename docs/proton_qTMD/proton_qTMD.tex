@@ -1055,12 +1055,81 @@ The current implementation has the following limitations:
 \end{enumerate}
 
 % ======================================================================
+\section{Connected GI qTMD Update}
+\label{sec:connected_gi_qtmd}
+% ======================================================================
+
+The connected proton qTMD code now has a gauge-invariant staple qTMD path in
+addition to the original Coulomb-gauge coordinate-shift qTMD and the straight
+PDF operators.  The existing \texttt{application/nucleon\_TMD\_CG} workflow is
+kept as the already-tested CG path.  New workflows live in
+\texttt{application/nucleon\_TMD/Aurora} and
+\texttt{application/nucleon\_TMD/perlmutter}; the Perlmutter version is intended
+for CUDA/CuPy smoke tests and production preparation.
+
+The connected \texttt{GI\_qTMD} operator uses the same Wilson index convention as
+the pion and disconnected qTMD code,
+\begin{equation}
+  W = [b_T,\; b_z,\; \eta,\; d_\perp],
+\end{equation}
+with $d_\perp=0,1$ for the transverse $x$ or $y$ direction.  The fixed-length
+staple path is
+\begin{align}
+  x
+  &\rightarrow x + \left(\eta + \frac{b_z}{2}\right)\hat z, \\
+  &\rightarrow x + \left(\eta + \frac{b_z}{2}\right)\hat z
+       + b_T \hat e_{d_\perp}, \\
+  &\rightarrow x + b_z \hat z + b_T \hat e_{d_\perp}.
+\end{align}
+The total staple length is therefore
+\begin{equation}
+  L_{\rm staple} = 2\eta + b_T,
+\end{equation}
+which is independent of $b_z$.  The allowed connected \texttt{GI\_qTMD}
+indices satisfy
+\begin{equation}
+  b_z \in 2\mathbb{Z}, \qquad \eta \geq \frac{|b_z|}{2}, \qquad b_T \geq 0.
+\end{equation}
+
+The source module exposes this through two new helpers:
+\begin{itemize}
+  \item \texttt{create\_TMD\_Wilsonline\_index\_list\_GI()} generates the
+    connected staple-index list.
+  \item \texttt{create\_fw\_prop\_TMD\_GI(gauge, prop, W, staple\_links)}
+    applies a cached gauge-only staple transporter to each spin-color source
+    column of the forward propagator.
+\end{itemize}
+The actual baryon contraction is unchanged: the shifted or covariantly
+transported forward line is contracted with the up- and down-insertion
+sequential propagators,
+\begin{equation}
+  C_{3,g}^{f}(q,W,\tau)
+  =
+  \sum_{\mathbf{x}}
+  e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
+  \mathrm{Tr}\!\left[
+    \mathrm{Seq}_{f}(\mathbf{x},\tau;p_f,t_{\rm sep},\mathcal{P})\,
+    \Gamma_g\,
+    \mathcal{O}_{W}^{\rm GI} S(\mathbf{x},\tau;\mathbf{x}_0,0)
+  \right],
+\end{equation}
+where $f=U,D$ labels the connected flavor insertion and $\mathcal{P}$ is the
+spin projector.
+
+Output files use the tags
+\begin{equation}
+  \texttt{GI\_qTMD.U.ex}, \qquad \texttt{GI\_qTMD.D.ex},
+\end{equation}
+while the original CG files keep the tags \texttt{CG.U.ex} and
+\texttt{CG.D.ex}.  The HDF5 internal path still follows the common qTMD writer
+layout based on $[b_T,b_z,\eta,d_\perp]$.
+
+% ======================================================================
 \section{Application Workflow Summary}
 \label{sec:workflow}
 % ======================================================================
 
-The production application (\texttt{pyquda\_nucleon\_TMD.py}) follows this workflow
-for each source position:
+The production applications follow this workflow for each source position:
 
 \begin{enumerate}
   \item \textbf{Forward propagator}: Generate a point source at position
@@ -1078,6 +1147,11 @@ for each source position:
     directions $+x$ and $+y$, incrementally shifting the forward propagator
     and contracting with both sequential propagators and the 16 gammas.
     Save results per polarization, gamma, and flavor.
+  \item \textbf{TMD contractions (GI)}: In the new
+    \texttt{application/nucleon\_TMD} workflows, build cached fixed-length
+    staple transporters, apply them to the forward propagator, and contract
+    with the same sequential propagators.  This path writes
+    \texttt{GI\_qTMD.U.ex} and \texttt{GI\_qTMD.D.ex}.
   \item \textbf{PDF contractions (GI)}: Loop over PDF Wilson-line indices,
     apply gauge-covariant $z$-shifts via \texttt{create\_fw\_prop\_PDF\_GI},
     and contract similarly.
@@ -1089,6 +1163,19 @@ The momentum transfer $q$ for the three-point functions is constructed from the
 \texttt{qext} parameter list: $q = (q_x, q_y, q_z, 0)$ with $q_z = 0$ for TMD
 and unrestricted for PDF. The initial momentum is $p_i = p_f - q$, and the
 two-point momenta are the negative of the \texttt{p\_2pt} list.
+
+On Perlmutter, the smoke-test entry point is
+\begin{equation}
+  \texttt{application/nucleon\_TMD/perlmutter/run\_nucleon\_TMD.sh}.
+\end{equation}
+The main environment toggles are
+\texttt{NUCLEON\_TMD\_RUN\_CG\_QTMD},
+\texttt{NUCLEON\_TMD\_RUN\_GI\_QTMD}, and
+\texttt{NUCLEON\_TMD\_RUN\_PDF}.  The staple parameters are controlled by
+\texttt{NUCLEON\_TMD\_ETA}, \texttt{NUCLEON\_TMD\_BZ}, and
+\texttt{NUCLEON\_TMD\_BT}.  For the fixed-length GI qTMD path, use even
+\texttt{NUCLEON\_TMD\_BZ} and choose
+\texttt{NUCLEON\_TMD\_ETA >= abs(NUCLEON\_TMD\_BZ)/2}.
 
 % ======================================================================
 \section*{Acknowledgments}

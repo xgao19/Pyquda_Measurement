@@ -1135,13 +1135,74 @@ For quick reference, the central contracted expressions are:
 \section{Wilson Line Index Convention}
 \label{app:wilson}
 
+\subsection*{Connected GI qTMD Update}
+
+The connected pion qTMD code now supports both the older Coulomb-gauge
+coordinate-shift qTMD and a gauge-invariant staple qTMD.  The old
+\texttt{application/pion\_TMD\_CG/perlmutter} workflow is intentionally kept as
+the already-tested CG-only path.  The newer
+\texttt{application/pion\_TMD/perlmutter} workflow can run
+\texttt{CG\_qTMD}, \texttt{GI\_qTMD}, \texttt{GI\_PDF}, and
+\texttt{CG\_PDF} from the same forward and sequential propagators.
+
+For the connected \texttt{GI\_qTMD} operator, the Wilson index remains
+\begin{equation}
+  W = [b_T,\; b_z,\; \eta,\; d_\perp],
+\end{equation}
+where $d_\perp=0,1$ denotes the transverse $x$ or $y$ direction.  The staple is
+implemented with the fixed-length convention
+\begin{align}
+  x
+  &\rightarrow x + \left(\eta + \frac{b_z}{2}\right)\hat z, \\
+  &\rightarrow x + \left(\eta + \frac{b_z}{2}\right)\hat z
+       + b_T \hat e_{d_\perp}, \\
+  &\rightarrow x + b_z \hat z + b_T \hat e_{d_\perp}.
+\end{align}
+Thus the total staple length is
+\begin{equation}
+  L_{\rm staple} = 2\eta + b_T,
+\end{equation}
+independent of $b_z$.  This is useful for renormalization studies because
+different even $b_z$ values at fixed $\eta$ and $b_T$ share the same total
+staple length.  The constraints are
+\begin{equation}
+  b_z \in 2\mathbb{Z}, \qquad \eta \geq \frac{|b_z|}{2}, \qquad b_T \geq 0.
+\end{equation}
+
+The implementation uses the same tested helper convention as the disconnected
+qTMD one-point code: first build reusable gauge-only staple transporters, then
+apply each transporter to the endpoint-shifted forward propagator.  In the pion
+source file this is exposed through
+\begin{itemize}[nosep]
+  \item \texttt{create\_TMD\_Wilsonline\_index\_list\_GI()},
+  \item \texttt{create\_fw\_prop\_TMD\_GI(...)},
+  \item \texttt{contract\_qTMD\_GI(...)}.
+\end{itemize}
+
+The HDF5 tag for the connected pion gauge-invariant staple output is
+\texttt{GI\_qTMD.ex}.  The HDF5 internal path still uses the existing qTMD
+writer convention
+\begin{equation}
+  b_X/\eta\eta/bT b_T
+  \quad \text{or} \quad
+  b_Y/\eta\eta/bT b_T,
+\end{equation}
+with the full $W$ list saved by the writer.  For the local/PDF sanity limits,
+the expected equality is
+\begin{equation}
+  C_3^{\rm GI\_qTMD}(b_T=0,\; b_z=\pm 2\eta,\; \eta)
+  =
+  C_3^{\rm GI\_PDF}(b_z=\pm 2\eta),
+\end{equation}
+up to the common momentum, gamma, source, and sink conventions.
+
 \begin{center}
 \begin{tabular}{c|c|l}
 \hline
 \textbf{Field} & \textbf{Values} & \textbf{Meaning} \\ \hline
 $b_T$      & $0,1,\dots,b_T^{\rm max}$ & Transverse displacement \\
-$b_z$      & $-b_z^{\rm max},\dots,+b_z^{\rm max}$ & Longitudinal displacement \\
-$\eta$      & $0$ (current) & Staple length parameter \\
+$b_z$      & $-b_z^{\rm max},\dots,+b_z^{\rm max}$ & Longitudinal displacement; even for GI qTMD \\
+$\eta$      & $0$ for CG, $\eta \ge |b_z|/2$ for GI qTMD & Staple length parameter \\
 direction  & $0$ or $1$ & $0$ for $x$, $1$ for $y$ \\
 \hline
 \end{tabular}

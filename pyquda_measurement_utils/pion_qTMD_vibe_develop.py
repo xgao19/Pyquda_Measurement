@@ -134,6 +134,11 @@ import numpy as np
 
 from pyquda_utils import core
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
+from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+    build_gi_qtmd_staple_links,
+    create_fermion_TMD_GI,
+    create_fermion_TMD_GI_from_link,
+)
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
@@ -203,6 +208,30 @@ class pion_TMD:
 
         return np.array(pion_TMDs)
 
+    def contract_qTMD_GI(self, latt_info, gauge, prop_f, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="fixed_g5", staple_mode="link_cache"):
+        xp = _get_xp_from_array(prop_f.data)
+        phases = _asarray_on_queue(phases, xp, prop_f.data)
+        sink_gamma_ls = gamma_stack(prop_f.data)
+        source_gamma_ls = source_gamma_stack(src_gamma, sink_gamma_ls, prop_f.data)
+        seq_bw_line = meson_backward_line(seq_bw_prop)
+
+        W_index_list = W_index_list_dir0 + W_index_list_dir1
+        staple_links = None
+        if staple_mode == "link_cache":
+            mpi_print(latt_info, f"Build {len(W_index_list)} connected pion GI_qTMD staple transporters.")
+            staple_links = build_gi_qtmd_staple_links(gauge, W_index_list)
+        elif staple_mode != "direct_covdev":
+            raise ValueError(f"Unsupported GI_qTMD staple_mode {staple_mode!r}")
+
+        pion_TMDs = []
+        for iW, W_index in enumerate(W_index_list):
+            mpi_print(latt_info, f"Contract pion qTMD GI {iW + 1}/{len(W_index_list)} {W_index}")
+            shifted_prop = self.create_fw_prop_TMD_GI(gauge, prop_f, W_index, staple_links=staple_links)
+            pion_TMDs.append(self._contract_qTMD_one_shift(seq_bw_line, shifted_prop, sink_gamma_ls, source_gamma_ls, phases))
+            del shifted_prop
+
+        return np.array(pion_TMDs)
+
     def contract_PDF(self, latt_info, gauge, prop_f, seq_bw_prop, phases, W_index_list, src_gamma="fixed_g5", gauge_invariant=True):
         xp = _get_xp_from_array(prop_f.data)
         phases = _asarray_on_queue(phases, xp, prop_f.data)
@@ -263,6 +292,25 @@ class pion_TMD:
 
         return self._reorder_wilson_indices(index_list_trans0), self._reorder_wilson_indices(index_list_trans1)
 
+    def create_TMD_Wilsonline_index_list_GI(self):
+        index_list_trans0 = []
+        index_list_trans1 = []
+
+        for eta in self.eta:
+            eta = int(eta)
+            for current_bz in range(0, self.b_z + 1, 2):
+                if eta < current_bz // 2:
+                    continue
+                for current_b_T in range(0, self.b_T + 1):
+                    index_list_trans0.append([current_b_T, current_bz, eta, 0])
+                    index_list_trans1.append([current_b_T, current_bz, eta, 1])
+
+                    if current_bz != 0:
+                        index_list_trans0.append([current_b_T, -current_bz, eta, 0])
+                        index_list_trans1.append([current_b_T, -current_bz, eta, 1])
+
+        return index_list_trans0, index_list_trans1
+
     def _reorder_wilson_indices(self, index_list):
         sorted_list = sorted(index_list, key=lambda x: (x[0], x[1]))
         reordered = []
@@ -298,6 +346,21 @@ class pion_TMD:
         previous_bz = W_index_previous[1]
 
         return prop_f.shift(round(current_b_T - previous_b_T), transverse_direction).shift(round(current_bz - previous_bz), z_direction)
+
+    def create_fw_prop_TMD_GI(self, gauge, prop_f, W_index, staple_links=None):
+        prop_shift = prop_f.copy()
+        staple_link = None if staple_links is None else staple_links[tuple(W_index)]
+
+        for spin in range(4):
+            for color in range(3):
+                fermion = prop_f.getFermion(spin, color)
+                if staple_link is None:
+                    fermion_shift = create_fermion_TMD_GI(gauge, fermion, W_index)
+                else:
+                    fermion_shift = create_fermion_TMD_GI_from_link(staple_link, fermion, W_index)
+                prop_shift.setFermion(fermion_shift, spin, color)
+
+        return prop_shift
 
     def create_PDF_Wilsonline_index_list(self):
         index_list = []
