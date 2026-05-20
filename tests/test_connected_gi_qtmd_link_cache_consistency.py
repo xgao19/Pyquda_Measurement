@@ -6,6 +6,7 @@ import numpy as np
 
 
 DATA_ROOT = Path("/tmp/pyquda_connected_gi_qtmd_consistency")
+TEST_REQUIRES = "external_hdf5"
 
 
 def _h5_files(label, mode):

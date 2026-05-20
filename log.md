@@ -4,14 +4,19 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit title and the main changes.  Keep reusable tips,
 cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
-## Pending Commit: Validate connected GI qTMD cache/direct consistency
+## Pending Commit: Add lightweight measurement regression tests
 
-- Added connected GI qTMD bookkeeping and HDF5 cache/direct consistency tests.
-- Validated pion and nucleon nonzero-staple GI-only smoke outputs on `login32`
-  with `qmax=0`, `bz=2`, `bT=1`, `eta=1`.
-- Added README files for the new connected pion/nucleon TMD applications.
-- Updated reusable session memory with connected TMD toggles and validation
-  notes.
+- Added a lightweight `tests/run_smoke_tests.py` runner and broad regression
+  tests for gamma conventions, EMT contractions, qTMD limits, HDF5 schema,
+  meson sequential-source smearing, pion soft-factor bookkeeping, and utility
+  helpers.
+- Added optional tiny-gauge GPU smoke tests and validated the pion soft-factor
+  prop/contract smoke on `login32`.
+- Marked GPU and external-HDF5 checks as optional so the default runner stays
+  login-node friendly.
+- Defaulted pion soft-factor prop generation to all time slices, while the
+  optional tiny smoke contracts only source time zero after generating the
+  required sink-time wall propagators.
 
 ## 2026-05-19: Add connected GI qTMD workflows and docs
 

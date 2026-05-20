@@ -3,6 +3,8 @@ from unittest import SkipTest
 
 import numpy as np
 
+TEST_REQUIRES = "gpu"
+
 
 def _get_xp(arr):
     module = type(arr).__module__.split(".")[0]

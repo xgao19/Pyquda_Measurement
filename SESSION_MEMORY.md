@@ -131,6 +131,22 @@ module load texlive/2024
 - If using `py_compile` in production directories with restrictive filesystems,
   it may fail only because Python cannot write `__pycache__`.  Use `ast.parse`
   if a write-free syntax check is needed.
+- The lightweight test runner is:
+
+```bash
+source systems/perlmutter/activate-venv-quda.sh
+python tests/run_smoke_tests.py
+```
+
+  The default runner skips tests marked with `TEST_REQUIRES = "gpu"` or
+  `TEST_REQUIRES = "external_hdf5"`.
+- Optional tiny-gauge GPU smoke tests can be run on `login32` with:
+
+```bash
+PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workflows import test_optional_pion_soft_factor_tiny_gauge_smoke; test_optional_pion_soft_factor_tiny_gauge_smoke()"
+```
+
+  The pion soft-factor tiny smoke has been validated on `login32`.
 
 ## EMT Conventions And Baselines
 
@@ -189,6 +205,25 @@ module load texlive/2024
   all agree at q=0, `bT=bz=eta=0`, `gamma_4/T`, source/sink gamma5.
   Max absolute difference: `8.401198274707147e-14`;
   max relative difference: `7.016753011768688e-16`.
+
+## Test Suite Baselines
+
+- Current default lightweight test baseline:
+  `81 passed, 5 skipped, 0 failed`.
+- The skipped tests are optional GPU or external-HDF5 checks.
+- The test suite now includes guards for:
+  - PyQUDA gamma label/order and composite gamma signs
+  - pion/meson sequential-source phase and smearing placement
+  - pion EMFF free-field momentum flow
+  - pion soft-factor contraction order, phase convention, HDF5 schema, and
+    prop/contract time-slice bookkeeping
+  - connected/disconnected qTMD local/PDF/GI limits and Wilson-link helpers
+  - EMT 1pt/3pt HDF5 schema, flow bookkeeping, and connected toy contraction
+  - boosted-smearing kernel phase/symmetry
+  - disconnected noise and hierarchical-probing bookkeeping
+- Pion soft-factor prop generation should usually cover all time slices
+  (`PION_SOFT_T_COUNT=0`) because contract time `t0` with separation `tsep`
+  needs wall propagators at both `t0` and `(t0 + tsep) % Lt`.
 
 ## Connected qTMD / GI qTMD
 

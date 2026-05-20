@@ -18,6 +18,7 @@ DEFAULT_FILES = {
     "direct": DATA_DIR / "S8T32.qTMD1pt.smoke.GI_qTMD_bz2_eta1_bT1.direct_covdev.h5",
     "cache": DATA_DIR / "S8T32.qTMD1pt.smoke.GI_qTMD_bz2_eta1_bT1.link_cache.h5",
 }
+TEST_REQUIRES = "external_hdf5"
 
 
 def _read_required_outputs():

@@ -297,14 +297,14 @@ def save_proton_c2pt_hdf5(corr, tag, gammalist, plist):
 
 # W_index_list[bT, bz, eta, Tdir]
 # Save proton qTMD/PDF three-point data after the application has already rolled time.
-def save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info):
+def save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info, attrs=None):
 
     bT_list = ['b_X', 'b_Y']
 
     #g.message("-->>",W_index_list)
 
     save_h5 = tag + ".h5"
-    f = h5py.File(save_h5, 'w')
+    f = _prepare_h5_file(save_h5, attrs)
 
     if latt_info.mpi_rank == 0:
         print(f"no roll")
@@ -324,8 +324,8 @@ def save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep
 
 
 # Save pion qTMD/PDF data using the same HDF5 layout as the proton writer.
-def save_qTMD_pion_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info):
-    save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info)
+def save_qTMD_pion_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info, attrs=None):
+    save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info, attrs=attrs)
 
 
 # Save disconnected qTMD/PDF one-point loops.
