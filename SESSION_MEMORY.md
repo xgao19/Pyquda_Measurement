@@ -209,7 +209,7 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
 ## Test Suite Baselines
 
 - Current default lightweight test baseline:
-  `81 passed, 5 skipped, 0 failed`.
+  `87 passed, 5 skipped, 0 failed`.
 - The skipped tests are optional GPU or external-HDF5 checks.
 - The test suite now includes guards for:
   - PyQUDA gamma label/order and composite gamma signs
@@ -221,6 +221,15 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
   - EMT 1pt/3pt HDF5 schema, flow bookkeeping, and connected toy contraction
   - boosted-smearing kernel phase/symmetry
   - disconnected noise and hierarchical-probing bookkeeping
+  - pion EMFF background-response phase/formula/HDF5 summary schema
+- Optional pion EMFF background-response tiny-gauge GPU smoke passed on
+  `login32` using S8T32 with `qext=[0,0,0]` and `[0,0,1]`, `tsep=2,4`,
+  restricted tau window, and current `T`.
+  Explicit summed C3 and response C2-like contractions agreed at
+  `relative_difference ~ 5e-18` to `2e-16`.
+- Pion EMFF background-response HDF5 schema v2 includes a `summary/` group
+  with table-like datasets for `relative_difference`, `response_R_sum`,
+  `explicit_R_sum`, `pf`, `qext`, `pi`, `tsep`, gamma labels, and window labels.
 - Pion soft-factor prop generation should usually cover all time slices
   (`PION_SOFT_T_COUNT=0`) because contract time `t0` with separation `tsep`
   needs wall propagators at both `t0` and `(t0 + tsep) % Lt`.

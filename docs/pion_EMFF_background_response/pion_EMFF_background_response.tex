@@ -1,0 +1,594 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{physics}
+\usepackage{braket}
+\usepackage{hyperref}
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  showstringspaces=false,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+}
+
+\newcommand{\Dslash}{D}
+\newcommand{\Slambda}{S_\lambda}
+\newcommand{\Szero}{S}
+\newcommand{\Sresp}{S_{\mathrm{resp}}}
+\newcommand{\Ocur}{\mathcal{O}}
+\newcommand{\gcur}{\Gamma_{\mathrm{cur}}}
+\newcommand{\gsrc}{\Gamma_{\mathrm{src}}}
+\newcommand{\gsink}{\Gamma_{\mathrm{sink}}}
+\newcommand{\gfive}{\gamma_5}
+\newcommand{\Phiq}{\Phi_{\mathbf q}}
+\newcommand{\Ctwo}{C_2}
+\newcommand{\Cthree}{C_3}
+\newcommand{\Cresp}{C_{\mathrm{resp}}}
+\newcommand{\Rsum}{R_{\mathrm{sum}}}
+\newcommand{\pyquda}{\texttt{PyQUDA}}
+
+\title{\textbf{Pion EMFF Background-Response Diagnostic}\\[4pt]
+\large Finite-Field Energy Shift versus Linearized Response Propagator}
+\author{Pyquda\_Measurement Collaboration}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+%=============================================================================
+\section{Purpose}
+%=============================================================================
+
+This note documents the pion electromagnetic form-factor (EMFF)
+background-response diagnostic implemented in
+\begin{center}
+\texttt{pyquda\_measurement\_utils/pion\_EMFF\_background\_response\_vibe\_develop.py}
+\end{center}
+and
+\begin{center}
+\texttt{application/EMFF\_pion\_background\_response/perlmutter/}.
+\end{center}
+
+The goal is to study a background-field/Feynman-Hellmann route to pion EMFF
+matrix elements while \emph{not} modifying the QUDA Dirac operator and while
+\emph{not} performing inversions with a finite external field
+\(\Dslash+\lambda\Ocur\).  Instead, the current implementation constructs the
+first-order response propagator using ordinary \(\Dslash^{-1}\) inversions.
+
+This is not yet the full finite-\(\lambda\) background-field method.  It is the
+linearized method at \(\lambda=0\), which is mathematically equivalent to a
+summed current insertion.
+
+%=============================================================================
+\section{Two Related But Distinct Methods}
+%=============================================================================
+
+\subsection{Finite-\(\lambda\) background-field method}
+
+The most literal background-field method modifies the action or Dirac operator,
+\begin{equation}
+  \Dslash_\lambda = \Dslash + \lambda \Ocur,
+\end{equation}
+then computes ordinary two-point functions in this modified theory,
+\begin{equation}
+  C_\lambda(t)
+  =
+  \braket{
+    O_\pi(t) O_\pi^\dagger(0)
+  }_\lambda .
+\end{equation}
+At large Euclidean time,
+\begin{equation}
+  C_\lambda(t)
+  =
+  Z_\lambda e^{-E_\lambda t}
+  + \cdots .
+\end{equation}
+The desired matrix element is obtained from the energy response,
+\begin{equation}
+  \left.\frac{\partial E_\lambda}{\partial\lambda}\right|_{\lambda=0}.
+\end{equation}
+This is the usual ``extract the energy shift'' picture of the background-field
+method.
+
+\subsection{Linearized response at \(\lambda=0\)}
+
+The method currently implemented in this repository does not invert
+\(\Dslash+\lambda\Ocur\).  Instead, it expands the propagator,
+\begin{equation}
+  \Slambda
+  =
+  (\Dslash + \lambda \Ocur)^{-1}
+  =
+  \Szero - \lambda \Szero \Ocur \Szero + O(\lambda^2).
+\end{equation}
+Thus,
+\begin{equation}
+  \left.
+  \frac{\partial \Slambda}{\partial\lambda}
+  \right|_{\lambda=0}
+  =
+  - \Szero \Ocur \Szero.
+\label{eq:dSdlambda}
+\end{equation}
+
+The code constructs the object
+\begin{equation}
+  \Sresp
+  =
+  \Szero \Ocur \Szero
+  =
+  \Dslash^{-1} \Ocur \Szero,
+\label{eq:Sresponse_code_sign}
+\end{equation}
+using ordinary inversions.  Therefore, relative to the derivative in
+Eq.~\eqref{eq:dSdlambda}, the physical finite-difference sign is
+\begin{equation}
+  \left.
+  \frac{\partial \Slambda}{\partial\lambda}
+  \right|_{\lambda=0}
+  =
+  -\Sresp.
+\end{equation}
+The positive-sign \(\Sresp\) convention is useful because it can be compared
+directly against the explicit summed three-point function.
+
+\subsection{Why the linear response looks like a summed three-point function}
+
+Expanding the two-point function in the external source gives
+\begin{equation}
+  \left.
+  \frac{\partial C_\lambda(t)}{\partial\lambda}
+  \right|_{\lambda=0}
+  =
+  -\sum_\tau
+  \braket{
+    O_\pi(t)\,
+    \Ocur(\tau)\,
+    O_\pi^\dagger(0)
+  },
+\label{eq:dC_summed_3pt_sign}
+\end{equation}
+up to the sign convention chosen in the action perturbation.  In the code-sign
+convention of Eq.~\eqref{eq:Sresponse_code_sign}, the response contraction is
+compared to
+\begin{equation}
+  \sum_\tau \Cthree(t,\tau).
+\end{equation}
+This explains why a linearized background-response calculation has analysis
+features similar to a summed three-point function: it is the derivative
+\(\partial C_\lambda/\partial\lambda|_0\), not a finite-\(\lambda\) energy fit.
+
+%=============================================================================
+\section{Pion EMFF Kinematics}
+%=============================================================================
+
+The pion EMFF matrix element is defined by
+\begin{equation}
+  \braket{\pi(p_f)|J_\mu(0)|\pi(p_i)}
+  =
+  (p_i+p_f)_\mu F_\pi(Q^2),
+  \qquad
+  q=p_f-p_i .
+\end{equation}
+The lattice implementation uses
+\begin{equation}
+  \mathbf p_i = \mathbf p_f - \mathbf q_{\mathrm{ext}}.
+\end{equation}
+The explicit three-point correlator is
+\begin{align}
+  \Cthree^\Gamma(\mathbf q,\tau;\mathbf p_f,t_{\mathrm{sep}})
+  &=
+  \sum_{\mathbf x}
+  e^{-i\mathbf q\cdot(\mathbf x-\mathbf x_0)}
+  \tr\left[
+    S_{\mathrm{seq,anti}}(\mathbf x,\tau;\mathbf p_f,t_{\mathrm{sep}})
+    \Gamma
+    S_q(\mathbf x,\tau;\mathbf x_0,0)
+    \gsrc
+  \right],
+\label{eq:explicit_emff_c3}
+\end{align}
+where the fixed-sink sequential propagator has already absorbed the sink
+momentum \(\mathbf p_f\), the sink time \(t_{\mathrm{sep}}\), and the sink
+interpolator \(\gsink\).  The standard EMFF current is the temporal vector
+current,
+\begin{equation}
+  \Gamma = \gamma_T,
+\end{equation}
+labeled \(\texttt{T}\) in the code.
+
+%=============================================================================
+\section{Current-Inserted Source}
+%=============================================================================
+
+For a local current with momentum transfer \(\mathbf q\),
+\begin{equation}
+  \Ocur_{\Gamma,\mathbf q}(x)
+  =
+  \Gamma\,\Phi_{\mathbf q}(x-\mathbf x_0),
+\end{equation}
+where \(\Phi_{\mathbf q}\) is produced by \texttt{MomentumPhase} using the same
+phase convention as the ordinary EMFF code.
+
+Given an ordinary source-to-current propagator
+\begin{equation}
+  S(x,x_0),
+\end{equation}
+the all-time current-inserted source is
+\begin{equation}
+  \eta_{\Gamma,\mathbf q}(x)
+  =
+  \Gamma\,\Phi_{\mathbf q}(x-\mathbf x_0)\,S(x,x_0).
+\label{eq:inserted_source_alltime}
+\end{equation}
+The response propagator is then obtained by a standard inversion,
+\begin{equation}
+  \Sresp(y,x_0;\Gamma,\mathbf q)
+  =
+  \sum_x S(y,x)\,
+  \Gamma\,\Phi_{\mathbf q}(x-\mathbf x_0)\,
+  S(x,x_0).
+\label{eq:response_prop}
+\end{equation}
+
+In code, Eq.~\eqref{eq:inserted_source_alltime} is built by
+\begin{center}
+\texttt{build\_local\_current\_inserted\_source(...)}
+\end{center}
+and Eq.~\eqref{eq:response_prop} by
+\begin{center}
+\texttt{invert\_local\_current\_response\_propagator(...)}.
+\end{center}
+
+%=============================================================================
+\section{Response Correlator}
+%=============================================================================
+
+The response propagator can be contracted like the forward quark line in a pion
+two-point function.  With an ordinary antiquark line \(S_{\mathrm{anti}}\),
+\begin{align}
+  \Cresp(t;\mathbf p_f,\mathbf q)
+  &=
+  \sum_{\mathbf y}
+  e^{-i\mathbf p_f\cdot(\mathbf y-\mathbf x_0)}
+  \tr\left[
+    S_{\mathrm{anti}}(\mathbf y,t;\mathbf x_0,0)\,
+    \gsink\,
+    \Sresp(\mathbf y,t;\mathbf x_0,0;\Gamma,\mathbf q)\,
+    \gsrc
+  \right].
+\label{eq:Cresponse}
+\end{align}
+
+For the code-sign convention,
+\begin{equation}
+  \Cresp(t_{\mathrm{sep}};\mathbf p_f,\mathbf q)
+  =
+  \sum_\tau
+  \Cthree^\Gamma(\mathbf q,\tau;\mathbf p_f,t_{\mathrm{sep}}),
+\label{eq:Cresponse_equals_summed_C3}
+\end{equation}
+provided the same current gamma, source/sink interpolators, momentum phases, and
+smearing conventions are used.
+
+The first validated case is
+\begin{equation}
+  \mathbf p_f=\mathbf 0,\qquad
+  \mathbf q=\mathbf 0,\qquad
+  \mathbf p_i=\mathbf 0,\qquad
+  \Gamma=\gamma_T,\qquad
+  \gsrc=\gsink=\gamma_5.
+\end{equation}
+On the S8T32 test gauge, the diagnostic found
+\begin{align}
+  \sum_\tau C_3(\tau)
+    &= 327.27206385480486 + 0.1342484007638715\,i,\\
+  C_{\mathrm{resp}}
+    &= 327.27206385480486 + 0.13424840076386432\,i,
+\end{align}
+with relative difference
+\begin{equation}
+  2.2\times 10^{-17}.
+\end{equation}
+
+%=============================================================================
+\section{Energy-Shift Interpretation}
+%=============================================================================
+
+Although Eq.~\eqref{eq:Cresponse_equals_summed_C3} looks like a summed
+three-point function, it is still directly related to the background-field
+energy shift.  Suppose
+\begin{equation}
+  C_\lambda(t)
+  =
+  Z_\lambda e^{-E_\lambda t}.
+\end{equation}
+Expanding around \(\lambda=0\),
+\begin{align}
+  Z_\lambda &= Z_0 + \lambda Z'_0 + O(\lambda^2),\\
+  E_\lambda &= E_0 + \lambda E'_0 + O(\lambda^2),
+\end{align}
+gives
+\begin{equation}
+  C_\lambda(t)
+  =
+  C_0(t)
+  \left[
+    1+\lambda
+    \left(
+      \frac{Z'_0}{Z_0} - t E'_0
+    \right)
+  \right]
+  + O(\lambda^2).
+\end{equation}
+Therefore
+\begin{equation}
+  \frac{1}{C_0(t)}
+  \left.
+  \frac{\partial C_\lambda(t)}{\partial\lambda}
+  \right|_{\lambda=0}
+  =
+  \frac{Z'_0}{Z_0} - t E'_0.
+\label{eq:response_ratio_slope}
+\end{equation}
+
+Thus, in the linear-response method, the energy-shift derivative is extracted
+from the slope of a response ratio, not from separate finite-\(\lambda\) energy
+fits.  This is the same Feynman-Hellmann information, but represented at
+\(\lambda=0\).
+
+%=============================================================================
+\section{Summed-Ratio Object}
+%=============================================================================
+
+Define
+\begin{equation}
+  \Rsum(t_{\mathrm{sep}})
+  =
+  \frac{
+    \sum_\tau \Cthree(t_{\mathrm{sep}},\tau)
+  }{
+    \Ctwo(t_{\mathrm{sep}})
+  }
+  =
+  \frac{
+    \Cresp(t_{\mathrm{sep}})
+  }{
+    \Ctwo(t_{\mathrm{sep}})
+  }.
+\end{equation}
+At large \(t_{\mathrm{sep}}\),
+\begin{equation}
+  \Rsum(t_{\mathrm{sep}})
+  =
+  A - t_{\mathrm{sep}} E'_0
+  + \text{excited-state corrections},
+\label{eq:summed_ratio_slope}
+\end{equation}
+where \(A\) absorbs overlap-factor response and contact-term effects.
+
+For the finite-\(\lambda\) sign convention
+\(\Dslash_\lambda=\Dslash+\lambda\Ocur\), the derivative of the propagator has
+the sign in Eq.~\eqref{eq:dSdlambda}.  The diagnostic code stores both
+\begin{center}
+\texttt{response\_sign = +1}
+\end{center}
+for direct comparison to the explicit summed three-point function, and
+\begin{center}
+\texttt{finite\_difference\_derivative\_sign = -1}
+\end{center}
+for the corresponding finite-field derivative convention.
+
+%=============================================================================
+\section{Restricted Insertion-Time Windows}
+%=============================================================================
+
+The full background-field energy-shift picture corresponds to an all-time
+insertion.  However, in the linearized response implementation one may restrict
+the insertion time,
+\begin{equation}
+  \Sresp^{W_\tau}
+  =
+  \sum_{\tau\in W_\tau}
+  \Dslash^{-1}
+  \left[
+    \delta_{t,\tau}\,
+    \Gamma\Phi_{\mathbf q}(x-\mathbf x_0)S(x,x_0)
+  \right].
+\end{equation}
+This produces
+\begin{equation}
+  \Cresp^{W_\tau}(t_{\mathrm{sep}})
+  =
+  \sum_{\tau\in W_\tau}
+  \Cthree(t_{\mathrm{sep}},\tau).
+\end{equation}
+
+Useful choices include
+\begin{align}
+  W_\tau &= \text{all time slices},\\
+  W_\tau &= \{0,\ldots,t_{\mathrm{sep}}\},\\
+  W_\tau &= \{1,\ldots,t_{\mathrm{sep}}-1\},\\
+  W_\tau &= \{\tau_{\min},\ldots,t_{\mathrm{sep}}-\tau_{\min}\}.
+\end{align}
+The restricted windows are not the pure finite-field energy-shift method.
+They are analysis tools for the linearized method, useful for:
+\begin{itemize}
+  \item removing source/sink contact terms,
+  \item comparing with explicit three-point functions in the same time window,
+  \item studying excited-state contamination,
+  \item checking the stability of summed-ratio slopes.
+\end{itemize}
+
+%=============================================================================
+\section{Current Implementation}
+%=============================================================================
+
+\subsection{Source helper}
+
+The helper
+\begin{center}
+\texttt{build\_local\_current\_inserted\_source(prop\_forward, phase\_q, current\_gamma, tau)}
+\end{center}
+constructs
+\begin{equation}
+  \eta(x)
+  =
+  \Gamma_{\mathrm{cur}}\Phi_{\mathbf q}(x-\mathbf x_0)S(x,x_0).
+\end{equation}
+If \texttt{tau} is provided, the source is masked to that global insertion time.
+If \texttt{tau} is omitted, all time slices are included.
+
+\subsection{Response inversion}
+
+The helper
+\begin{center}
+\texttt{invert\_local\_current\_response\_propagator(...)}
+\end{center}
+performs the ordinary \(\Dslash^{-1}\) inversion of the current-inserted
+source.  If a list of times \texttt{tau\_list} is given, the code first builds
+the summed time-window source and then performs one inversion.  This deliberately
+avoids storing per-\(\tau\) response propagators.
+
+\subsection{Response contraction}
+
+The helper
+\begin{center}
+\texttt{contract\_response\_pion\_2pt(...)}
+\end{center}
+contracts the response propagator with the ordinary antiquark line using the
+same pion two-point contraction infrastructure as the rest of the pion code.
+
+\subsection{Diagnostic application}
+
+The Perlmutter diagnostic application is
+\begin{center}
+\texttt{application/EMFF\_pion\_background\_response/perlmutter/}.
+\end{center}
+The default run uses the S8T32 test gauge and compares
+\begin{equation}
+  \Cresp(t_{\mathrm{sep}})
+  \quad\text{against}\quad
+  \sum_\tau \Cthree(t_{\mathrm{sep}},\tau)
+\end{equation}
+for \(t_{\mathrm{sep}}=2\), \(\Gamma=\gamma_T\), and zero external momentum.
+The upgraded diagnostic can also run several \(t_{\mathrm{sep}}\), several
+momentum transfers, and several current gamma matrices in a single job.  The
+HDF5 output stores one record for each
+\((\Gamma,\mathbf q,t_{\mathrm{sep}},W_\tau)\).
+
+%=============================================================================
+\section{Implemented Upgrade Path}
+%=============================================================================
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Nonzero-\(q\) validation.}
+  The response schema stores
+  \[
+    \mathbf p_i = \mathbf p_f - \mathbf q,
+  \]
+  for every record.  The phase test covers both ordinary and Breit-frame
+  examples, including
+  \[
+    \mathbf p_f=(0,0,1),\quad
+    \mathbf q=(0,0,1),\quad
+    \mathbf p_i=(0,0,0).
+  \]
+  and
+  \[
+    \mathbf p_f=(0,0,1),\quad
+    \mathbf q=(0,0,2),\quad
+    \mathbf p_i=(0,0,-1).
+  \]
+
+  \item \textbf{Multi-\(t_{\mathrm{sep}}\), \(C_2\), and summed-ratio output.}
+  The application accepts a list of source-sink separations and saves
+  \[
+    \Ctwo(t_{\mathrm{sep}}),\quad
+    \Cresp(t_{\mathrm{sep}}),\quad
+    \Rsum(t_{\mathrm{sep}}).
+  \]
+  The saved ratios are
+  \begin{equation}
+    \Rsum^{\mathrm{resp}}(t_{\mathrm{sep}})
+      =
+      \frac{\Cresp(t_{\mathrm{sep}})}
+           {\Ctwo(t_{\mathrm{sep}})},
+    \qquad
+    \Rsum^{\mathrm{explicit}}(t_{\mathrm{sep}})
+      =
+      \frac{\sum_{\tau\in W_\tau}\Cthree(t_{\mathrm{sep}},\tau)}
+           {\Ctwo(t_{\mathrm{sep}})}.
+  \end{equation}
+
+  \item \textbf{Restricted tau windows.}
+  The supported choices are all time slices, source-to-sink,
+  open source-to-sink, a symmetric restricted window, and an explicit
+  integer range:
+  \[
+    W_\tau=\{\tau_{\min},\ldots,t_{\mathrm{sep}}-\tau_{\min}\}.
+  \]
+  For restricted windows, the inserted source is summed before inversion.
+
+  \item \textbf{Multi-current gamma response suite.}
+  The application accepts multiple gamma labels from the standard pion gamma
+  list.  The primary EMFF current is still \(V_4\), labeled \(\texttt{T}\),
+  but scalar, pseudoscalar, vector, axial, and tensor bilinears can be used as
+  response diagnostics without changing the production EMFF contraction.
+
+  \item \textbf{HDF5 schema upgrade.}
+  Version-2 output stores file-level kinematics and one
+  \(\texttt{results/record\_XXXX}\) group per diagnostic.  Each record includes
+  \(\mathbf p_f\), \(\mathbf q\), inferred \(\mathbf p_i\), \(t_{\mathrm{sep}}\),
+  current gamma, source/sink gamma labels, the tau-window definition, \(C_2\),
+  explicit summed \(C_3\), response \(C_2\)-like data, ratios, and the
+  response-explicit difference.
+  For analysis convenience, the same per-record scalars are also collected in
+  \(\texttt{summary/}\) datasets:
+  \[
+    \texttt{relative\_difference},\quad
+    \texttt{response\_R\_sum},\quad
+    \texttt{explicit\_R\_sum},
+  \]
+  together with \(\mathbf p_f\), \(\mathbf q\), \(\mathbf p_i\),
+  \(t_{\mathrm{sep}}\), gamma labels, and window labels.  Analysis scripts can
+  therefore scan the diagnostics without opening every
+  \(\texttt{results/record\_XXXX}\) group.
+
+  \item \textbf{Optional GPU regression tests.}
+  The Perlmutter application remains a small S8T32 smoke workflow.  The test
+  suite contains CPU-only schema, phase, and algebra checks, while the GPU
+  smoke run can be launched when a QUDA-enabled node is available.
+\end{enumerate}
+
+\paragraph{Explicit non-goal.}
+This implementation does not save a per-\(\tau\) response-propagator cache.
+If arbitrary post-hoc tau windows become necessary, that should be considered
+as a separate design discussion rather than silently added to this diagnostic.
+
+%=============================================================================
+\section{Summary}
+%=============================================================================
+
+The present pion EMFF background-response code is a linearized
+Feynman-Hellmann diagnostic:
+\begin{equation}
+  \Sresp=\Dslash^{-1}\Gamma\Phi_{\mathbf q}S.
+\end{equation}
+It does not compute finite-\(\lambda\) energies.  Instead, it computes
+\(\partial C_\lambda/\partial\lambda|_{\lambda=0}\), which equals a summed
+three-point function up to the convention-dependent sign.  The energy-shift
+derivative is then encoded in the slope of the response ratio
+\(\Cresp/\Ctwo\) as a function of \(t_{\mathrm{sep}}\).
+
+\end{document}
