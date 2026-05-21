@@ -227,19 +227,22 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
   - EMT 1pt/3pt HDF5 schema, flow bookkeeping, and connected toy contraction
   - boosted-smearing kernel phase/symmetry
   - disconnected noise and hierarchical-probing bookkeeping
-  - pion EMFF background-response phase/formula/HDF5 summary schema
-- Optional pion EMFF background-response tiny-gauge GPU smoke passed on
+  - pion current background-response phase/formula/HDF5 summary schema
+- Optional pion current background-response tiny-gauge GPU smoke passed on
   `login32` using S8T32 with `qext=[0,0,0]` and `[0,0,1]`, `tsep=2,4`,
   restricted tau window, and current `T`.
   Explicit summed C3 and response C2-like contractions agreed at
   `relative_difference ~ 5e-18` to `2e-16`.
-- Pion EMFF background-response HDF5 schema v2 includes a `summary/` group
+- Pion current background-response HDF5 schema v2 includes a `summary/` group
   with table-like datasets for `relative_difference`, `response_R_sum`,
   `explicit_R_sum`, `pf`, `qext`, `pi`, `tsep`, gamma labels, and window labels.
 - Pion current-background response code is now in the more generic module:
   `pyquda_measurement_utils/pion_current_background_response_vibe_develop.py`.
   The former `pion_EMFF_background_response_vibe_develop.py` name should not be
   used in new code.
+- Pion current-background response docs live under:
+  `docs/pion_current_background_response/pion_current_background_response.tex`.
+  The old `docs/pion_EMFF_background_response` path should not be used.
 - Current-current response diagnostic uses the nested first-order construction
   without caching per-tau response propagators:
   `S_resp^(2) = D^{-1} O_2 D^{-1} O_1 S`.

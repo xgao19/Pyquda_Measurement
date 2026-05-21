@@ -36,8 +36,8 @@
 \newcommand{\Rsum}{R_{\mathrm{sum}}}
 \newcommand{\pyquda}{\texttt{PyQUDA}}
 
-\title{\textbf{Pion EMFF Background-Response Diagnostic}\\[4pt]
-\large Finite-Field Energy Shift versus Linearized Response Propagator}
+\title{\textbf{Pion Current Background-Response Diagnostics}\\[4pt]
+\large Linearized Current Response and Current-Current Response Propagators}
 \author{Pyquda\_Measurement Collaboration}
 \date{\today}
 
@@ -49,8 +49,8 @@
 \section{Purpose}
 %=============================================================================
 
-This note documents the pion electromagnetic form-factor (EMFF)
-background-response diagnostic implemented in
+This note documents the pion current background-response diagnostics implemented
+in
 \begin{center}
 \texttt{pyquda\_measurement\_utils/pion\_current\_background\_response\_vibe\_develop.py}
 \end{center}
@@ -59,20 +59,20 @@ and
 \texttt{application/EMFF\_pion\_background\_response/perlmutter/}.
 \end{center}
 
-The goal is to study a background-field/Feynman-Hellmann route to pion EMFF
+The goal is to study background-field/Feynman-Hellmann routes to pion current
 matrix elements while \emph{not} modifying the QUDA Dirac operator and while
 \emph{not} performing inversions with a finite external field
-\(\Dslash+\lambda\Ocur\).  Instead, the current implementation constructs the
-first-order response propagator using ordinary \(\Dslash^{-1}\) inversions.
+\(\Dslash+\lambda\Ocur\).  Instead, the current implementation constructs
+linearized response propagators using ordinary \(\Dslash^{-1}\) inversions.
 
 This is not yet the full finite-\(\lambda\) background-field method.  It is the
 linearized method at \(\lambda=0\), which is mathematically equivalent to a
 summed current insertion.
 
-The same source module now also contains a minimal second-order
-current-current response building block.  This is intended for future
-hadronic-tensor or Compton-amplitude style diagnostics, while the present
-production application remains the first-order pion EMFF response.
+The pion electromagnetic form-factor (EMFF) response is the first concrete
+application, using the temporal vector current \(V_4\).  The same source module
+also contains a minimal second-order current-current response building block for
+future hadronic-tensor or Compton-amplitude style diagnostics.
 
 %=============================================================================
 \section{Two Related But Distinct Methods}
@@ -175,10 +175,10 @@ features similar to a summed three-point function: it is the derivative
 \(\partial C_\lambda/\partial\lambda|_0\), not a finite-\(\lambda\) energy fit.
 
 %=============================================================================
-\section{Pion EMFF Kinematics}
+\section{Pion Current Kinematics}
 %=============================================================================
 
-The pion EMFF matrix element is defined by
+For the pion EMFF application, the current matrix element is defined by
 \begin{equation}
   \braket{\pi(p_f)|J_\mu(0)|\pi(p_i)}
   =
@@ -206,7 +206,7 @@ The explicit three-point correlator is
 \end{align}
 where the fixed-sink sequential propagator has already absorbed the sink
 momentum \(\mathbf p_f\), the sink time \(t_{\mathrm{sep}}\), and the sink
-interpolator \(\gsink\).  The standard EMFF current is the temporal vector
+interpolator \(\gsink\).  The standard EMFF choice is the temporal vector
 current,
 \begin{equation}
   \Gamma = \gamma_T,
@@ -224,7 +224,7 @@ For a local current with momentum transfer \(\mathbf q\),
   \Gamma\,\Phi_{\mathbf q}(x-\mathbf x_0),
 \end{equation}
 where \(\Phi_{\mathbf q}\) is produced by \texttt{MomentumPhase} using the same
-phase convention as the ordinary EMFF code.
+phase convention as the ordinary pion current three-point code.
 
 Given an ordinary source-to-current propagator
 \begin{equation}
@@ -524,7 +524,7 @@ not save per-\(\tau\) response-propagator caches.
 
 \subsection{Diagnostic application}
 
-The Perlmutter diagnostic application is
+The current first-order Perlmutter diagnostic application is
 \begin{center}
 \texttt{application/EMFF\_pion\_background\_response/perlmutter/}.
 \end{center}
@@ -597,7 +597,7 @@ HDF5 output stores one record for each
   The application accepts multiple gamma labels from the standard pion gamma
   list.  The primary EMFF current is still \(V_4\), labeled \(\texttt{T}\),
   but scalar, pseudoscalar, vector, axial, and tensor bilinears can be used as
-  response diagnostics without changing the production EMFF contraction.
+  current-response diagnostics without changing the first-order contraction.
 
   \item \textbf{HDF5 schema upgrade.}
   Version-2 output stores file-level kinematics and one
@@ -633,7 +633,7 @@ as a separate design discussion rather than silently added to this diagnostic.
 \section{Summary}
 %=============================================================================
 
-The present pion EMFF background-response code is a linearized
+The present pion current background-response code is a linearized
 Feynman-Hellmann diagnostic:
 \begin{equation}
   \Sresp=\Dslash^{-1}\Gamma\Phi_{\mathbf q}S.
