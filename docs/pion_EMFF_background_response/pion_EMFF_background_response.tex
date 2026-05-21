@@ -32,6 +32,7 @@
 \newcommand{\Ctwo}{C_2}
 \newcommand{\Cthree}{C_3}
 \newcommand{\Cresp}{C_{\mathrm{resp}}}
+\newcommand{\Cresptwo}{C_{\mathrm{resp}}^{(2)}}
 \newcommand{\Rsum}{R_{\mathrm{sum}}}
 \newcommand{\pyquda}{\texttt{PyQUDA}}
 
@@ -51,7 +52,7 @@
 This note documents the pion electromagnetic form-factor (EMFF)
 background-response diagnostic implemented in
 \begin{center}
-\texttt{pyquda\_measurement\_utils/pion\_EMFF\_background\_response\_vibe\_develop.py}
+\texttt{pyquda\_measurement\_utils/pion\_current\_background\_response\_vibe\_develop.py}
 \end{center}
 and
 \begin{center}
@@ -67,6 +68,11 @@ first-order response propagator using ordinary \(\Dslash^{-1}\) inversions.
 This is not yet the full finite-\(\lambda\) background-field method.  It is the
 linearized method at \(\lambda=0\), which is mathematically equivalent to a
 summed current insertion.
+
+The same source module now also contains a minimal second-order
+current-current response building block.  This is intended for future
+hadronic-tensor or Compton-amplitude style diagnostics, while the present
+production application remains the first-order pion EMFF response.
 
 %=============================================================================
 \section{Two Related But Distinct Methods}
@@ -468,6 +474,53 @@ The helper
 \end{center}
 contracts the response propagator with the ordinary antiquark line using the
 same pion two-point contraction infrastructure as the rest of the pion code.
+
+\subsection{Current-current response}
+
+The same helper module also contains a minimal nested current-current response
+prototype,
+\begin{center}
+\texttt{invert\_current\_current\_response\_propagator(...)}.
+\end{center}
+For two local currents \(O_1\) and \(O_2\), it constructs
+\begin{equation}
+  \Sresp^{(2)}
+  =
+  \Dslash^{-1} O_2 \Dslash^{-1} O_1 S.
+\end{equation}
+With
+\begin{equation}
+  O_i(x)
+  =
+  \Gamma_i \Phi_{\mathbf q_i}(x-\mathbf x_0),
+\end{equation}
+this corresponds to the ordered two-current insertion
+\begin{equation}
+  S^{(2)}_{21}
+  =
+  S O_2 S O_1 S,
+\end{equation}
+up to the sign convention chosen for finite-\(\lambda\) derivatives.  The
+associated pion two-point-like response contraction is
+\begin{equation}
+  \Cresptwo(t_{\mathrm{sep}})
+  =
+  \sum_{\tau_2\in W_2}
+  \sum_{\tau_1\in W_1}
+  C_{JJ}(t_{\mathrm{sep}},\tau_2,\tau_1),
+\end{equation}
+where \(C_{JJ}\) is the pion correlator with two local current insertions on
+the active quark line.  The total momentum injected by the two currents is
+\begin{equation}
+  \mathbf q_{\mathrm{tot}} = \mathbf q_1 + \mathbf q_2,
+  \qquad
+  \mathbf p_i = \mathbf p_f - \mathbf q_{\mathrm{tot}}.
+\end{equation}
+This is the direct local-current analogue of a two-current insertion into the
+quark line.  It is intended as a diagnostic building block for current-current
+and hadronic-tensor style measurements.  As with the first-order response, tau
+windows are summed at the inserted-source level before inversion; the code does
+not save per-\(\tau\) response-propagator caches.
 
 \subsection{Diagnostic application}
 

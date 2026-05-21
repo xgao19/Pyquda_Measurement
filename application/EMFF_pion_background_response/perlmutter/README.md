@@ -11,6 +11,11 @@ S_response = D^{-1} Gamma_T Phi_q S
 and compares its pion two-point-like contraction with the summed explicit
 EMFF three-point function.
 
+The source helper now lives in the more general
+`pion_current_background_response_vibe_develop.py` module, which also contains
+a minimal nested current-current response prototype
+`D^{-1} O_2 D^{-1} O_1 S`.
+
 For a true finite-difference derivative of `(D + lambda O)^{-1}`, multiply this
 response by an additional overall minus sign.
 

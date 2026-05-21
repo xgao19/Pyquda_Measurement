@@ -51,7 +51,7 @@ from pyquda_utils.phase import MomentumPhase
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_meson_bw_seq_pyquda
 from pyquda_measurement_utils.io_corr import ensure_parent_dir
-from pyquda_measurement_utils.pion_EMFF_background_response_vibe_develop import (
+from pyquda_measurement_utils.pion_current_background_response_vibe_develop import (
     contract_response_pion_2pt,
     infer_source_momentum,
     invert_local_current_response_propagator,

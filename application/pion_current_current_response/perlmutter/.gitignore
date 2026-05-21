@@ -1,0 +1,8 @@
+data/
+data_smoke/
+logs/
+sample_log*/
+.quda-cache/
+.cupy-cache/
+profile_*
+__pycache__/

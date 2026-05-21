@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-05-19
+Last updated: 2026-05-21
 
 This file is for reusable knowledge, stable run tips, repeated pitfalls, and
 validated cluster/code/test facts.  Historical commit-style progress should go
@@ -209,7 +209,7 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
 ## Test Suite Baselines
 
 - Current default lightweight test baseline:
-  `87 passed, 5 skipped, 0 failed`.
+  `89 passed, 5 skipped, 0 failed`.
 - The skipped tests are optional GPU or external-HDF5 checks.
 - The test suite now includes guards for:
   - PyQUDA gamma label/order and composite gamma signs
@@ -230,6 +230,20 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
 - Pion EMFF background-response HDF5 schema v2 includes a `summary/` group
   with table-like datasets for `relative_difference`, `response_R_sum`,
   `explicit_R_sum`, `pf`, `qext`, `pi`, `tsep`, gamma labels, and window labels.
+- Pion current-background response code is now in the more generic module:
+  `pyquda_measurement_utils/pion_current_background_response_vibe_develop.py`.
+  The former `pion_EMFF_background_response_vibe_develop.py` name should not be
+  used in new code.
+- Current-current response diagnostic uses the nested first-order construction
+  without caching per-tau response propagators:
+  `S_resp^(2) = D^{-1} O_2 D^{-1} O_1 S`.
+- Current-current response HDF5 output uses measurement
+  `pion_current_current_response`, schema version `1`, and stores a `summary/`
+  table with `response_R_sum`, `pf`, `pi`, `first_qext`, `second_qext`,
+  `total_qext`, tau windows, and gamma labels.
+- Optional pion current-current response tiny-gauge GPU smoke passed on
+  `login32` using S8T32, `pf=[0,0,0]`, `q1=[0,0,1]`, `q2=[0,0,-1]`,
+  `tsep=2`, and current gamma `T/T`.
 - Pion soft-factor prop generation should usually cover all time slices
   (`PION_SOFT_T_COUNT=0`) because contract time `t0` with separation `tsep`
   needs wall propagators at both `t0` and `(t0 + tsep) % Lt`.

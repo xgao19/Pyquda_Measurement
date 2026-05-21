@@ -1,6 +1,7 @@
 import numpy as np
 
-from pyquda_measurement_utils.pion_EMFF_background_response_vibe_develop import (
+from pyquda_measurement_utils.pion_current_background_response_vibe_develop import (
+    current_current_response_toy,
     infer_source_momentum,
     response_at_sink_time,
     response_ratio,
@@ -26,6 +27,22 @@ def test_response_propagator_formula_matches_explicit_summed_insertion_toy():
     response = np.einsum("tab,tbc,ca->t", sink_line, response_prop, gamma_src, optimize=True).sum()
 
     np.testing.assert_allclose(response, explicit)
+
+
+def test_current_current_response_toy_matches_nested_current_insertions():
+    rng = np.random.default_rng(20260521)
+    prop_forward = rng.normal(size=(4, 2, 2)) + 1j * rng.normal(size=(4, 2, 2))
+    gamma_1 = np.array([[0, 1], [2, 0]], dtype=np.complex128)
+    gamma_2 = np.array([[1, 1j], [-1j, 3]], dtype=np.complex128)
+    phase_1 = np.exp(2j * np.pi * np.arange(4) / 4)
+    phase_2 = np.exp(-2j * np.pi * np.arange(4) / 4)
+
+    expected = np.zeros_like(prop_forward)
+    for tau in range(4):
+        expected[tau] = phase_2[tau] * gamma_2 @ (phase_1[tau] * gamma_1 @ prop_forward[tau])
+
+    response = current_current_response_toy(prop_forward, phase_1, phase_2, gamma_1, gamma_2)
+    np.testing.assert_allclose(response, expected)
 
 
 def test_summed_explicit_and_response_selectors_use_expected_gamma_indices():

@@ -1,17 +1,20 @@
-"""Pion EMFF background-field linear-response helpers.
+"""Pion local-current background-response helpers.
 
-This module implements the first-order response-propagator version of a
-background-field pion EMFF diagnostic.  It does not modify the QUDA Dirac
-operator.  Instead it uses the identity
+This module implements first- and second-order response-propagator diagnostics
+for local pion current insertions.  It does not modify the QUDA Dirac operator.
+Instead it uses the identities
 
     S O S = D^{-1} O S
+    S O_2 S O_1 S = D^{-1} O_2 D^{-1} O_1 S
 
 for a local vector-current insertion
 
     O_q(x) = Gamma_current * Phi_q(x - x0),
 
 where ``Phi_q`` is the same ``MomentumPhase`` convention used by the ordinary
-pion EMFF three-point code.  For a true finite-difference derivative of
+pion EMFF three-point code.  The second identity is a minimal
+current-current-response diagnostic; it is not a full finite-lambda background
+field calculation.  For a true finite-difference derivative of
 ``(D + lambda O)^{-1}`` there is an additional overall minus sign:
 
     d (D + lambda O)^{-1} / d lambda |_{0} = - S O S.
@@ -147,6 +150,62 @@ def invert_local_current_response_propagator(
     return response
 
 
+def invert_current_current_response_propagator(
+    dirac,
+    prop_forward,
+    first_phase_q,
+    second_phase_q,
+    first_current_gamma="T",
+    second_current_gamma="T",
+    first_tau_list=None,
+    second_tau_list=None,
+    response_sign=1,
+    mrhs=1,
+    restart=0,
+):
+    """Build the nested local-current response ``D^-1 O2 D^-1 O1 S``.
+
+    The implementation intentionally does not store per-tau response
+    propagators.  Each tau window is summed at the inserted-source level before
+    its inversion.  The output is useful as a second-order response diagnostic
+    or as the starting point for current-current pion two-point contractions.
+    """
+    first_response = invert_local_current_response_propagator(
+        dirac,
+        prop_forward,
+        first_phase_q,
+        current_gamma=first_current_gamma,
+        tau_list=first_tau_list,
+        response_sign=1,
+        mrhs=mrhs,
+        restart=restart,
+    )
+    second_response = invert_local_current_response_propagator(
+        dirac,
+        first_response,
+        second_phase_q,
+        current_gamma=second_current_gamma,
+        tau_list=second_tau_list,
+        response_sign=response_sign,
+        mrhs=mrhs,
+        restart=restart,
+    )
+    return second_response
+
+
+def current_current_response_toy(prop_forward, first_phase, second_phase, first_gamma, second_gamma):
+    """Small NumPy diagnostic for the nested current-current response algebra."""
+    return np.einsum(
+        "t,ab,t,bc,tcd->tad",
+        second_phase,
+        second_gamma,
+        first_phase,
+        first_gamma,
+        prop_forward,
+        optimize=True,
+    )
+
+
 def contract_response_pion_2pt(
     latt_info,
     prop_response,
@@ -166,6 +225,23 @@ def contract_response_pion_2pt(
         sink_phases,
         [src_gamma],
     )[src_gamma]
+
+
+def contract_current_current_response_pion_2pt(
+    latt_info,
+    prop_current_current_response,
+    prop_antiquark,
+    sink_phases,
+    src_gamma="fixed_g5",
+):
+    """Contract a nested current-current response with the pion antiquark line."""
+    return contract_response_pion_2pt(
+        latt_info,
+        prop_current_current_response,
+        prop_antiquark,
+        sink_phases,
+        src_gamma=src_gamma,
+    )
 
 
 def summed_explicit_emff(c3, current_gamma="T", q_index=0, tau_list=None):
@@ -249,3 +325,73 @@ def save_pion_EMFF_background_response_hdf5(tag, records, attrs=None):
             ):
                 if key in record:
                     group.create_dataset(key, data=record[key])
+
+
+def save_pion_current_current_response_hdf5(tag, records, attrs=None):
+    """Save nested pion current-current response diagnostics.
+
+    Each record stores one ``D^-1 O2 D^-1 O1 S`` contraction with the pion
+    two-point sink line.  The schema is intentionally compact because this is a
+    diagnostic building block rather than a production hadronic-tensor writer.
+    """
+    with _prepare_h5_file(f"{tag}.h5", attrs) as h5:
+        h5.attrs["measurement"] = "pion_current_current_response"
+        h5.attrs["schema_version"] = "1"
+        h5.attrs["current_order"] = "Dinv_O2_Dinv_O1_S"
+
+        summary = h5.require_group("summary")
+        summary.create_dataset("record_index", data=np.arange(len(records), dtype=np.int32))
+        summary.create_dataset("first_current_gamma", data=np.asarray([record["first_current_gamma"] for record in records], dtype="S"))
+        summary.create_dataset("second_current_gamma", data=np.asarray([record["second_current_gamma"] for record in records], dtype="S"))
+        summary.create_dataset("sink_gamma", data=np.asarray([record["sink_gamma"] for record in records], dtype="S"))
+        summary.create_dataset("src_gamma", data=np.asarray([record["src_gamma"] for record in records], dtype="S"))
+        summary.create_dataset("first_tau_window", data=np.asarray([record["first_tau_window"] for record in records], dtype="S"))
+        summary.create_dataset("second_tau_window", data=np.asarray([record["second_tau_window"] for record in records], dtype="S"))
+        summary.create_dataset("pf", data=np.asarray([record["pf"] for record in records], dtype=np.int32))
+        summary.create_dataset("first_qext", data=np.asarray([record["first_qext"] for record in records], dtype=np.int32))
+        summary.create_dataset("second_qext", data=np.asarray([record["second_qext"] for record in records], dtype=np.int32))
+        summary.create_dataset("total_qext", data=np.asarray([record["total_qext"] for record in records], dtype=np.int32))
+        summary.create_dataset("pi", data=np.asarray([record["pi"] for record in records], dtype=np.int32))
+        summary.create_dataset("tsep", data=np.asarray([record["tsep"] for record in records], dtype=np.int32))
+        summary.create_dataset("response_R_sum", data=np.asarray([record["response_R_sum"] for record in records]))
+        summary.create_dataset("response_c2_like", data=np.asarray([record["response_c2_like"] for record in records]))
+        summary.create_dataset("c2_tsep", data=np.asarray([record["c2_tsep"] for record in records]))
+
+        results = h5.require_group("results")
+        for irec, record in enumerate(records):
+            group = results.require_group(f"record_{irec:04d}")
+            for key in (
+                "first_current_gamma",
+                "second_current_gamma",
+                "sink_gamma",
+                "src_gamma",
+                "first_tau_window",
+                "second_tau_window",
+                "response_sign",
+            ):
+                if key in record:
+                    group.attrs[key] = record[key]
+            for key in (
+                "pf",
+                "first_qext",
+                "second_qext",
+                "total_qext",
+                "pi",
+                "tsep",
+                "first_tau_min",
+                "second_tau_min",
+                "c2_tsep",
+                "response_c2_like",
+                "response_R_sum",
+                "response_corr_all_t",
+                "c2_all_t",
+            ):
+                if key in record:
+                    group.create_dataset(key, data=record[key])
+            for key in ("first_tau_list", "second_tau_list"):
+                tau_list = record.get(key)
+                group.create_dataset(
+                    key,
+                    data=np.asarray([] if tau_list is None else tau_list, dtype=np.int32),
+                )
+                group.attrs[f"{key}_is_all_time_slices"] = tau_list is None

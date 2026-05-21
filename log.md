@@ -4,15 +4,16 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit title and the main changes.  Keep reusable tips,
 cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
-## Pending Commit: Add pion EMFF background-response diagnostics
+## Pending Commit: Add pion current-current response diagnostics
 
-- Added linearized pion EMFF background-response helpers and a Perlmutter
-  application without per-tau response-propagator caching.
-- Added nonzero-q, multi-`tsep`, restricted-window, multi-current gamma, and
-  HDF5 schema-v2 support, including `summary/` datasets for analysis.
-- Added CPU phase/formula/schema tests and optional S8T32 GPU smoke coverage.
-- Validated on `login32`: explicit summed C3 and response C2-like contractions
-  agree at `relative_difference ~ 5e-18` to `2e-16`.
+- Renamed the pion EMFF background-response module to the more generic pion
+  current-background response module.
+- Added current-current response helpers using
+  `D^{-1} O_2 D^{-1} O_1 S`, plus HDF5 summary schema and a minimal
+  Perlmutter GPU diagnostic application.
+- Updated background-response documentation and regenerated the PDF.
+- Validated default smoke tests and optional `login32` tiny-gauge GPU smoke for
+  both first-order current response and second-order current-current response.
 
 ## 2026-05-19: Add connected GI qTMD workflows and docs
 

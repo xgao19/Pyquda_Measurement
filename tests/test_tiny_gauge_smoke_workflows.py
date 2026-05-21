@@ -125,3 +125,42 @@ def test_optional_pion_emff_background_response_tiny_gauge_smoke():
     _run(["bash", "application/EMFF_pion_background_response/perlmutter/run_pion_EMFF_background_response.sh"], env)
 
     assert list((data_dir / "background_response").glob("*.h5"))
+
+
+def test_optional_pion_current_current_response_tiny_gauge_smoke():
+    if os.environ.get("PYQUDA_RUN_TINY_GAUGE_SMOKE") != "1":
+        raise SkipTest("set PYQUDA_RUN_TINY_GAUGE_SMOKE=1 on a GPU node to run tiny-gauge smoke workflows")
+    if os.environ.get("PYQUDA_RUN_CURRENT_CURRENT_TINY_SMOKE") != "1":
+        raise SkipTest("set PYQUDA_RUN_CURRENT_CURRENT_TINY_SMOKE=1 to include current-current response smoke")
+
+    repo = _repo_root()
+    data_dir = Path(os.environ.get("PYQUDA_TINY_GAUGE_SMOKE_DIR", "/tmp/pyquda_measurement_tiny_smoke")) / "pion_current_current_response"
+    shutil.rmtree(data_dir, ignore_errors=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PION_CC_RESPONSE_DATA_DIR": str(data_dir),
+            "PION_CC_RESPONSE_GAUGE_PATH": str(repo / "test_gauge" / "S8T32_wilson_b6.cg.1e-08.0"),
+            "PION_CC_RESPONSE_PF": "0.0.0",
+            "PION_CC_RESPONSE_FIRST_QEXT": "0.0.1",
+            "PION_CC_RESPONSE_SECOND_QEXT": "0.0.-1",
+            "PION_CC_RESPONSE_TSEP": "2",
+            "PION_CC_RESPONSE_FIRST_GAMMA": "T",
+            "PION_CC_RESPONSE_SECOND_GAMMA": "T",
+            "PION_CC_RESPONSE_FIRST_TAU_WINDOW": "restricted",
+            "PION_CC_RESPONSE_SECOND_TAU_WINDOW": "restricted",
+            "PION_CC_RESPONSE_FIRST_TAU_MIN": "1",
+            "PION_CC_RESPONSE_SECOND_TAU_MIN": "1",
+            "PION_CC_RESPONSE_WIDTH": "1.0",
+            "PION_CC_RESPONSE_MAXITER": "300",
+            "QUDA_ENABLE_TUNING": "0",
+            "QUDA_RESOURCE_PATH": str(data_dir / ".quda-cache"),
+            "CUPY_CACHE_DIR": str(data_dir / ".cupy-cache"),
+        }
+    )
+
+    _run(["bash", "application/pion_current_current_response/perlmutter/run_pion_current_current_response.sh"], env)
+
+    assert list((data_dir / "current_current_response").glob("*.h5"))
