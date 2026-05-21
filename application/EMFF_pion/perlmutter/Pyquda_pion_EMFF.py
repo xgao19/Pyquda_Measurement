@@ -124,7 +124,12 @@ boost_tag = (
     f"_negSrc{''.join(str(v) for v in parameters['neg_boost_src'])}"
     f"_negSink{''.join(str(v) for v in parameters['neg_boost_sink'])}"
 )
+c2_boost_tag = (
+    f"posSrc{''.join(str(v) for v in parameters['pos_boost_src'])}"
+    f"_negSrc{''.join(str(v) for v in parameters['neg_boost_src'])}"
+)
 sm_tag = os.environ.get("PION_EMFF_SM_TAG", f"1HYP_GSRC_W{args.width:g}_k0_{args.sink_interpolator}.{boost_tag}")
+c2_sm_tag = f"1HYP_GSRC_W{args.width:g}_k0_{args.sink_interpolator}.{c2_boost_tag}"
 src_interpolators = parse_src_interpolators(args.src_interpolators, args.src_interpolator)
 measurement = pion_EMFF(parameters)
 
@@ -187,7 +192,7 @@ for pos in src_positions:
         mpi_print(latt_info, f"TIME PyQUDA: Negative propagator inversion {time.time() - t0}s")
 
     t0 = time.time()
-    c2_tag = get_c2pt_file_tag(str(data_dir), lat_tag, conf, "EMFF.ex", pos, sm_tag)
+    c2_tag = get_c2pt_file_tag(str(data_dir), lat_tag, conf, "EMFF.ex", pos, c2_sm_tag)
     p_2pt_xyz = [[-v[0], -v[1], -v[2]] for v in parameters["p_2pt"]]
     phases_2pt = MomentumPhase(latt_info).getPhases(p_2pt_xyz, x0=pos)
     c2_tags_by_src = {

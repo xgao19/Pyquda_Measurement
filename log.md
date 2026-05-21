@@ -4,7 +4,15 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit title and the main changes.  Keep reusable tips,
 cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
-## Pending Commit: Add pion current-current response diagnostics
+## Pending Commit: Fix pion EMFF C2 boost tagging
+
+- Corrected pion EMFF C2 sink smearing to reuse source-side quark and antiquark
+  boosts, while leaving 3pt sequential-source smearing unchanged.
+- Added a C2-only smearing tag with `posSrc..._negSrc...`; 3pt output keeps the
+  full four-boost tag.
+- Validated with py_compile and the default Perlmutter smoke test suite.
+
+## 2026-05-21: Add pion current-current response diagnostics
 
 - Renamed the pion EMFF background-response module to the more generic pion
   current-background response module.

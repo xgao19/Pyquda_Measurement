@@ -195,6 +195,12 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
   sequential inversion, matching the known-good proton logic.
 - `create_meson_bw_seq_pyquda(...)` accepts optional `sm_width` and `sm_boost`.
 - EMFF now passes `width` and `pos_boost_sink`.
+- Pion EMFF C2 must not use mixed source/sink boost smearing.  Even when the
+  3pt uses independent `pos_boost_src`, `pos_boost_sink`, `neg_boost_src`, and
+  `neg_boost_sink`, the 2pt has no momentum transfer and uses source-side
+  boosts on both ends: `pos_boost_src` and `neg_boost_src`.
+- Pion EMFF C2 tags are intentionally shorter than 3pt tags:
+  `posSrc..._negSrc...` only.  The 3pt tag keeps all four boost labels.
 - pion qTMD CG now passes `width` and `pos_boost`.
 - pion EMT passes the appropriate active-line boost when `CG_GaussSmear` is on.
 - S8T32 local-limit check passed after this fix:

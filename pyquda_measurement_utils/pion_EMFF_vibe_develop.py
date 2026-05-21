@@ -80,11 +80,15 @@ Boost-smearing convention
 Pion measurements have a quark and an antiquark line, so this module supports
 independent source and sink boosts for both lines:
 
-    pos_boost_src: source smearing for the forward quark propagator.
-    pos_boost_sink: sink smearing for the forward quark propagator in C2.
-    neg_boost_src: source smearing for the antiquark propagator in C2.
-    neg_boost_sink: sink smearing for the antiquark propagator and sequential
-                    source.
+    pos_boost_src: source-side smearing for the forward quark propagator.
+    pos_boost_sink: sink-side smearing for the forward quark line in C3.
+    neg_boost_src: source-side smearing for the antiquark propagator.
+    neg_boost_sink: sink-side smearing for the antiquark line and sequential
+                    source in C3.
+
+The pion two-point function has no current momentum transfer, so it uses the
+source-side boosts on both source and sink ends.  The independent sink-side
+boosts are reserved for the EMFF three-point sequential sink.
 
 If these four parameters are not provided, they fall back to ``pos_boost`` and
 ``neg_boost``.  When source and sink boosts are equal, this reproduces the
@@ -137,8 +141,8 @@ class pion_EMFF:
 
     def contract_2pt_pion_multi_src_gamma(self, latt_info, prop_pos, prop_neg, phases, tags_by_src_gamma):
         mpi_print(latt_info, "Begin pion EMFF sink smearing")
-        prop_pos = boosted_smearing(prop_pos, w=self.width, boost=self.pos_boost_sink)
-        prop_neg = boosted_smearing(prop_neg, w=self.width, boost=self.neg_boost_sink)
+        prop_pos = boosted_smearing(prop_pos, w=self.width, boost=self.pos_boost_src)
+        prop_neg = boosted_smearing(prop_neg, w=self.width, boost=self.neg_boost_src)
         mpi_print(latt_info, "Pion EMFF sink smearing completed")
 
         corr_by_src = contract_pion_2pt_multi_src_gamma(
