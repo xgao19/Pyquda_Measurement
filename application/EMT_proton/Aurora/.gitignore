@@ -1,0 +1,12 @@
+data/
+data_*/
+log/
+logs/
+.cache/
+.quda-cache/
+.cupy-cache/
+hostfile/
+__pycache__/
+*.o
+*.e
+profile_*

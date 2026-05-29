@@ -4,7 +4,15 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit title and the main changes.  Keep reusable tips,
 cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
-## Pending Commit: Generalize pion current-response docs
+## Pending Commit: Add Aurora proton EMT connected workflow
+
+- Added `application/EMT_proton/Aurora` for connected quark EMT 3pt plus proton
+  2pt only.
+- Added Aurora/SYCL driver, run script, PBS submit script, README, and ignore
+  rules for data/cache/log outputs.
+- Validated Python and shell syntax locally; no Aurora runtime test was run.
+
+## 2026-05-21: Generalize pion current-response docs
 
 - Renamed the background-response documentation from
   `pion_EMFF_background_response` to `pion_current_background_response`.

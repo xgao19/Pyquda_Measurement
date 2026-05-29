@@ -158,6 +158,11 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
   recover from Git history if needed.
 - EMT meson Perlmutter application:
   `application/EMT_meson/perlmutter`
+- Proton EMT applications:
+  - `application/EMT_proton/perlmutter` contains connected quark 3pt plus
+    proton 2pt, quark 1pt, and gluon 1pt workflows.
+  - `application/EMT_proton/Aurora` is intentionally connected-only: proton
+    2pt plus connected quark EMT 3pt.  It does not include quark/gluon 1pt.
 - Runtime working directory used earlier:
   `/global/cfs/cdirs/m3760/xgao/software/EMT_meson`
 - EMT output is HDF5-only in vibe paths; `.npy` was removed.
