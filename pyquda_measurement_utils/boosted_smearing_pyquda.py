@@ -25,7 +25,7 @@ except ImportError:
     raise ImportError("Could not import 'fft' from 'pyquda_utils'. Please ensure PyQUDA is installed correctly.")
 
 from pyquda_comm import getMPIRank, getCoordFromRank
-from pyquda_measurement_utils.tools import _get_xp_from_array, _ensure_backend
+from pyquda_measurement_utils.tools import _get_xp_from_array, _asarray_on_queue
 
 def _exp_complex(xp, real, imag):
     if xp.__name__ == "torch":
@@ -93,8 +93,8 @@ def _build_kernel_realspace_distributed(xp, latt_info: LatticeInfo, w: float, bo
     k_full_local_cpu = xp.asnumpy(k_full_local)
     cb_data = latt_info.evenodd(k_full_local_cpu, False)
     
-    # assign to field.data (convert back to GPU through _ensure_backend)
-    kernel_field.data = _ensure_backend(cb_data, xp)
+    # assign to field.data on the exact same SYCL queue as the PyQUDA field
+    kernel_field.data = _asarray_on_queue(cb_data, xp, kernel_field.data)
     
     return kernel_field
 

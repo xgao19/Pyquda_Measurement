@@ -104,6 +104,7 @@ connected proton EMT data in disconnected-diagram analyses.
 """
 
 import numpy as np
+import os
 from opt_einsum import contract
 
 from pyquda import getMPIComm
@@ -114,11 +115,24 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedGluon1pt,
     EMTDisconnectedQuark1pt,
 )
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_bw_seq_pyquda
 from pyquda_measurement_utils.io_corr import save_emt_quark_3pt_hdf5
 from pyquda_measurement_utils.proton_qTMD_pyquda import my_gammas, proton_TMD
 from pyquda_measurement_utils.tools import mpi_print
+
+
+def _parse_mg_block(default):
+    text = os.environ.get("EMT_PROTON_MG_BLOCK")
+    if not text:
+        return default
+    if text.strip().lower() in {"none", "off", "false", "0"}:
+        return None
+    block = [int(v) for v in text.replace(",", ".").split(".") if v]
+    if len(block) != 4:
+        raise ValueError("EMT_PROTON_MG_BLOCK must contain four integers, e.g. 4.4.4.4")
+    return [block]
 
 
 class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
@@ -165,7 +179,8 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 "save_propagators": self.save_propagators,
             }
         )
-        return helper.contract_2pt_TMD(latt_info, prop, phases_2pt, tag, interpolator=interpolator)
+        C2 = helper.contract_2pt_TMD(latt_info, prop, phases_2pt, tag, interpolator=interpolator)
+        return getMPIComm().bcast(C2, root=0)
 
     @staticmethod
     def _seq_to_prop(latt_info, seq_data):
@@ -182,7 +197,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
     def get_C3_chi_proton(cls, latt_info, prop_fw, seq_data, phases_3pt, t0):
         scalar_field = contract("wtzyxjicf,wtzyxijfc->wtzyx", seq_data, prop_fw.data)
         slice_t = core.gatherLattice(
-            contract("qwtzyx,wtzyx->qt", phases_3pt, scalar_field).get(),
+            array_to_numpy(contract("qwtzyx,wtzyx->qt", phases_3pt, scalar_field)),
             [1, -1, -1, -1],
         )
         slice_t = getMPIComm().bcast(slice_t, root=0)
@@ -201,7 +216,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 gamma_D_fw = contract("ab,wtzyxbdij->wtzyxadij", D_gammas_local[nu], D_fw.data)
                 scalar_field = 0.5 * contract("wtzyxjicf,wtzyxijfc->wtzyx", seq_data, gamma_D_fw)
                 slice_t = core.gatherLattice(
-                    contract("qwtzyx,wtzyx->qt", phases_3pt, scalar_field).get(),
+                    array_to_numpy(contract("qwtzyx,wtzyx->qt", phases_3pt, scalar_field)),
                     [1, -1, -1, -1],
                 )
                 slice_t = getMPIComm().bcast(slice_t, root=0)
@@ -213,7 +228,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 gamma_fw = contract("ab,wtzyxbdij->wtzyxadij", D_gammas_local[nu], prop_fw.data)
                 scalar_field = -0.5 * contract("wtzyxjicf,wtzyxijfc->wtzyx", leftD_seq, gamma_fw)
                 slice_t = core.gatherLattice(
-                    contract("qwtzyx,wtzyx->qt", phases_3pt, scalar_field).get(),
+                    array_to_numpy(contract("qwtzyx,wtzyx->qt", phases_3pt, scalar_field)),
                     [1, -1, -1, -1],
                 )
                 slice_t = getMPIComm().bcast(slice_t, root=0)
@@ -247,7 +262,9 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         mass, csw, tol, maxiter = invPara
         t0 = src_pos[3]
 
-        dirac = core.getDirac(latt_info, mass, tol, maxiter, 1.0, csw, csw, [[8, 8, 4, 4]])
+        multigrid = _parse_mg_block([[8, 8, 4, 4]])
+        mpi_print(latt_info, f"Proton EMT multigrid block: {multigrid}")
+        dirac = core.getDirac(latt_info, mass, tol, maxiter, 1.0, csw, csw, multigrid)
         dirac.loadGauge(U)
         mpi_print(latt_info, "Proton EMT inverter ready.")
 
@@ -339,7 +356,8 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
             "c2_selected_momentum_index": zero_mom_idx,
             "c2_selected_momentum": self.pilist[zero_mom_idx],
         }
-        save_emt_quark_3pt_hdf5(tag, C2_selected, C3_chi, C3_Tmunu, momentum_transfer_list=self.qlist, attrs=attrs)
+        if latt_info.mpi_rank == 0:
+            save_emt_quark_3pt_hdf5(tag, C2_selected, C3_chi, C3_Tmunu, momentum_transfer_list=self.qlist, attrs=attrs)
         return C2, C3_chi, C3_Tmunu
 
 

@@ -2,28 +2,43 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/../../.." && pwd)"
+measurement_root="$(cd "$script_dir/../../.." && pwd)"
+
 cd "$script_dir"
+source /lus/flare/projects/StructNGB/xgao/software_gradientflow/activate-pyquda-develop.sh
 
-export PYTHONPATH="$repo_root:${PYTHONPATH:-}"
-export EMT_PROTON_STREAM="${EMT_PROTON_STREAM:-b}"
-export EMT_PROTON_CONFIG_NUM="${EMT_PROTON_CONFIG_NUM:-220}"
-export EMT_PROTON_MPI_GEOMETRY="${EMT_PROTON_MPI_GEOMETRY:-1.5.4.5}"
-export EMT_PROTON_DATA_DIR="${EMT_PROTON_DATA_DIR:-/lus/flare/projects/StructNGB/xgao/run/l80c80a050/proton_EMT_pyquda/data_${EMT_PROTON_STREAM}}"
+export QUDA_ENABLE_TUNING="${QUDA_ENABLE_TUNING:-0}"
+export QUDA_ENABLE_MPS="${QUDA_ENABLE_MPS:-1}"
+export QUDA_RESOURCE_PATH="${QUDA_RESOURCE_PATH:-$script_dir/.cache/proton_quark_3pt}"
+export QUDA_PROFILE_OUTPUT_BASE="${QUDA_PROFILE_OUTPUT_BASE:-profile_}"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
+export MPICH_GPU_SUPPORT_ENABLED="${MPICH_GPU_SUPPORT_ENABLED:-1}"
+
+export EMT_PROTON_DATA_DIR="${EMT_PROTON_DATA_DIR:-$script_dir/data}"
+export EMT_PROTON_GAUGE_PATH="${EMT_PROTON_GAUGE_PATH:-$measurement_root/test_gauge/S8T32_wilson_b6.cg.1e-08.0}"
+export EMT_PROTON_CONFIG_NUM="${EMT_PROTON_CONFIG_NUM:-0}"
+export EMT_PROTON_LAT_TAG="${EMT_PROTON_LAT_TAG:-S8T32}"
+export EMT_PROTON_MPI_GEOMETRY="${EMT_PROTON_MPI_GEOMETRY:-1.1.1.2}"
 export EMT_PROTON_QMAX="${EMT_PROTON_QMAX:-0}"
-export EMT_PROTON_T_SEPS="${EMT_PROTON_T_SEPS:-9}"
+export EMT_PROTON_T_SEPS="${EMT_PROTON_T_SEPS:-2}"
 export EMT_PROTON_FLOW_STEPS="${EMT_PROTON_FLOW_STEPS:-1}"
-export QUDA_RESOURCE_PATH="${QUDA_RESOURCE_PATH:-$script_dir/.cache}"
+export EMT_PROTON_WIDTH="${EMT_PROTON_WIDTH:-1.0}"
+export EMT_PROTON_GAUSS_SMEAR="${EMT_PROTON_GAUSS_SMEAR:-0}"
+export EMT_PROTON_SRC_POS="${EMT_PROTON_SRC_POS:-0.0.0}"
+export EMT_PROTON_SRC_T="${EMT_PROTON_SRC_T:-0}"
+export EMT_PROTON_MAXITER="${EMT_PROTON_MAXITER:-300}"
 
-mkdir -p "$EMT_PROTON_DATA_DIR" "$QUDA_RESOURCE_PATH"
+mkdir -p "$QUDA_RESOURCE_PATH" "$EMT_PROTON_DATA_DIR"
 
-echo "Running Aurora proton EMT connected quark 3pt"
-echo "  EMT_PROTON_STREAM=$EMT_PROTON_STREAM"
+echo "Running proton quark EMT 3pt"
+echo "  EMT_PROTON_GAUGE_PATH=$EMT_PROTON_GAUGE_PATH"
+echo "  EMT_PROTON_DATA_DIR=$EMT_PROTON_DATA_DIR"
 echo "  EMT_PROTON_CONFIG_NUM=$EMT_PROTON_CONFIG_NUM"
 echo "  EMT_PROTON_MPI_GEOMETRY=$EMT_PROTON_MPI_GEOMETRY"
-echo "  EMT_PROTON_DATA_DIR=$EMT_PROTON_DATA_DIR"
+echo "  EMT_PROTON_LAT_TAG=$EMT_PROTON_LAT_TAG"
+echo "  EMT_PROTON_GAUSS_SMEAR=$EMT_PROTON_GAUSS_SMEAR"
+echo "  QUDA_RESOURCE_PATH=$QUDA_RESOURCE_PATH"
 
-python3 -u "$script_dir/Pyquda_EMT_proton_quark_3pt.py" \
-  --stream "$EMT_PROTON_STREAM" \
+python -u "$script_dir/Pyquda_EMT_proton_quark_3pt.py" \
   --config_num "$EMT_PROTON_CONFIG_NUM" \
   --mpi_geometry "$EMT_PROTON_MPI_GEOMETRY"

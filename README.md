@@ -21,8 +21,9 @@ The actively maintained workflows are:
 - Shared qTMD/PDF disconnected one-point workflows for pion/proton analysis.
 - Existing proton qTMD and pion qTMDWF utilities used as mature references.
 
-The most validated runtime target is currently NERSC Perlmutter with NVIDIA
-GPUs.
+The most validated runtime targets are currently NERSC Perlmutter with NVIDIA
+GPUs and Aurora with Intel GPU / SYCL QUDA.  The Aurora route uses the PyQUDA
+`develop` branch with the `dpnp` backend.
 
 ## Repository Layout
 
@@ -156,6 +157,55 @@ Run the baseline gradient-flow smoke test:
 ```bash
 bash /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/systems/perlmutter/check-gradient-flow.sh
 ```
+
+## Aurora Runtime
+
+Aurora helper notes live in:
+
+```text
+systems/Aurora/
+```
+
+Current validated shared paths:
+
+```text
+QUDA install:  /lus/flare/projects/StructNGB/xgao/software_260507/install/quda
+Python venv:   /lus/flare/projects/StructNGB/xgao/software_gradientflow/pyquda_env
+PyQUDA source: /lus/flare/projects/StructNGB/xgao/software_gradientflow/PyQUDA
+Repo root:     /lus/flare/projects/StructNGB/xgao/software_gradientflow/Pyquda_Measurement
+Activation:    /lus/flare/projects/StructNGB/xgao/software_gradientflow/activate-pyquda-develop.sh
+```
+
+Activate the environment:
+
+```bash
+module load gcc/13.4.0
+module load oneapi/release/2025.3.1
+module load mpich/opt/5.0.0.aurora_test.3c70a61
+module load libfabric/1.22.0
+module load cray-pals/1.8.0
+source /lus/flare/projects/StructNGB/xgao/software_gradientflow/activate-pyquda-develop.sh
+```
+
+Aurora best practices:
+
+- Use PyQUDA `develop` with `backend="dpnp", backend_target="sycl"`.
+- Keep `h5py` parallel-enabled; `h5py.get_config().mpi` should be `True`.
+- Prefer PBS/PALS launches from allocated compute nodes for MPI checks.
+- Avoid Torch XPU in the default environment because it can pollute MPI and
+  oneAPI runtime resolution.
+- Avoid tile-affinity wrappers that set `ZE_AFFINITY_MASK` for the current
+  `dpnp` route; let PyQUDA/QUDA select the device per rank.
+
+Run the validated Aurora proton EMT smoke:
+
+```bash
+cd /lus/flare/projects/StructNGB/xgao/software_gradientflow/Pyquda_Measurement/application/EMT_proton/Aurora
+bash submit_or_run_interactive.sh
+```
+
+See `systems/Aurora/README.md` for install details, PALS launch examples, and
+the 32-rank l64 fixed_GLU smoke settings.
 
 ## Test Gauge
 

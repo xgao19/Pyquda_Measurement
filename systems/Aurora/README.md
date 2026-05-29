@@ -1,202 +1,218 @@
-# PyQUDA on Aurora (Intel GPU)
+# PyQUDA On Aurora
 
-This guide provides step-by-step instructions for setting up and running PyQUDA on Aurora supercomputer with Intel GPU support.
+This note records the current Aurora best practice for this measurement
+repository.  The validated route is Intel GPU / SYCL QUDA with the PyQUDA
+`develop` branch and the `dpnp` backend.
 
-## Overview
+## Validated Layout
 
-PyQUDA is a Python interface for QUDA (QCD on CUDA), a library for lattice QCD computations. This setup enables PyQUDA to run on Intel GPUs using SYCL backend on Aurora.
+Current shared installation paths:
 
-## Prerequisites
+```text
+Measurement repo: /lus/flare/projects/StructNGB/xgao/software_gradientflow/Pyquda_Measurement
+PyQUDA source:    /lus/flare/projects/StructNGB/xgao/software_gradientflow/PyQUDA
+Python venv:      /lus/flare/projects/StructNGB/xgao/software_gradientflow/pyquda_env
+QUDA install:     /lus/flare/projects/StructNGB/xgao/software_260507/install/quda
+Activation:       /lus/flare/projects/StructNGB/xgao/software_gradientflow/activate-pyquda-develop.sh
+```
 
-- Access to Aurora supercomputer
-- Intel oneAPI toolkit with SYCL support
-- Python environment: PyTorch (for Torch backend) or dpnp, and opt-einsum
+The QUDA install is reused from `software_260507`; do not rebuild QUDA unless
+the QUDA side itself needs to change.
 
-## Python Environment Setup
+## Module Environment
 
-It's recommended to use a virtual environment for this setup:
+Use the Aurora programming environment that matches the existing QUDA build:
 
 ```bash
-# Create a virtual environment
-python3 -m venv pyquda_env
-source pyquda_env/bin/activate
-
-# Choose one of the following backend options:
-# Option 1: NumPy backend (slowest but most compatible)
-No additional packages needed beyond PyQUDA dependencies
-
-# Option 2: Torch XPU backend (requires --no-deps to avoid MPI pollution)
-python3 -m pip install --no-deps torch==2.9.0+xpu torchvision==0.24.0+xpu torchaudio==2.9.0+xpu --index-url https://download.pytorch.org/whl/xpu
-
-# Option 3: dpnp backend (recommended for Intel GPU)
-python3 -m pip install --index-url https://software.repos.intel.com/python/pypi dpnp
+module load gcc/13.4.0
+module load oneapi/release/2025.3.1
+module load mpich/opt/5.0.0.aurora_test.3c70a61
+module load libfabric/1.22.0
+module load cray-pals/1.8.0
 ```
 
-## Installation Steps
-
-### 1. Install QUDA with SYCL Support
-
-Clone the QUDA repository with SYCL support:
+Then activate the PyQUDA environment:
 
 ```bash
-git clone -b feature/sycl https://github.com/lattice/quda.git
-cd quda
+source /lus/flare/projects/StructNGB/xgao/software_gradientflow/activate-pyquda-develop.sh
 ```
 
-Configure and build QUDA for Intel GPU:
+The activation script sets the key paths and runtime knobs:
 
-**Important**: Before running `./configure-quda`, you need to modify the paths in the script:
+```text
+QUDA_PATH
+PYQUDA_ROOT
+PYTHONPATH
+LD_LIBRARY_PATH
+MPICH_GPU_SUPPORT_ENABLED=1
+```
 
-1. **Update the prefix path** (around line 74, 78, 88, 94):
-   ```bash
-   # Change these lines to your desired installation directory
-   prefix="/your/desired/installation/path"
-   ```
+## Python Environment
 
-2. **Update the QUDA source path** (around line 170-171):
-   ```bash
-   # Change this line to point to your QUDA source directory
-   echo $CMAKE --fresh $o /path/to/your/quda/source
-   $CMAKE --fresh $o /path/to/your/quda/source
-   ```
+The venv should be created with Aurora's system Python 3.12 from the loaded
+module stack, not `/usr/bin/python3`.
 
-Then run the configuration and build:
+Install PyQUDA from source and check out `develop`:
 
 ```bash
-./configure-quda
-ninja
+git clone https://github.com/CLQCD/PyQUDA.git /lus/flare/projects/StructNGB/xgao/software_gradientflow/PyQUDA
+cd /lus/flare/projects/StructNGB/xgao/software_gradientflow/PyQUDA
+git checkout develop
 ```
 
-The `configure-quda` script sets up the following key configurations:
-- **Target**: SYCL backend for Intel GPU
-- **SYCL Targets**: `intel_gpu_pvc` (Intel PVC GPU)
-- **Compilers**: Intel SYCL compilers (`icpx`, `mpicxx`)
-- **Features**: Multi-grid, distance preconditioning, QDP-JIT interface
-
-### 2. Configure PyQUDA Backend
-
-Choose one of the following three backend options:
-
-#### Option 1: NumPy Backend (Baseline)
-
-```python
-import pyquda
-pyquda.init(backend="numpy")
-```
-
-**Pros**: Most compatible, no additional setup required
-**Cons**: Slowest performance, CPU-only operations
-
-#### Option 2: Torch XPU Backend (with workarounds)
-
-First, install Torch XPU with `--no-deps` to avoid MPI pollution:
+Recommended packages:
 
 ```bash
-python3 -m pip install --no-deps torch==2.9.0+xpu torchvision==0.24.0+xpu torchaudio==2.9.0+xpu --index-url https://download.pytorch.org/whl/xpu
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install numpy==2.4.4 Cython==3.2.4 opt-einsum==3.4.0 packaging pkgconfig
+python -m pip install --index-url https://software.repos.intel.com/python/pypi dpnp==0.19.0
+python -m pip install mpi4py==4.1.1
+CC=mpicc HDF5_MPI=ON \
+HDF5_DIR=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/hdf5-1.14.6-ehlefog \
+  python -m pip install --no-binary=h5py h5py==3.15.1
+python -m pip install -e /lus/flare/projects/StructNGB/xgao/software_gradientflow/PyQUDA
+python -m pip install -e /lus/flare/projects/StructNGB/xgao/software_gradientflow/PyQUDA/pyquda_utils
 ```
 
-Configure PyQUDA:
+`h5py` must be parallel-enabled.  If a later pip operation replaces it with a
+non-MPI wheel, uninstall it and rebuild from source with `CC=mpicc` and
+`HDF5_MPI=ON`.
+
+## Backend Choice
+
+Use `dpnp` on SYCL:
 
 ```python
-import pyquda
-pyquda.init(backend="torch", torch_backend="xpu")
+from pyquda import init
+
+init(mpi_geometry, backend="dpnp", backend_target="sycl", enable_mps=True)
 ```
 
-**Complex tensor workaround**: Since XPU Torch doesn't support complex matrix multiplication, use the provided `sitecustomize.py`:
+Avoid Torch XPU for the default Aurora environment.  Torch XPU can introduce
+additional oneAPI and MPI runtime libraries into the process, and that can
+pollute `mpi4py`, `h5py`, MPICH, and libfabric resolution.  The current tested
+route does not need Torch.
+
+## Runtime Checks
+
+Run lightweight checks after activating the environment:
 
 ```bash
-# Add to PYTHONPATH
-export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+python -c "import h5py; print(h5py.get_config().mpi)"
+python -c "import pyquda, pyquda_utils; print(pyquda.__file__)"
+python - <<'PY'
+import h5py, mpi4py.MPI
+print("h5py mpi:", h5py.get_config().mpi)
+print("mpi size:", mpi4py.MPI.COMM_WORLD.Get_size())
+PY
 ```
 
-**What the sitecustomize.py does:**
-- Automatically patches opt-einsum's contract function
-- Detects XPU complex tensors and falls back to CPU computation
-- Transfers results back to XPU device when appropriate
+Expected `h5py.get_config().mpi` is `True`.
 
-**Pros**: Good performance for non-complex operations
-**Cons**: Complex operations require CPU fallback, MPI environment pollution risk
-
-#### Option 3: dpnp Backend (Recommended)
-
-Install dpnp:
+For multi-rank checks, use an interactive allocation or a PBS job.  Avoid
+forcing PALS launches from an ordinary login shell.
 
 ```bash
-python3 -m pip install --index-url https://software.repos.intel.com/python/pypi dpnp
+/opt/cray/pals/1.8/bin/mpiexec -n 2 -envall \
+  python -c "from mpi4py import MPI; print(MPI.COMM_WORLD.Get_rank(), MPI.COMM_WORLD.Get_size())"
 ```
 
-Configure PyQUDA:
+## Launching On Compute Nodes
 
-```python
-import pyquda
-import dpnp as np
-pyquda.init(backend="dpnp", backend_target="sycl")
+For interactive testing, request nodes with PBS, then SSH to one allocated
+compute node and launch with PALS:
+
+```bash
+qsub -I -q debug-scaling -A StructNGB -N pyquda_test \
+  -l select=6:ngpus=6 -l walltime=01:00:00 -l filesystems=flare -l place=scatter
+
+ssh <allocated-node>
+cd /lus/flare/projects/StructNGB/xgao/software_gradientflow/Pyquda_Measurement
 ```
 
-**Pros**: 
-- Native complex tensor support on Intel GPU
-- No CPU fallbacks needed
-- Intel-optimized performance
-- No PyTorch dependency (avoids MPI pollution)
+Use PALS directly:
 
-**Cons**: Requires dpnp installation
-
-## Usage Examples
-
-### NumPy backend
-```python
-import pyquda
-pyquda.init(backend="numpy")
+```bash
+/opt/cray/pals/1.8/bin/mpiexec -n 32 --hosts host0,host1,host2,host3,host4,host5 \
+  -envall --cpu-bind=depth bash run_script.sh
 ```
 
-### Torch XPU backend
-```python
-import pyquda
-import torch  # ensure XPU build installed with --no-deps
+Do not force `ppn` when using 32 ranks on 6 nodes if the goal is to spread ranks
+unevenly while still using the available GPUs.
 
-pyquda.init(backend="torch", torch_backend="xpu")
+## GPU Visibility Notes
+
+For the current PyQUDA `develop` plus `dpnp` path, let PyQUDA/QUDA select the
+device per rank.  Avoid tile-affinity wrappers that set `ZE_AFFINITY_MASK=0.0`
+or similar masks, because they can make the `dpnp` backend see zero devices.
+
+Recommended defaults for the current route:
+
+```bash
+unset ZE_FLAT_DEVICE_HIERARCHY
+unset ZE_AFFINITY_MASK
+unset ONEAPI_DEVICE_SELECTOR
+unset ONEAPI_DEVICE_FILTER
+export QUDA_ENABLE_P2P="${QUDA_ENABLE_P2P:-0}"
+export QUDA_ENABLE_MPS="${QUDA_ENABLE_MPS:-1}"
+export QUDA_ENABLE_TUNING="${QUDA_ENABLE_TUNING:-0}"
 ```
 
-### dpnp backend
-```python
-import pyquda
-import dpnp as np
+Enable tuning in a fresh cache only when needed:
 
-pyquda.init(backend="dpnp", backend_target="sycl")
-
-# point_pion.append(
-#    core.gatherLattice(
-#       contract("wtzyxjiba,wtzyxjiba->t", point_propag.data.conj(), point_propag.data).real.get(), [0, -1, -1, -1]
-#    )
-# )
-
-point_pion.append(
-   core.gatherLattice(
-      dnp.asnumpy(dnp.einsum("wtzyxjiba,wtzyxjiba->t", point_propag.data.conj(), point_propag.data)).real, [0, -1, -1, -1]
-   )
-)
-
+```bash
+export QUDA_ENABLE_TUNING=1
+export QUDA_RESOURCE_PATH=/path/to/new/cache
 ```
 
-## Log (Hacking PyQUDA on Aurora)
+Avoid reusing stale tune caches after changing rank geometry, lattice size, or
+QUDA/PyQUDA versions.
 
-1. Initial validation (NumPy backend works):
-   - QUDA and PyQUDA were built and installed successfully.
-   - Because the `cupy` backend is not usable on Intel GPUs, we first validated functionality with the `numpy` backend.
-   - Both pion 2pt and proton 2pt tests passed, but performance was slow.
+## EMT Proton Smoke Tests
 
-2. Trying the Torch XPU backend (install with --no-deps):
-   - To improve performance, we switched the backend to Torch (XPU build).
-   - When installing the XPU build via pip, add `--no-deps` to avoid polluting the MPI environment: the XPU build of Torch brings Intel oneAPI/IMPI runtime shared libraries that can overshadow the system MPI and libfabric paths, causing `mpi4py` to link against the wrong objects during initialization.
+The shortest validated Aurora template is:
 
-3. Complex matmul limitation in XPU Torch and the temporary workaround:
-   - We found XPU Torch lacks support for complex matrix multiplication. Both `opt_einsum` and `torch.einsum` fail on complex contractions with errors like: `RuntimeError: Complex data type matmul is not supported in oneDNN`.
-   - Temporary workaround: use `sitecustomize.py` to force `opt_einsum` contractions to run on the CPU and then move the result back to XPU. This works but adds CPU round-trips and overhead.
+```text
+application/EMT_proton/Aurora
+```
 
-4. Adopting the dpnp backend (native complex einsum):
-   - We evaluated Intel-maintained `dpnp` (Data Parallel Extension for NumPy). Tests show `dpnp.einsum` natively supports complex matrix multiplication on Intel GPUs.
-   - Both pion 2pt and proton 2pt tests passed successfully with the dpnp backend, confirming full functionality.
-   - We added `dpnp` as a PyQUDA backend option and prefer `dpnp.einsum` on contraction paths to keep Aurora behavior as close as possible to the `cupy` backend.
-   - Note: when choosing the `dpnp` path, do not install Torch (XPU) to avoid introducing oneAPI/IMPI runtimes that can pollute MPI. See the `dpnp` repository for details: https://github.com/IntelPython/dpnp
+It runs the bundled S8T32 gauge with 2 ranks:
 
- 
+```bash
+cd /lus/flare/projects/StructNGB/xgao/software_gradientflow/Pyquda_Measurement/application/EMT_proton/Aurora
+bash submit_or_run_interactive.sh
+```
+
+For a 32-rank l64 validation, the tested gauge is:
+
+```text
+/lus/flare/projects/StructNGB/ensemble/l6464f21b7130m00119m0322a.nersc.cg_high_prec/fixed_GLU/l6464f21b7130m00119m0322a.1050.coulomb.1e-14
+```
+
+A successful smoke used:
+
+```text
+nranks=32
+mpi_geometry=2.2.2.4
+EMT_PROTON_MG_BLOCK=none
+EMT_PROTON_T_SEPS=1
+EMT_PROTON_WIDTH=1.0
+EMT_PROTON_FLOW_STEPS=0
+EMT_PROTON_TOL=1e-2
+EMT_PROTON_MAXITER=50
+```
+
+That run produced readable 2pt and 3pt HDF5 outputs.  These are smoke settings,
+not production physics settings.
+
+## Known Issues
+
+- The current QUDA multigrid path can fail on Aurora with `BlockOrtho` tuning
+  parameters whose work group exceeds the device limit.  Use
+  `EMT_PROTON_MG_BLOCK=none` for the validated smoke path until the MG tuning
+  issue is resolved.
+- `QUDA_ENABLE_TUNING=0` with a stale cache can reuse bad kernel parameters.
+  Use a fresh cache and `QUDA_ENABLE_TUNING=1` when investigating tuning issues.
+- Source/sink smearing and production tolerances are much more expensive than
+  the smoke settings above.  First validate the gauge, MPI geometry, and HDF5
+  output path with a small smoke run, then restore stricter parameters.
