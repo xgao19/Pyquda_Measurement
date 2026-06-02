@@ -1015,14 +1015,32 @@ where $\overleftarrow{\Dmu}$ denotes the covariant derivative acting to the left
 $\overleftarrow{D}_{\mu} = -\overrightarrow{D}_{\mu}^{\dagger}$ in the bilinear
 form.
 
-In the implementation, the left derivative is applied by:
+In the implementation, the left derivative is applied to the raw sequential
+propagator before the final proton-specific $\gamma_{5}$ conjugation:
 \begin{enumerate}
-  \item Wrapping \texttt{seq\_data} as a \texttt{LatticePropagator};
-  \item Applying the symmetric covariant derivative $\frac{1}{2}(D_{+\mu}-D_{-\mu})$
-        to this propagator (the derivative naturally acts on the ``source'' index,
-        which is the insertion-side index of the sequential propagator);
-  \item Extracting the data from the result.
+  \item \texttt{create\_bw\_seq\_raw\_pyquda(...)} returns only the raw
+        sequential propagator immediately after the sequential inversion.  This
+        avoids building and storing the finalized qTMD-style \texttt{dst\_seq}
+        object in the proton EMT workflow.
+  \item The symmetric covariant derivative $\frac{1}{2}(D_{+\mu}-D_{-\mu})$ is
+        applied to this raw sequential propagator.
+  \item The derivative result is converted to the final proton sequential layout
+        with the same $\gamma_{5}$ hermiticity/index transformation used in
+        \texttt{create\_bw\_seq\_pyquda}:
+        \begin{equation}
+          \texttt{leftD\_seq = contract("wtzyxijfc, ik -> wtzyxjkcf",}
+          \;\texttt{D\_raw\_seq.conj(), G5)}.
+        \end{equation}
 \end{enumerate}
+This mirrors the meson EMT construction, where the left derivative is built by
+applying the covariant derivative to the raw sequential propagator and only then
+forming the backward line through $\gamma_{5}$ hermiticity.  The convention is
+also the lattice realization of the standard quark EMT operator used in proton
+GFF calculations, $\bar\psi\,\overleftrightarrow{D}_{\{\mu}\gamma_{\nu\}}\psi$.
+This is the same operator-level convention used, for example, in the
+MIT/Fermilab proton gravitational form-factor calculation by Hackett, Pefkou,
+and Shanahan, Phys. Rev. Lett. 132, 251904 (2024),
+doi:10.1103/PhysRevLett.132.251904.
 
 \subsection{Full Connected Quark EMT}
 \label{sec:C3_total}
@@ -1073,12 +1091,14 @@ ways:
         source gamma matrix in the proton contraction because the spin projection
         is already absorbed into the sequential source.
 
-  \item \textbf{Covariant derivative on sequential data.}
-        In the meson case, the left derivative is applied to \texttt{dst2} through
-        \texttt{\_left\_covdev\_dst2\_from\_prop}.  In the proton case, the
-        covariant derivative is applied directly to \texttt{seq\_data} through
-        \texttt{\_covdev\_sym\_seq}, which wraps the data as a
-        \texttt{LatticePropagator} and applies the symmetric derivative.
+  \item \textbf{Covariant derivative on the raw sequential propagator.}
+        In the meson case, the left derivative is applied to the raw sequential
+        propagator and then converted to the backward line through
+        \texttt{\_left\_covdev\_dst2\_from\_prop}.  The proton EMT code now follows
+        the same logic: the derivative acts on the raw sequential propagator, and
+        the result is then converted to the final proton sequential layout through
+        $\gamma_{5}$ hermiticity.  The already-finalized \texttt{seq\_data} is not
+        treated as an ordinary \texttt{LatticePropagator} for the left derivative.
 
   \item \textbf{Flavor dimension.}  The proton result carries a flavor index
         $[U, D]$ since the insertion can be on either quark line.  The meson

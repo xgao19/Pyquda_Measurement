@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-05-21
+Last updated: 2026-06-02
 
 This file is for reusable knowledge, stable run tips, repeated pitfalls, and
 validated cluster/code/test facts.  Historical commit-style progress should go
@@ -29,6 +29,24 @@ to `log.md`.
   `/global/cfs/cdirs/m3760/xgao/software/quda/install`
 - Shared Python venv:
   `/global/cfs/cdirs/m3760/xgao/software/venv`
+
+## Aurora / software_gradientflow Environment
+
+- Aurora repo root:
+  `/lus/flare/projects/StructNGB/xgao/software_gradientflow/Pyquda_Measurement`
+- Aurora software root:
+  `/lus/flare/projects/StructNGB/xgao/software_gradientflow`
+- PyQUDA develop environment:
+  `/lus/flare/projects/StructNGB/xgao/software_gradientflow/pyquda_env`
+- Activation helper:
+  `/lus/flare/projects/StructNGB/xgao/software_gradientflow/activate-pyquda-develop.sh`
+- Reused QUDA install:
+  `/lus/flare/projects/StructNGB/xgao/software_260507/install/quda`
+- Aurora backend convention: `backend="dpnp", backend_target="sycl"`; avoid
+  Torch XPU paths unless explicitly requested.
+- Parallel h5py must stay enabled: `h5py.get_config().mpi == True`.
+- Multi-rank runs should be launched inside an Aurora compute allocation via
+  PALS, e.g. `/opt/cray/pals/1.8/bin/mpiexec -n <nranks> -envall ...`.
 
 ## Perlmutter Environment
 
@@ -193,6 +211,38 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
 - Gluon 1pt code saves the full gluonic building block, not a traceless EMT
   projection.  `_F_clover_traceless` only projects field-strength matrices onto
   the su(3) algebra.
+
+## Aurora Proton EMT Validation Notes
+
+- S8T32 proton EMT smoke project:
+  `/lus/flare/projects/StructNGB/xgao/run/test_gauge/EMT_proton`
+- l64 production-style project:
+  `/lus/flare/projects/StructNGB/xgao/run/l64c64a076/EMT_proton`
+- For point-source validation, disable quark/source/sink smearing with the
+  temporary monkeypatch path (`EMT_PROTON_DISABLE_SMEARING=1`) and keep HYP gauge
+  preprocessing enabled unless intentionally testing otherwise.
+- Gauge-covariance regression baseline:
+  - Before the left-derivative fix, point-source local transform gave
+    `C2 rel diff ~ 1.14e-10`, `C3_chi rel diff ~ 5.00e-11`, but
+    `C3_Tmunu rel diff = 0.4599556563267348`.
+  - After the fix, local transform gives `C3_Tmunu rel diff =
+    9.244013511964703e-12` with `Tmunu_sym_maxabs = 0.0`.
+  - Validation directory:
+    `/lus/flare/projects/StructNGB/xgao/run/test_gauge/EMT_proton/validation_leftD_20260602_191030`
+- Proton EMT left derivative convention:
+  - Do not apply covDev directly to finalized proton `seq_data`.
+  - Apply the symmetric covariant derivative to the raw sequential propagator,
+    then convert with the same final gamma5-hermiticity/index transform used by
+    the proton sequential builder.
+  - HDF5 attrs record `left_derivative_convention=raw_seq_gamma5_hermiticity`.
+- Memory optimization:
+  - `create_bw_seq_pyquda(...)` remains the qTMD/nucleon TMD public builder and
+    returns finalized `dst_seq`.
+  - `create_bw_seq_raw_pyquda(...)` is the proton EMT raw-only builder and avoids
+    constructing/storing finalized `dst_seq` before EMT contractions.
+  - Raw-only equivalence check gave `maxabs_diff=0.0`, `rel_diff=0.0` before the
+    final generator cleanup; generator cleanup only avoids retaining raw objects
+    in the original qTMD builder.
 
 ## Pion Sequential-Source Smearing
 

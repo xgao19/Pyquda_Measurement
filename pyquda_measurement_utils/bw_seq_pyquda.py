@@ -36,11 +36,7 @@ PolProjections = {
     "PpUnpol": Pp,  
 }
 
-def create_bw_seq_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_insert, pol_list, flavor, interpolator="5"):
-    """
-    PyQUDA version: Build backward sequential source (Backend Agnostic).
-    """
-    
+def _iter_bw_seq_raw(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_insert, pol_list, flavor, interpolator="5"):
     if interpolator == "5":
         gamma_insert = Cg5
     elif interpolator == "T5":
@@ -49,77 +45,89 @@ def create_bw_seq_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_bo
         gamma_insert = CgZ5
     else:
         raise ValueError(f"Invalid interpolator: {interpolator}")
-    
-    # 1. Identify Backend from input prop
-    xp = _get_xp_from_array(prop.data)
 
+    xp = _get_xp_from_array(prop.data)
     latt_info = prop.latt_info
     GLt = latt_info.GLt
-    
-    # Perform boosted smearing
+
     prop = boosted_smearing(prop, w=sm_width, boost=sm_boost)
-    
-    dst_seq = []
+
     for pol in pol_list:
-        # --- 1. Perform baryon contraction ---
-        if flavor == 1: # up quark insertion
+        if flavor == 1:  # up quark insertion
             if latt_info.mpi_rank == 0:
                 print(f"starting diquark contractions for up quark insertion and Polarization {pol}")
             src_seq = up_quark_insertion_pyquda(prop, prop, gamma_insert, PolProjections[pol])
-
-        elif flavor == 2: # down quark insertion
+        elif flavor == 2:  # down quark insertion
             if latt_info.mpi_rank == 0:
                 print(f"starting diquark contractions for down quark insertion and Polarization {pol}")
             src_seq = down_quark_insertion_pyquda(prop, gamma_insert, PolProjections[pol])
         else:
             raise ValueError(f"Invalid flavor: {flavor}")
-        
-        # --- 2. Time slicing (Refactored) ---
-        t_source = origin[3] 
+
+        t_source = origin[3]
         t_sink = (t_source + t_insert) % GLt
-        
-        # Use pyquda_utils.source.sequential12 to handle time slicing/masking.
-        # This operates directly on the LatticePropagator without manual reshape/masking.
         src_seq_sliced = sequential12(src_seq, t_sink)
-        
-        # Extract the underlying data (in even-odd format)
-        seq_data = src_seq_sliced.data
-        
-        # ENSURE seq_data is on the correct queue (Critical for SYCL/GPU compatibility)
-        seq_data = _asarray_on_queue(seq_data, xp, prop.data)
-        
-        # --- 3. Create momentum phase ---
-        # Generate phase (returns numpy usually)
+        seq_data = _asarray_on_queue(src_seq_sliced.data, xp, prop.data)
+
         mom_phase = MomentumPhase(latt_info).getPhase(momentum, x0=origin)
         mom_phase = _asarray_on_queue(mom_phase, xp, prop.data)
-        
+
         print(f"DEBUG: mom_phase shape: {mom_phase.shape}")
-        
-        # Get Gamma5 on correct backend AND QUEUE
+
         G5 = _asarray_on_queue(gamma.gamma(15), xp, prop.data)
-        
-        # Einsum contraction
-        # Note: seq_data is now directly from LatticePropagator, so it is in even-odd format (5 dims spatial/parity + 4 dims spin/color)
-        # The einsum 'wtzyxkjba' matches the standard PyQUDA data layout:
-        # w=parity, t, z, y, x=x_cb, k=spin_sink, j=spin_src, b=color_sink, a=color_src
         data = xp.einsum("ij, wtzyx, wtzyxkjba -> wtzyxikab", G5, mom_phase, seq_data.conj())
-    
+
         smearing_input = core.LatticePropagator(latt_info)
         smearing_input.data = data
-        
+
         if latt_info.mpi_rank == 0:
             print(f"diquark contractions for Polarization {pol} done")
-            
-        src = boosted_smearing(smearing_input, w=sm_width, boost=sm_boost)
-        prop_smeared = core.invertPropagator(dirac, src, 1, 0) 
-        
-        # Einsum at the end
-        final_term = xp.einsum("wtzyxijfc, ik -> wtzyxjkcf", prop_smeared.data.conj(), G5)
-        dst_seq.append(final_term)
-        
-    dst_seq = _asarray_on_queue(dst_seq, xp, prop.data)
 
-    return dst_seq
+        src = boosted_smearing(smearing_input, w=sm_width, boost=sm_boost)
+        yield core.invertPropagator(dirac, src, 1, 0)
+
+
+def create_bw_seq_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_insert, pol_list, flavor, interpolator="5"):
+    """
+    PyQUDA version: Build backward sequential source (Backend Agnostic).
+    """
+    dst_seq = []
+    xp = None
+    ref_data = None
+    for raw in _iter_bw_seq_raw(
+        dirac,
+        prop,
+        origin,
+        sm_width,
+        sm_boost,
+        momentum,
+        t_insert,
+        pol_list,
+        flavor,
+        interpolator,
+    ):
+        if xp is None:
+            xp = _get_xp_from_array(raw.data)
+            ref_data = raw.data
+        G5 = _asarray_on_queue(gamma.gamma(15), xp, raw.data)
+        dst_seq.append(xp.einsum("wtzyxijfc, ik -> wtzyxjkcf", raw.data.conj(), G5))
+    return _asarray_on_queue(dst_seq, xp, ref_data)
+
+
+def create_bw_seq_raw_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_insert, pol_list, flavor, interpolator="5"):
+    """Build proton backward sequential propagators before final gamma5 conjugation."""
+    return list(_iter_bw_seq_raw(
+        dirac,
+        prop,
+        origin,
+        sm_width,
+        sm_boost,
+        momentum,
+        t_insert,
+        pol_list,
+        flavor,
+        interpolator,
+    ))
 
 
 def create_meson_bw_seq_pyquda(

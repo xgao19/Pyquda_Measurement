@@ -117,7 +117,7 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
-from pyquda_measurement_utils.bw_seq_pyquda import create_bw_seq_pyquda
+from pyquda_measurement_utils.bw_seq_pyquda import create_bw_seq_raw_pyquda
 from pyquda_measurement_utils.io_corr import save_emt_quark_3pt_hdf5
 from pyquda_measurement_utils.proton_qTMD_pyquda import my_gammas, proton_TMD
 from pyquda_measurement_utils.tools import mpi_print
@@ -189,9 +189,14 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         return seq_prop
 
     @classmethod
-    def _covdev_sym_seq(cls, U_f, seq_data, mu):
-        seq_prop = cls._seq_to_prop(U_f.latt_info, seq_data)
-        return cls._covdev_sym_prop(U_f, seq_prop, mu).data
+    def _final_seq_from_raw_prop(cls, raw_seq_prop):
+        G5_local = cls._gamma5_for(raw_seq_prop.data)
+        return contract("wtzyxijfc,ik->wtzyxjkcf", raw_seq_prop.data.conj(), G5_local)
+
+    @classmethod
+    def _left_covdev_seq_from_raw_prop(cls, U_f, raw_seq_prop, mu):
+        D_raw_seq = cls._covdev_sym_prop(U_f, raw_seq_prop, mu)
+        return cls._final_seq_from_raw_prop(D_raw_seq)
 
     @classmethod
     def get_C3_chi_proton(cls, latt_info, prop_fw, seq_data, phases_3pt, t0):
@@ -204,7 +209,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         return np.roll(np.array(slice_t), -t0, axis=-1)
 
     @classmethod
-    def get_C3_Tmunu_symmetrized_proton(cls, U_f, prop_fw, seq_data, phases_3pt, t0):
+    def get_C3_Tmunu_symmetrized_proton(cls, U_f, prop_fw, seq_data, raw_seq_prop, phases_3pt, t0):
         Nq = len(phases_3pt)
         Nt = U_f.latt_info.global_size[3]
         C3_Tmunu = np.zeros((Nq, 4, 4, Nt), dtype=np.complex128)
@@ -223,7 +228,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 C3_Tmunu[:, mu, nu] += np.roll(np.array(slice_t), -t0, axis=-1)
 
         for mu in range(4):
-            leftD_seq = cls._covdev_sym_seq(U_f, seq_data, mu)
+            leftD_seq = cls._left_covdev_seq_from_raw_prop(U_f, raw_seq_prop, mu)
             for nu in range(4):
                 gamma_fw = contract("ab,wtzyxbdij->wtzyxadij", D_gammas_local[nu], prop_fw.data)
                 scalar_field = -0.5 * contract("wtzyxjicf,wtzyxijfc->wtzyx", leftD_seq, gamma_fw)
@@ -289,7 +294,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 flavor_name = "U" if flavor == 1 else "D"
                 mpi_print(latt_info, f"create proton sequential source flavor={flavor_name} t_sep={t_sep}")
                 dirac.loadGauge(U)
-                seq_bw = create_bw_seq_pyquda(
+                raw_seq_bw = create_bw_seq_raw_pyquda(
                     dirac,
                     prop_fw.copy(),
                     src_pos,
@@ -304,11 +309,12 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
 
                 for pol_idx, pol in enumerate(self.pol_list):
                     prop_fw_flow = prop_fw.copy()
-                    seq_prop_flow = self._seq_to_prop(latt_info, seq_bw[pol_idx].copy())
+                    raw_seq_prop_flow = raw_seq_bw[pol_idx].copy()
                     U_f = U.copy()
                     U_f.setAntiPeriodicT()
 
                     for step in range(Nsteps + 1):
+                        seq_data_flow = self._final_seq_from_raw_prop(raw_seq_prop_flow)
                         mpi_print(
                             latt_info,
                             f"proton EMT contraction flavor={flavor_name} pol={pol} t_sep={t_sep} step={step}",
@@ -316,30 +322,31 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                         C3_chi[flavor_idx, pol_idx, n_ts, step] += self.get_C3_chi_proton(
                             latt_info,
                             prop_fw_flow,
-                            seq_prop_flow.data,
+                            seq_data_flow,
                             phases_3pt,
                             t0,
                         )
                         C3_Tmunu[flavor_idx, pol_idx, n_ts, step] += self.get_C3_Tmunu_symmetrized_proton(
                             U_f,
                             prop_fw_flow,
-                            seq_prop_flow.data,
+                            seq_data_flow,
+                            raw_seq_prop_flow,
                             phases_3pt,
                             t0,
                         )
 
                         if step < Nsteps:
-                            prop_fw_flow, seq_prop_flow = self._advance_flowed_props(
+                            prop_fw_flow, raw_seq_prop_flow = self._advance_flowed_props(
                                 U_f,
                                 prop_fw_flow,
-                                seq_prop_flow,
+                                raw_seq_prop_flow,
                                 step,
                                 stepsize,
                                 Nsteps,
                             )
 
-                    del U_f, prop_fw_flow, seq_prop_flow
-                del seq_bw
+                    del U_f, prop_fw_flow, raw_seq_prop_flow
+                del raw_seq_bw
 
         attrs = {
             "measurement": "proton_quark_3pt",
@@ -353,6 +360,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
             "polarization_axis": ",".join(self.pol_list),
             "n_qext": Nq,
             "connected_only": True,
+            "left_derivative_convention": "raw_seq_gamma5_hermiticity",
             "c2_selected_momentum_index": zero_mom_idx,
             "c2_selected_momentum": self.pilist[zero_mom_idx],
         }

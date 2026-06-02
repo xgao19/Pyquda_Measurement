@@ -12,6 +12,21 @@ cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   rules for data/cache/log outputs.
 - Validated Python and shell syntax locally; no Aurora runtime test was run.
 
+## Pending Commit: Fix proton EMT left derivative and raw-only sequential builder
+
+- Fixed proton connected EMT `C3_Tmunu` left-acting derivative by differentiating
+  the raw sequential propagator before the final gamma5-hermiticity/index
+  transform, matching the meson EMT construction and standard proton GFF EMT
+  convention.
+- Added `create_bw_seq_raw_pyquda(...)` for proton EMT so the workflow no longer
+  constructs both finalized `dst_seq` and raw sequential propagators; restored
+  `create_bw_seq_pyquda(...)` public behavior for qTMD/nucleon TMD callers.
+- Updated `docs/proton_EMT/proton_EMT.tex` with the raw-sequential derivative
+  convention and MIT/Fermilab proton GFF reference.
+- Validated on Aurora S8T32 point-source gauge-covariance tests: local
+  `C3_Tmunu` relative diff improved from `0.4599556563267348` to
+  `9.244013511964703e-12`; `C2` and `C3_chi` stayed unchanged.
+
 ## 2026-05-21: Generalize pion current-response docs
 
 - Renamed the background-response documentation from
