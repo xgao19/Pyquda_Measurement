@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-06-02
+Last updated: 2026-06-10
 
 This file is for reusable knowledge, stable run tips, repeated pitfalls, and
 validated cluster/code/test facts.  Historical commit-style progress should go
@@ -243,6 +243,38 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
   - Raw-only equivalence check gave `maxabs_diff=0.0`, `rel_diff=0.0` before the
     final generator cleanup; generator cleanup only avoids retaining raw objects
     in the original qTMD builder.
+
+## EMT Disconnected 1pt Full Workflow
+
+- Application directory:
+  `application/EMT_disconnected_1pt/perlmutter`
+- Four-step diagnostic workflow:
+  1. `run_quark_1pt.sh`
+  2. `run_gluon_1pt.sh`
+  3. `run_proton_2pt.sh`
+  4. `run_build_disconnected_3pt.sh`
+- The builder combines proton `C2` with quark/gluon one-point loops into
+  disconnected diagnostic three-point building blocks.
+- Single-configuration output is intentionally unsubtracted-proxy only:
+  `quark/C3_disc_cumulative`, `quark/R_disc_cumulative`, `gluon/C3_disc`, and
+  `gluon/R_disc` are only written for `Ncfg >= 2`.
+- Validated on `login32` with S8T32:
+  `EMT_1PT_FLOW_STEPS=1`, `EMT_1PT_QMAX=0`, `EMT_1PT_N_VEC=2`,
+  `EMT_1PT_NOISE_SCHEME=zn`, and `EMT_DISC_T_SEPS=2`.
+- Validation baseline:
+  - C2 file contains `SS/5/PX0PY0PZ0` with shape `(32,)`.
+  - `quark/source_count = [1, 2]`.
+  - `quark/C3_unsubtracted_cumulative` shape:
+    `(1, 2, 1, 4, 4, 1, 2, 32)`.
+  - `gluon/C3_unsubtracted` shape:
+    `(1, 1, 4, 4, 1, 2, 32)`.
+  - HDF5-only fake two-configuration test confirmed that quark/gluon
+    vacuum-subtracted datasets are written when `Ncfg >= 2`.
+- Docs:
+  - quick workflow guide:
+    `docs/EMT_disconnected_1pt/EMT_proton_disconnected_guide.md`
+  - detailed physics/implementation note:
+    `docs/EMT_disconnected_1pt/EMT_disconnected_1pt.tex`
 
 ## Pion Sequential-Source Smearing
 

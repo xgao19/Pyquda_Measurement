@@ -8,9 +8,12 @@
 
 \newcommand{\code}[1]{\texttt{#1}}
 \newcommand{\Trsc}{\operatorname{Tr}_{sc}}
+\newcommand{\Trc}{\operatorname{Tr}_{c}}
+\newcommand{\Vthree}{V_3}
+\newcommand{\Tf}{t_f}
 
 \title{\textbf{EMT Disconnected One-Point Building Blocks}\\[4pt]
-       \large Flowed Quark/Gluon Loops, HDF5 Metadata, and Hierarchical Probing}
+       \large Quark Loops, Gluon Loops, Stochastic Sources, and HDF5 Outputs}
 \author{PyQUDA Measurement Notes}
 \date{\today}
 
@@ -18,213 +21,698 @@
 \maketitle
 \tableofcontents
 
-\section{Purpose}
+\section{Purpose and File Map}
 
 This note documents the hadron-independent one-point functions used to build
-disconnected contributions to pion and proton energy-momentum tensor (EMT)
-matrix elements.  The corresponding source file is
-\code{pyquda\_measurement\_utils/Disconnected\_1pt\_EMT\_vibe\_develop.py}.
+disconnected contributions to proton and pion energy-momentum tensor (EMT)
+matrix elements.  The main implementation is
+\begin{center}
+  \code{pyquda\_measurement\_utils/Disconnected\_1pt\_EMT\_vibe\_develop.py}.
+\end{center}
+The Perlmutter application entry points are in
+\begin{center}
+  \code{application/EMT\_disconnected\_1pt/perlmutter}.
+\end{center}
+The shorter command-oriented workflow guide is
+\begin{center}
+  \code{docs/EMT\_disconnected\_1pt/EMT\_proton\_disconnected\_guide.md}.
+\end{center}
 
-The one-point workflows do not form a hadron three-point function by themselves.
-Instead, they provide flowed quark and gluon loop observables that are combined
-with hadron two-point functions in ensemble analysis.
+The one-point workflows do not form hadron three-point functions by themselves.
+They measure vacuum loop building blocks.  A disconnected hadron matrix element
+is formed later by correlating these one-point loops with hadron two-point
+functions on the same gauge ensemble.
 
-\section{Flowed One-Point Observables}
+\section{Conventions}
 
-Let \(t_f\) denote the gradient-flow time.  The flowed gluonic building block is
-schematically
+We work in Euclidean spacetime with four directions.  Mathematical formulas use
+\(\mu,\nu,\rho = 1,2,3,4\), while Python loops use zero-based indices
+\(\mu,\nu,\rho = 0,1,2,3\).  The temporal direction is the fourth Euclidean
+direction.  PyQUDA stores local lattice fields in even-odd layout; the displayed
+formulas suppress this storage detail.
+
+For a spatial momentum transfer \(q\), the code constructs spatial phases with
+\code{MomentumPhase.getPhases}.  In this note the phase is written as
 \begin{equation}
-  L^g_{\mu\nu}(q,t_f)
-  =
-  \sum_{\mathbf{x}}
-  e^{i\mathbf{q}\cdot\mathbf{x}}\,
-  O^g_{\mu\nu}(\mathbf{x},\tau;t_f),
+  \Phi_q(x) = e^{i\mathbf{q}\cdot\mathbf{x}},
 \end{equation}
-where \(O^g_{\mu\nu}\) is the chosen flowed gluonic EMT operator.
+where only the spatial coordinates are Fourier transformed and the time
+coordinate \(t\) is kept explicit.
 
-The flowed quark loop is estimated stochastically.  For a noise vector
-\(\xi_r\) and solution \(\eta_r = D^{-1}\xi_r\), the measured loop has the
-form
+The spatial volume normalization used in the averaged HDF5 datasets is
 \begin{equation}
-  L^q_{\mu\nu}(q,\tau;t_f)
+  \Vthree = L_x L_y L_z.
+\end{equation}
+The raw per-source quark datasets are stored before this \(\Vthree\)
+normalization.  The averaged quark and gluon datasets are volume-normalized.
+
+\section{Quark One-Point Workflow}
+
+The quark workflow is usually the first part to study.  It contains the
+stochastic trace estimator, the hierarchical-probing source bookkeeping, the
+\(\chi\)-type diagnostics, and the flowed quark EMT loop used in disconnected
+analysis.
+
+\subsection{Target Trace}
+
+A disconnected quark loop has the schematic form
+\begin{equation}
+  L^q_{\Gamma}(q,t;\Tf)
   =
-  \frac{1}{N_r}
-  \sum_{r=1}^{N_r}
-  \sum_{\mathbf{x}}
-  e^{i\mathbf{q}\cdot\mathbf{x}}\,
+  \sum_{\mathbf{x}} \Phi_q(x)\,
   \Trsc\!\left[
-    \xi_r^\dagger(x,t_f)\,
-    \Gamma_{\mu\nu}[U(t_f),D]\,
-    \eta_r(x,t_f)
-  \right].
+    \Gamma[U(\Tf)](x)\,D^{-1}[U](x,x)
+  \right],
+  \label{eq:generic_trace}
 \end{equation}
-The operator \(\Gamma_{\mu\nu}\) includes the symmetrized covariant derivative
-structure used by the EMT kernel.  The code stores only the upper triangle
-\(\mu \leq \nu\), and downstream analysis reconstructs the lower triangle by
-symmetry when needed.
+where \(D^{-1}\) is the quark propagator, \(\Gamma\) is the local operator
+kernel, and \(\Trsc\) denotes spin-color trace.  Directly computing all diagonal
+entries of \(D^{-1}(x,x)\) is too expensive, so the trace is estimated with
+stochastic sources.
 
-\section{Disconnected Combination with Hadron Two-Point Functions}
+\subsection{Stochastic Trace Estimator}
 
-For a hadron two-point function \(C_2^H(p_f,t)\), the disconnected three-point
-building block is
+Let \(\xi_r\) be a stochastic source vector whose spin-color-site components
+satisfy
 \begin{equation}
-  C^{H,\mathrm{disc}}_{3,\mu\nu}
-  (p_f,p_i;t,\tau;t_f)
-  =
+  \left\langle \xi_r \right\rangle_{\mathrm{noise}} = 0,
+  \qquad
   \left\langle
-    C_2^H(p_f,t)\,
-    L_{\mu\nu}(q,\tau;t_f)
-  \right\rangle_{\mathrm{cfg}}
-  -
-  \left\langle C_2^H(p_f,t)\right\rangle_{\mathrm{cfg}}
-  \left\langle L_{\mu\nu}(q,\tau;t_f)\right\rangle_{\mathrm{cfg}},
+    \xi_r(i)\,\xi_r^\dagger(j)
+  \right\rangle_{\mathrm{noise}} = \delta_{ij}.
+  \label{eq:noise_identity}
 \end{equation}
-with
+Here \(i,j\) are combined site, spin, and color indices.  The code obtains
 \begin{equation}
-  q = p_f - p_i.
+  \eta_r = D^{-1}\xi_r
+  \label{eq:eta_def}
 \end{equation}
-The associated ratio is typically
-\begin{equation}
-  R^{H,\mathrm{disc}}_{\mu\nu}(t,\tau;t_f)
+from the Dirac inverter.  For any operator matrix \(A\),
+\begin{align}
+  \left\langle
+    \xi_r^\dagger A\eta_r
+  \right\rangle_{\mathrm{noise}}
+  &=
+  \left\langle
+    \xi_r^\dagger A D^{-1}\xi_r
+  \right\rangle_{\mathrm{noise}}  \\
+  &=
+  \sum_{i,j,k}
+  A_{ij}\,(D^{-1})_{jk}\,
+  \left\langle
+    \xi^\dagger_{r,i} \xi_{r,k}
+  \right\rangle_{\mathrm{noise}} \\
+  &=
+  \sum_{i,j} A_{ij}\,(D^{-1})_{ji}
   =
-  \frac{
-    C^{H,\mathrm{disc}}_{3,\mu\nu}(p_f,p_i;t,\tau;t_f)
-  }{
-    C_2^H(p_f,t)
-  },
-\end{equation}
-before applying kinematic projections, vacuum-subtracted gradient-flow matching,
-and the perturbative mixing coefficients required for the renormalized EMT.
+  \Tr(A D^{-1}).
+  \label{eq:stoch_trace_derivation}
+\end{align}
+This is the Hutchinson trace-estimator logic used by the quark one-point
+workflow.
 
-The subtraction term is essential: the one-point loop is hadron independent and
-contains a vacuum expectation value.  The subtraction should be done at the
-ensemble-analysis level using the same gauge-configuration sample as the hadron
-two-point function.
+\subsection{\texorpdfstring{\(Z_n\)}{Zn} Noise}
 
-\section{Ringed-Fermion Diagnostics}
-
-The quark workflow also writes \(\chi\)-type flowed-fermion diagnostics.  These
-outputs are useful for monitoring or reconstructing ringed-fermion normalization
-factors.  The standard kinetic normalization is not the raw \(\chi\) dataset by
-itself; it should be reconstructed from the appropriate flowed kinetic
-expectation values, especially the zero-momentum diagonal EMT components.
-
-\section{Hierarchical Probing}
-
-The quark loop supports two source schemes:
+The ordinary stochastic scheme is selected with
 \begin{equation}
-  \code{noise\_scheme} \in
+  \code{noise\_scheme = zn}.
+\end{equation}
+Each component of \(\xi\) is drawn independently from
+\begin{equation}
+  \xi(i) \in
+  \left\{
+  \exp\!\left(\frac{2\pi i r}{n}\right)
+  \;\middle|\;
+  r = 0,1,\ldots,n-1
+  \right\},
+  \label{eq:zn_noise}
+\end{equation}
+where \(n=\code{n\_zn}\).  The default smoke-test choice is usually
+\(\mathbb{Z}_2\) noise.
+
+\subsection{Quark EMT Operator Implemented in Code}
+
+The quark EMT kernel in the one-point code is the local bilinear with a
+covariant derivative acting on the solution vector \(\eta\).  The implemented
+per-source, pre-volume-normalized object is
+\begin{equation}
+  L^{q,(r)}_{\nu\mu}(q,t;\Tf)
+  =
+  -\frac{1}{2}
+  \sum_{\mathbf{x}} \Phi_q(x)\,
+  \xi_r^\dagger(x;\Tf)\,
+  \gamma_\nu\,
+  \Big[
+    D_{+\mu} - D_{-\mu}
+  \Big]\,
+  \eta_r(x;\Tf).
+  \label{eq:quark_loop_raw}
+\end{equation}
+This formula maps directly to
+\code{\_get\_Tmunu\_symmetrized\_P\_Breit\_slice}.  In code:
+\begin{verbatim}
+tmp = U_f.pure_gauge.covDev(eta, mu) - U_f.pure_gauge.covDev(eta, mu + 4)
+Y = contract("ab,...bc->...ac", D_gammas_local[nu], tmp.data)
+complex_field = contract("...sc,...sc->...", xi.data.conj(), Y)
+Tmunu[nu, mu] += -0.5 * impose_P_Breit_slice(...)
+\end{verbatim}
+The first tensor index is \(\nu\), because the gamma matrix \(\gamma_\nu\) is
+applied after choosing the derivative direction \(\mu\).  This is why the code
+fills \code{Tmunu[nu, mu]} before symmetrization.
+
+\subsection{Symmetrization}
+
+The EMT tensor is symmetrized after all unsymmetrized components have been
+accumulated:
+\begin{equation}
+  L^q_{\mu\nu}
+  \leftarrow
+  \frac{1}{2}\left(L^q_{\mu\nu} + L^q_{\nu\mu}\right).
+  \label{eq:quark_sym}
+\end{equation}
+The code then sets both entries equal.  The HDF5 writer stores only the upper
+triangle \(\mu\leq\nu\), with dataset names \code{T11}, \code{T12}, \ldots,
+\code{T44}.  The lower triangle should be reconstructed by symmetry if needed.
+
+\subsection{Noise Average and Volume Normalization}
+
+For \(N_{\mathrm{eff}}\) effective sources, the averaged quark one-point loop is
+\begin{equation}
+  L^q_{\mu\nu,\mathrm{avg}}(q,t;\Tf)
+  =
+  \frac{1}{\Vthree}\,
+  \frac{1}{N_{\mathrm{eff}}}
+  \sum_{r=1}^{N_{\mathrm{eff}}}
+  L^{q,(r)}_{\mu\nu}(q,t;\Tf).
+  \label{eq:noise_volume_avg}
+\end{equation}
+The code stores both the raw per-source data and the averaged
+volume-normalized data:
+\begin{align}
+  \code{raw/Tmunu\_pervec}
+  &\leftrightarrow
+  L^{q,(r)}_{\mu\nu}(q,t;\Tf),
+  \\
+  \code{avg/Tmunu/Tij}
+  &\leftrightarrow
+  L^q_{ij,\mathrm{avg}}(q,t;\Tf).
+\end{align}
+
+\subsection{\texorpdfstring{\(\chi\)}{CHI} Diagnostics}
+
+The quark workflow also writes two scalar diagnostics:
+\begin{align}
+  \chi_0^{(r)}(q,t;\Tf)
+  &=
+  \sum_{\mathbf{x}}\Phi_q(x)\,
+  \xi_r^\dagger(x;\Tf)\,\eta_r(x;\Tf),
+  \label{eq:chi0}
+  \\
+  \chi_1^{(r)}(q,t;\Tf)
+  &=
+  \sum_{\mathbf{x}}\Phi_q(x)\,
+  \xi_r^\dagger(x;\Tf)\,\xi_r(x;\Tf).
+  \label{eq:chi1}
+\end{align}
+\(\chi_0\) is the stochastic scalar trace estimate.  \(\chi_1\) checks the
+noise normalization.  In code these are the two entries of \code{CHI}:
+\begin{verbatim}
+dot_xi_eta = contract("etzyxbc,etzyxbc->etzyx", xi.data.conj(), eta.data)
+CHI[0] = impose_P_Breit_slice(U_f, dot_xi_eta, phases_3pt)
+
+dot_xi_xi = contract("etzyxbc,etzyxbc->etzyx", xi.data.conj(), xi.data)
+CHI[1] = impose_P_Breit_slice(U_f, dot_xi_xi, phases_3pt)
+\end{verbatim}
+The averaged HDF5 dataset \code{avg/CHI} is divided by \(\Vthree\), just like
+the averaged quark EMT datasets.
+
+\subsection{Ringed-Fermion Kinetic Normalization}
+
+The raw \code{CHI} datasets are diagnostics, not the ringed-fermion
+normalization itself.  The flowed ringed-fermion normalization uses the flowed
+fermion kinetic expectation value.  In this implementation, the relevant
+building block is reconstructed from the zero-momentum diagonal quark EMT
+components:
+\begin{equation}
+  \sum_{\mu=1}^{4} L^q_{\mu\mu,\mathrm{avg}}(q=0,t;\Tf)
+  =
+  -\frac{1}{2\Vthree}
+  \sum_{\mu,\mathbf{x}}
+  \xi^\dagger(x;\Tf)
+  \gamma_\mu
+  \left[D_{+\mu}-D_{-\mu}\right]
+  \eta(x;\Tf).
+  \label{eq:ringed_building_block}
+\end{equation}
+In HDF5 this is obtained from \code{avg/Tmunu/T11}, \code{T22}, \code{T33},
+and \code{T44} at the \(q=0\) momentum index.
+
+\subsection{Gradient-Flow Schedule for Quarks}
+
+The quark workflow measures before flowing.  Therefore step \(0\) is the
+unflowed observable.  If \(\epsilon=\code{flow\_epsilon}\), then
+\begin{equation}
+  \Tf(n) = n\,\epsilon,
+  \qquad
+  n=0,\ldots,\code{flow\_steps}.
+\end{equation}
+The first flow interval is internally split into ten smaller updates:
+\begin{verbatim}
+for step in range(Nsteps + 1):
+    measure Tmunu and CHI
+    if step == 0:
+        flow [xi, eta] for 10 substeps of stepsize/10
+    elif step < Nsteps:
+        flow [xi, eta] for 1 step of stepsize
+\end{verbatim}
+The stochastic source \(\xi\) and solution \(\eta\) are flowed together as one
+\code{MultiField}.  This keeps both fields on the same flowed gauge background.
+
+\section{Hierarchical Probing and Source Bookkeeping}
+
+The quark one-point workflow supports
+\begin{equation}
+  \code{noise\_scheme}\in
   \{\code{zn},\code{hierarchical\_probing}\}.
 \end{equation}
-For ordinary \(Z_n\) noise, each stochastic source corresponds to one inversion.
-For hierarchical probing, a base noise vector \(\xi_b\) is multiplied by a set of
-site-only Rademacher vectors \(h_k(x)=\pm 1\):
+Hierarchical probing starts from a base noise vector \(\xi_b\) and multiplies it
+by deterministic site-only Rademacher vectors \(h_k(x)=\pm 1\):
 \begin{equation}
   \xi_{b,k}(x) = h_k(x)\,\xi_b(x).
+  \label{eq:hp_source}
 \end{equation}
-The effective number of inversions is therefore
+The probing vectors are designed to reduce near-diagonal contributions to the
+stochastic trace variance.  In the current implementation the number of HP
+vectors must be a positive power of two:
+\begin{equation}
+  \code{hp\_num\_vectors}=1,2,4,8,\ldots .
+\end{equation}
+
+The effective number of inversions is
 \begin{equation}
   N_{\mathrm{eff}}
   =
-  N_{\mathrm{base}}\,
-  N_{\mathrm{HP}}.
+  \begin{cases}
+    \code{n\_vec}, &
+    \code{noise\_scheme=zn},\\
+    \code{n\_vec}\times\code{hp\_num\_vectors}, &
+    \code{noise\_scheme=hierarchical\_probing}.
+  \end{cases}
+  \label{eq:n_eff}
 \end{equation}
-In the application this is
-\begin{equation}
-  \code{effective\_n\_inversions}
-  =
-  \code{EMT\_1PT\_N\_VEC}
-  \times
-  \code{EMT\_1PT\_HP\_NUM\_VECTORS}.
-\end{equation}
-\code{EMT\_1PT\_HP\_NUM\_VECTORS} must be a positive power of two.
+This value is stored as \code{effective\_n\_inversions}.
 
 \subsection{Ordering Choices}
 
-Two Gray-code ordering choices are implemented:
+Two HP orderings are currently implemented:
 \begin{center}
 \begin{tabular}{ll}
 \toprule
 Ordering & Meaning \\
 \midrule
 \code{global\_xyzt\_gray\_projected\_to\_evenodd}
-& Gray code the full \(x,y,z,t\) site id. \\
+& Gray-code the full \(x,y,z,t\) site id. \\
 \code{spatial\_xyz\_then\_t\_gray\_projected\_to\_evenodd}
-& Gray code spatial sites first, then append time bits. \\
+& Gray-code spatial sites first, then append time bits. \\
 \bottomrule
 \end{tabular}
 \end{center}
+The spatial-first option is useful when early HP vectors should emphasize
+spatial locality before time locality.
 
-The global ordering is the default to preserve the previously validated
-behavior.  The spatial-first ordering is intended for studies where the leading
-noise correlations are expected to be dominated by spatial locality and where
-time dilution is not yet being used.
+\subsection{Bookkeeping Datasets}
 
-Spin-color dilution and time dilution are not part of the current short-term
-workflow.
-
-\section{HDF5 Output}
-
-The quark HDF5 file stores metadata attributes:
-\begin{center}
-\begin{tabular}{ll}
-\toprule
-Attribute & Meaning \\
-\midrule
-\code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{flow\_times}
-& Gradient-flow schedule. \\
-\code{qext}, \code{pf}, \code{p\_2pt}
-& Momentum labels used by downstream analysis. \\
-\code{volume\_norm}
-& Spatial volume normalization used in the averaged datasets. \\
-\code{upper\_triangle\_only}
-& Only \(\mu \leq \nu\) components are written. \\
-\code{noise\_scheme}, \code{hp\_num\_vectors}, \code{hp\_ordering}
-& Source-generation scheme. \\
-\code{n\_base\_noise}, \code{effective\_n\_inversions}
-& Stochastic source counting. \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-The raw quark datasets are:
-\begin{equation}
-  \code{raw/Tmunu\_pervec},\quad
-  \code{raw/CHI\_pervec},\quad
-  \code{raw/source\_index},\quad
-  \code{raw/base\_noise\_index},\quad
-  \code{raw/hp\_index}.
-\end{equation}
-The bookkeeping datasets allow analysis code to group effective HP sources back
-to the original base noise:
+For each effective source, the output records:
 \begin{center}
 \begin{tabular}{ll}
 \toprule
 Dataset & Meaning \\
 \midrule
-\code{source\_index}
+\code{raw/source\_index}
 & Effective source index after HP expansion. \\
-\code{base\_noise\_index}
-& Original stochastic base-noise index. \\
-\code{hp\_index}
-& Hierarchical-probing vector index for that base noise. \\
+\code{raw/base\_noise\_index}
+& Original base noise index. \\
+\code{raw/hp\_index}
+& HP vector index used for that base noise. \\
+\bottomrule
+\end{tabular}
+\end{center}
+For example, with \(\code{n\_vec}=1\) and
+\(\code{hp\_num\_vectors}=2\), the expected bookkeeping is
+\begin{equation}
+  \code{source\_index}=[0,1],
+  \qquad
+  \code{base\_noise\_index}=[0,0],
+  \qquad
+  \code{hp\_index}=[0,1].
+\end{equation}
+
+\section{Quark HDF5 Layout}
+
+The quark writer is \code{save\_emt\_quark\_1pt\_hdf5}.  The main raw datasets
+are
+\begin{align}
+  \code{raw/Tmunu\_pervec}
+  &:
+  [N_{\mathrm{eff}},4,4,N_q,N_{\mathrm{steps}}+1,N_t],
+  \\
+  \code{raw/CHI\_pervec}
+  &:
+  [N_{\mathrm{eff}},2,N_q,N_{\mathrm{steps}}+1,N_t].
+\end{align}
+The averaged datasets are
+\begin{align}
+  \code{avg/Tmunu/T11},\code{T12},\ldots,\code{T44}
+  &:
+  [N_q,N_{\mathrm{steps}}+1,N_t],
+  \\
+  \code{avg/CHI}
+  &:
+  [2,N_q,N_{\mathrm{steps}}+1,N_t].
+\end{align}
+Only \(\mu\leq\nu\) tensor components are written in the averaged
+\code{avg/Tmunu} group.
+
+The exact quark dataset and attribute names used by downstream scripts are:
+\begin{verbatim}
+raw/Tmunu_pervec
+raw/CHI_pervec
+raw/source_index
+raw/base_noise_index
+raw/hp_index
+avg/Tmunu/T11
+avg/Tmunu/T12
+avg/Tmunu/T22
+avg/Tmunu/T33
+avg/Tmunu/T44
+avg/CHI
+noise_scheme
+hp_num_vectors
+effective_n_inversions
+\end{verbatim}
+
+Important attributes include
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Attribute & Meaning \\
+\midrule
+\code{measurement} & \code{quark\_1pt}. \\
+\code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{flow\_times}
+& Gradient-flow schedule. \\
+\code{qext}, \code{pf}, \code{p\_2pt}
+& Momentum labels used by downstream analysis. \\
+\code{volume\_norm}
+& \(\Vthree\), the spatial-volume normalization. \\
+\code{upper\_triangle\_only}
+& Whether only \(\mu\leq\nu\) components are written. \\
+\code{n\_vec}, \code{n\_base\_noise}, \code{effective\_n\_inversions}
+& Stochastic source counts. \\
+\code{noise\_scheme}, \code{hp\_num\_vectors}, \code{hp\_ordering}
+& Source-generation scheme. \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\section{Current Validation Status}
+\section{Gluon One-Point Workflow}
 
-The current implementation has been checked with:
+The gluon workflow is independent of stochastic quark sources.  It constructs a
+flowed gauge-field strength and then measures a spatially Fourier-projected
+gluon EMT building block.
+
+\subsection{Clover Field Strength}
+
+For each independent plane \((\mu,\nu)\), the code constructs the four oriented
+clover plaquettes
+\begin{align}
+  &\mu \to \nu \to -\mu \to -\nu, \\
+  &\nu \to -\mu \to -\nu \to \mu, \\
+  &-\mu \to -\nu \to \mu \to \nu, \\
+  &-\nu \to \mu \to \nu \to -\mu.
+\end{align}
+Let \(Q_{\mu\nu}(x)\) be their sum.  The anti-Hermitian clover field is
+\begin{equation}
+  A_{\mu\nu}(x)
+  =
+  \frac{1}{8}
+  \left[
+    Q_{\mu\nu}(x)-Q_{\mu\nu}^\dagger(x)
+  \right].
+  \label{eq:clover_A}
+\end{equation}
+The code projects this matrix to the traceless \(\mathfrak{su}(3)\) algebra:
+\begin{equation}
+  A^{\mathrm{tl}}_{\mu\nu}(x)
+  =
+  A_{\mu\nu}(x)
+  -
+  \frac{1}{N_c}
+  \Trc[A_{\mu\nu}(x)]\,\mathbf{1}.
+  \label{eq:clover_traceless}
+\end{equation}
+Finally, the Euclidean field-strength convention used by the implementation is
+\begin{equation}
+  F_{\mu\nu}(x) = -i\,A^{\mathrm{tl}}_{\mu\nu}(x).
+  \label{eq:F_euclidean}
+\end{equation}
+Only the six independent planes are computed, and the antisymmetric entries are
+filled with
+\begin{equation}
+  F_{\nu\mu}(x) = -F_{\mu\nu}(x).
+\end{equation}
+The traceless projection is a field-strength projection.  It is not a
+traceless projection of the final EMT tensor.
+
+\subsection{Implemented Gluon EMT Loop}
+
+The implemented gluon one-point building block is
+\begin{equation}
+  L^g_{\mu\nu}(q,t;\Tf)
+  =
+  \frac{2}{\Vthree}
+  \sum_{\mathbf{x}}\Phi_q(x)
+  \sum_{\substack{\rho=1\\ \rho\ne\mu,\nu}}^{4}
+  \Trc\!\left[
+    F_{\mu\rho}(x;\Tf)\,
+    F_{\nu\rho}(x;\Tf)
+  \right].
+  \label{eq:gluon_loop}
+\end{equation}
+This maps directly to the code in \code{EMTDisconnectedGluon1pt.flowed\_1pt}:
+\begin{verbatim}
+for mu in range(4):
+    for nu in range(mu, 4):
+        tmp = zeros(...)
+        for rho in range(4):
+            if rho == mu or rho == nu:
+                continue
+            tmp += contract("...ab,...ba->...", F[mu][rho], F[nu][rho])
+        Tmunu_t[mu, nu, :, step, :] += 2.0 * slice_t
+Tmunu_t /= Ns3
+\end{verbatim}
+The factor \(2\) is explicit in the code.  The division by \(\Vthree\) is
+applied after all spatial Fourier sums have been accumulated.
+
+\subsection{Gradient-Flow Schedule for Gluons}
+
+As in the quark workflow, step \(0\) is measured before flow and therefore is
+the unflowed gauge observable.  After each measurement, the gauge field is
+advanced by Wilson or Symanzik flow:
+\begin{verbatim}
+for step in range(Nsteps + 1):
+    measure F and Tmunu
+    if step == 0:
+        flow gauge for 10 substeps of stepsize/10
+    elif step < Nsteps:
+        flow gauge for 1 step of stepsize
+\end{verbatim}
+
+\section{Gluon HDF5 Layout}
+
+The gluon writer is \code{save\_emt\_gluon\_1pt\_hdf5}.  Unlike the quark file,
+there are no stochastic raw per-vector datasets.  The output contains only
+volume-normalized upper-triangle tensor components:
+\begin{equation}
+  \code{Tmunu/T11},\code{T12},\ldots,\code{T44}
+  :
+  [N_q,N_{\mathrm{steps}}+1,N_t].
+\end{equation}
+Important attributes include
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Attribute & Meaning \\
+\midrule
+\code{measurement} & \code{gluon\_1pt}. \\
+\code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{flow\_times}
+& Gradient-flow schedule. \\
+\code{qext}, \code{pf}, \code{p\_2pt}
+& Momentum labels used by downstream analysis. \\
+\code{volume\_norm}
+& \(\Vthree\), the spatial-volume normalization. \\
+\code{upper\_triangle\_only}
+& Whether only \(\mu\leq\nu\) components are written. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Disconnected Combination with Proton Two-Point Functions}
+
+The quark and gluon one-point loops are hadron independent.  They become a
+proton disconnected three-point building block only after being correlated with
+the proton two-point function on the gauge ensemble.  For a proton two-point
+function \(C_2^p(p_f,t)\), define
+\begin{equation}
+  C^{p,\mathrm{disc}}_{3,\mu\nu}
+  (p_f,p_i;t,\tau;\Tf)
+  =
+  \left\langle
+    C_2^p(p_f,t)\,
+    L_{\mu\nu}(q,\tau;\Tf)
+  \right\rangle_{\mathrm{cfg}}
+  -
+  \left\langle C_2^p(p_f,t)\right\rangle_{\mathrm{cfg}}
+  \left\langle L_{\mu\nu}(q,\tau;\Tf)\right\rangle_{\mathrm{cfg}},
+  \label{eq:disc_C3}
+\end{equation}
+with
+\begin{equation}
+  q=p_f-p_i.
+\end{equation}
+The subtraction term removes the vacuum expectation value of the one-point
+loop.  This subtraction must be done at the ensemble-analysis level using the
+same configuration set as the proton two-point function.
+
+A basic ratio is
+\begin{equation}
+  R^{p,\mathrm{disc}}_{\mu\nu}(t,\tau;\Tf)
+  =
+  \frac{
+    C^{p,\mathrm{disc}}_{3,\mu\nu}(p_f,p_i;t,\tau;\Tf)
+  }{
+    C_2^p(p_f,t)
+  }.
+  \label{eq:disc_ratio}
+\end{equation}
+Kinematic projectors, EMT mixing coefficients, and gradient-flow matching
+factors are applied later in the physics analysis.
+
+\section{End-to-End Proton Diagnostic Workflow}
+
+The application directory
+\begin{center}
+  \code{application/EMT\_disconnected\_1pt/perlmutter}
+\end{center}
+contains a minimal four-step diagnostic workflow:
+\begin{enumerate}
+  \item measure the stochastic quark one-point loop;
+  \item measure the gluon one-point loop;
+  \item measure the proton two-point function \(C_2^p\);
+  \item combine \(C_2^p\) and the one-point loops into disconnected diagnostic
+        three-point objects.
+\end{enumerate}
+
+For the quark loop, the builder reads \code{raw/Tmunu\_pervec} and forms
+cumulative stochastic averages
+\begin{equation}
+  \overline{L}^{q,N}_{\mu\nu}(q,t;\Tf)
+  =
+  \frac{1}{\Vthree}
+  \frac{1}{N}
+  \sum_{r=1}^{N}
+  L^{q,(r)}_{\mu\nu}(q,t;\Tf),
+  \qquad
+  N=1,\ldots,N_{\mathrm{eff}}.
+  \label{eq:cumulative_loop}
+\end{equation}
+This is the quantity used to check whether the stochastic estimator changes
+smoothly as more random sources are included.
+
+For a single configuration, the builder can only form the unsubtracted proxy
+\begin{equation}
+  C^{\mathrm{unsub},N}_{3,\mu\nu}
+  (t_{\mathrm{sep}},q,t;\Tf)
+  =
+  C_2^p(t_{\mathrm{sep}})\,
+  \overline{L}^{q,N}_{\mu\nu}(q,t;\Tf).
+  \label{eq:single_cfg_proxy}
+\end{equation}
+This object is useful for checking shapes, source-count dependence, time
+alignment, and HDF5 plumbing.  It is not the physical disconnected correlator,
+because the vacuum subtraction in Eq.~\eqref{eq:disc_C3} requires an ensemble
+average.
+
+With multiple configurations, the builder applies the ensemble subtraction for
+each cumulative source count:
+\begin{align}
+  C^{\mathrm{disc},N}_{3,\mu\nu}
+  &=
+  \left\langle
+    C_2^p\,\overline{L}^{q,N}_{\mu\nu}
+  \right\rangle_{\mathrm{cfg}}
+  -
+  \left\langle C_2^p \right\rangle_{\mathrm{cfg}}
+  \left\langle
+    \overline{L}^{q,N}_{\mu\nu}
+  \right\rangle_{\mathrm{cfg}},
+  \\
+  R^{\mathrm{disc},N}_{\mu\nu}
+  &=
+  \frac{
+    C^{\mathrm{disc},N}_{3,\mu\nu}
+  }{
+    \left\langle C_2^p \right\rangle_{\mathrm{cfg}}
+  }.
+  \label{eq:cumulative_ratio}
+\end{align}
+The gluon loop has no stochastic source axis, so the builder forms the same
+unsubtracted and vacuum-subtracted objects without a cumulative \(N\) index.
+
+The diagnostic merger output contains:
+\begin{verbatim}
+C2
+quark/source_count
+quark/loop_cumulative
+quark/C3_unsubtracted_cumulative
+quark/C3_disc_cumulative     # only if Ncfg >= 2
+quark/R_disc_cumulative      # only if Ncfg >= 2
+gluon/loop
+gluon/C3_unsubtracted
+gluon/C3_disc                # only if Ncfg >= 2
+gluon/R_disc                 # only if Ncfg >= 2
+summary/quark_source_count
+summary/quark_T44_q0_flow0_loop_norm
+summary/quark_T44_q0_flow0_unsub_ratio_proxy
+\end{verbatim}
+
+\section{How to Read Smoke Tests}
+
+A single \code{S8T32} test gauge checks implementation conventions, not physics
+signals.  Useful smoke-test checks are:
 \begin{itemize}
-  \item Python syntax compilation.
-  \item A CPU/numpy backend check that \(\mathrm{HP}=1\) leaves the base source
-        unchanged.
-  \item A Perlmutter login-node GPU smoke test with
-        \(\code{hp\_num\_vectors}=2\) and spatial-first ordering.
+  \item the code runs on the intended backend;
+  \item \code{flow\_times} contains step \(0\) and the requested flow times;
+  \item \code{upper\_triangle\_only=True};
+  \item quark raw datasets have the expected
+        \([N_{\mathrm{eff}},4,4,N_q,N_{\mathrm{steps}}+1,N_t]\) and
+        \([N_{\mathrm{eff}},2,N_q,N_{\mathrm{steps}}+1,N_t]\) shapes;
+  \item HP runs have consistent \code{raw/source\_index},
+        \code{raw/base\_noise\_index}, and \code{raw/hp\_index};
+  \item gluon datasets contain \code{Tmunu/T11} through \code{T44} but no
+        stochastic \code{raw/Tmunu\_pervec}.
 \end{itemize}
 
-Before production analysis, the recommended next validation is a scaling study
-comparing \(Z_n\), \(\mathrm{HP}=1\), \(\mathrm{HP}=2,4,8,16\) at fixed gauge,
-flow time, and momentum.
+\section{Recommended Next Algorithmic Upgrade}
+
+The current variance-reduction options are ordinary \(Z_n\) noise and
+hierarchical probing.  A planned future direction is multiplier-based graph
+coloring, motivated by
+\begin{center}
+  \href{https://arxiv.org/abs/2606.00394}{arXiv:2606.00394}.
+\end{center}
+The motivation is that standard HP naturally tests \(2^k\) source counts,
+whereas multiplier-based coloring can test intermediate coloring budgets.  A
+future scheme should be added as a separate optional source scheme, with HDF5
+metadata that clearly distinguishes it from \code{hierarchical\_probing}.
 
 \end{document}

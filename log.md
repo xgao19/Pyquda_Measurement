@@ -4,6 +4,15 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit title and the main changes.  Keep reusable tips,
 cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## Pending Commit: Add EMT disconnected full-workflow diagnostic
+
+- Added proton `C2` generation and disconnected `C2 x 1pt` merger scripts under
+  `application/EMT_disconnected_1pt/perlmutter`.
+- Added run wrappers, a concise workflow guide, and a detailed LaTeX diagnostic
+  section with regenerated PDF.
+- Validated syntax, `login32` S8T32 quark/gluon/C2/build smoke workflow, and
+  one-config plus fake two-config HDF5 schema behavior.
+
 ## Pending Commit: Add Aurora proton EMT connected workflow
 
 - Added `application/EMT_proton/Aurora` for connected quark EMT 3pt plus proton
