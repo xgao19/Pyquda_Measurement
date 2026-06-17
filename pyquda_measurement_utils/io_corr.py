@@ -184,8 +184,8 @@ def get_emt_proton_2pt_file_tag(data_dir, lat, cfg, ama, src, sm):
 
 
 # Build the proton quark EMT three-point output tag.
-def get_emt_proton_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, spin):
-    return str(Path(data_dir) / "EMTproton3pt" / (str(lat) + ".EMTproton3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm) + ".spin" + str(spin)))
+def get_emt_proton_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm):
+    return str(Path(data_dir) / "EMTproton3pt" / (str(lat) + ".EMTproton3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
 
 
 # -----------------------------------------------------------------------------

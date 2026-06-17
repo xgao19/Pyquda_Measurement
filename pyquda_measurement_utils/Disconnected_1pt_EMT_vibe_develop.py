@@ -307,14 +307,21 @@ class EMTDisconnectedQuark1pt:
         L5_b = mf_b.L5
         assert L5_a == L5_b
 
-        packed = convert.multiField([mf_a[idx] for idx in range(L5_a)] + [mf_b[idx] for idx in range(L5_b)])
-        packed_flow = U_f.gradientFlow(packed, flow_type, Nsteps, stepsize)
+        fields = [mf_a[idx] for idx in range(L5_a)] + [mf_b[idx] for idx in range(L5_b)]
+        packed = convert.multiField(fields)
+        del fields, mf_a, mf_b, prop_a, prop_b
 
-        mf_a_flow = MultiLatticeFermion(U_f.latt_info, L5_a, packed_flow.data[:L5_a].copy())
-        mf_b_flow = MultiLatticeFermion(U_f.latt_info, L5_b, packed_flow.data[L5_a:L5_a + L5_b].copy())
+        packed_flow = U_f.gradientFlow(packed, flow_type, Nsteps, stepsize)
+        del packed
+
+        mf_a_flow = MultiLatticeFermion(U_f.latt_info, L5_a, packed_flow.data[:L5_a])
+        mf_b_flow = MultiLatticeFermion(U_f.latt_info, L5_b, packed_flow.data[L5_a:L5_a + L5_b])
 
         prop_a_flow = convert.multiFermionToPropagator(mf_a_flow)
         prop_b_flow = convert.multiFermionToPropagator(mf_b_flow)
+        prop_a_flow._packed_flow_owner = packed_flow
+        prop_b_flow._packed_flow_owner = packed_flow
+        del mf_a_flow, mf_b_flow
         return prop_a_flow, prop_b_flow
 
     def _advance_flowed_props(self, U_f, prop_fw_flow, seq_bw_prop_flow, step, stepsize, Nsteps):

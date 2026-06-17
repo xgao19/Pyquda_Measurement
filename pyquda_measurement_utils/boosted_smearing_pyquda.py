@@ -12,6 +12,7 @@ boosted smearing: apply a gauge-covariant Gaussian convolution with an injected 
 
 from typing import Sequence
 from math import pi
+from time import perf_counter
 import numpy as np
 
 # PyQUDA imports
@@ -25,7 +26,7 @@ except ImportError:
     raise ImportError("Could not import 'fft' from 'pyquda_utils'. Please ensure PyQUDA is installed correctly.")
 
 from pyquda_comm import getMPIRank, getCoordFromRank
-from pyquda_measurement_utils.tools import _get_xp_from_array, _asarray_on_queue
+from pyquda_measurement_utils.tools import _get_xp_from_array, _asarray_on_queue, mpi_timer_print
 
 def _exp_complex(xp, real, imag):
     if xp.__name__ == "torch":
@@ -142,8 +143,11 @@ def boosted_smearing(
     w: float,
     boost: Sequence[float],
 ):
+    t0 = perf_counter()
     if isinstance(src, LatticeFermion):
-        return _boosted_smearing_fermion(src, w=w, boost=boost)
+        out = _boosted_smearing_fermion(src, w=w, boost=boost)
+        mpi_timer_print(src.latt_info, "boosted_smearing", perf_counter() - t0, field="LatticeFermion", width=w, boost=boost)
+        return out
     if isinstance(src, LatticePropagator):
         out = LatticePropagator(src.latt_info)
         for s in range(Ns):
@@ -151,5 +155,6 @@ def boosted_smearing(
                 # pass in a single fermion
                 f_sm = _boosted_smearing_fermion(src.getFermion(s, c), w=w, boost=boost)
                 out.setFermion(f_sm, s, c)
+        mpi_timer_print(src.latt_info, "boosted_smearing", perf_counter() - t0, field="LatticePropagator", width=w, boost=boost)
         return out
     raise TypeError(f"boosted_smearing: unsupported src type: {type(src)}")

@@ -36,8 +36,8 @@ def test_soft_factor_tag_helpers_preserve_forward_backward_momenta():
     )
 
 
-def test_emt_tag_helpers_preserve_spin_and_measurement_kind():
+def test_emt_tag_helpers_preserve_measurement_kind():
     src = [1, 0, 2, 3]
 
     assert get_emt_gluon_1pt_file_tag("/data", "lat", 9, "G", src, "sm") == "/data/EMTg/lat.EMTg.9.G.x1y0z2t3.sm"
-    assert get_emt_proton_quark_3pt_file_tag("/data", "lat", 9, "Q", src, "sm", 5) == "/data/EMTproton3pt/lat.EMTproton3pt.9.Q.x1y0z2t3.sm.spin5"
+    assert get_emt_proton_quark_3pt_file_tag("/data", "lat", 9, "Q", src, "sm") == "/data/EMTproton3pt/lat.EMTproton3pt.9.Q.x1y0z2t3.sm"

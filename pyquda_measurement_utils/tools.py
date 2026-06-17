@@ -3,6 +3,8 @@
 # GPT inversion sources selection
 #
 
+import os
+
 # ---------- Backend Helpers (consistent with boosted_smearing_pyquda) ----------
 def _get_xp_from_array(a):
     """Return the base module of the array's type, e.g. cupy / numpy / dpnp / torch."""
@@ -41,6 +43,24 @@ def mpi_print(latt_info, message):
         print(message)
 
 
+def timing_enabled():
+    value = os.environ.get("PYQUDA_MEASUREMENT_TIMERS", "1").strip().lower()
+    return value not in {"0", "false", "off", "no"}
+
+
+def mpi_timer_print(latt_info, label, seconds, **fields):
+    if not timing_enabled() or latt_info.mpi_rank != 0:
+        return
+    items = [f"TIMER {label}", f"seconds={seconds:.6f}"]
+    for key, value in fields.items():
+        if isinstance(value, float):
+            value = f"{value:.6f}"
+        elif isinstance(value, (list, tuple)):
+            value = ",".join(str(v) for v in value)
+        items.append(f"{key}={value}")
+    print(" ".join(items), flush=True)
+
+
 def srcLoc_distri_eq(L, src_origin):
     source_positions = []
     i_src = 0
@@ -66,4 +86,3 @@ def srcLoc_distri_eq(L, src_origin):
         for j in range(jobs[job]["exact"])
     ]
 '''
-

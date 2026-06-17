@@ -72,8 +72,6 @@ def _iter_bw_seq_raw(dirac, prop: LatticePropagator, origin, sm_width, sm_boost,
         mom_phase = MomentumPhase(latt_info).getPhase(momentum, x0=origin)
         mom_phase = _asarray_on_queue(mom_phase, xp, prop.data)
 
-        print(f"DEBUG: mom_phase shape: {mom_phase.shape}")
-
         G5 = _asarray_on_queue(gamma.gamma(15), xp, prop.data)
         data = xp.einsum("ij, wtzyx, wtzyxkjba -> wtzyxikab", G5, mom_phase, seq_data.conj())
 

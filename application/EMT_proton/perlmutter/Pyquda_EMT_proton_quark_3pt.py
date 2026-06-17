@@ -68,15 +68,15 @@ parameters = {
     "width": width,
     "pol": pol_list,
     "t_insert": max(t_separations),
+    "t_separations": t_separations,
     "save_propagators": False,
     "flow_type": os.environ.get("EMT_PROTON_FLOW_TYPE", "wilson"),
     "flow_epsilon": float(os.environ.get("EMT_PROTON_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_PROTON_FLOW_STEPS", "1")),
 }
 
-spin = int(os.environ.get("EMT_PROTON_SPIN", "5"))
 c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
-quark_3pt_tag = get_emt_proton_quark_3pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag, spin=spin)
+quark_3pt_tag = get_emt_proton_quark_3pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
 
 init(mpi_geometry, enable_mps=True)
 
@@ -96,10 +96,14 @@ quark_emt = ProtonQuarkEMT(parameters)
 quark_emt.connected_3pt(
     gauge,
     invPara,
-    src_pos=src_pos,
-    t_separations=t_separations,
-    spin=spin,
-    tag=os.environ.get("EMT_PROTON_3PT_OUT", quark_3pt_tag),
-    c2_tag=os.environ.get("EMT_PROTON_2PT_OUT", c2_tag),
+    [
+        {
+            "src_idx": 0,
+            "src_pos": src_pos,
+            "tag": os.environ.get("EMT_PROTON_3PT_OUT", quark_3pt_tag),
+            "c2_tag": os.environ.get("EMT_PROTON_2PT_OUT", c2_tag),
+            "config": conf,
+        }
+    ],
     interpolator=args.interpolator,
 )

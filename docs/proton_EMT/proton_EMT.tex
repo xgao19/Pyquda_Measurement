@@ -1592,6 +1592,159 @@ For quick reference, here are all the sign conventions used in the proton EMT co
         strength includes an extra factor of $-i$ to match the Euclidean convention.
 \end{enumerate}
 
+
+% ---------------------------------------------------------------------------
+\section{Validation and Regression Evidence}
+% ---------------------------------------------------------------------------
+
+This section records the implementation-level validation that has been performed
+for the connected proton EMT measurement.  These tests are not a replacement for
+physics production checks such as continuum normalization, renormalization,
+operator mixing, disconnected contributions, or final GFF extraction.  They are
+designed to catch common implementation errors in the connected sequential-source
+path: gauge covariance violations, wrong left-derivative placement, phase
+convention mistakes, missing up-quark Wick contractions, and accidental changes
+to the raw-only sequential builder.
+
+\subsection{Validated Test Setup}
+
+The most complete validation suite was run on Aurora with the S8T32 test gauge
+\begin{verbatim}
+software_gradientflow/Pyquda_Measurement/test_gauge/
+  S8T32_wilson_b6.cg.1e-08.0
+\end{verbatim}
+using the PyQUDA develop environment
+\begin{verbatim}
+software_gradientflow/activate-pyquda-develop.sh
+\end{verbatim}
+with \texttt{backend="dpnp"}, \texttt{backend\_target="sycl"}, two MPI ranks, and
+\texttt{mpi\_geometry=1.1.1.2}.  Parallel HDF5 was verified with
+\texttt{h5py.get\_config().mpi == True}.  Quark source/sink smearing was disabled
+for the gauge-covariance tests so that the tests isolate the EMT/sequential
+contractions rather than the non-gauge-covariant boosted-smearing path:
+\begin{verbatim}
+EMT_PROTON_DISABLE_SMEARING=1
+EMT_PROTON_GAUSS_SMEAR=0
+EMT_PROTON_MG_BLOCK=none
+\end{verbatim}
+HYP gauge preprocessing was kept enabled, matching the normal workflow.
+
+The suite output is archived under
+\begin{verbatim}
+/lus/flare/projects/StructNGB/xgao/run/test_gauge/EMT_proton/
+  validation_suite_20260603_141831
+\end{verbatim}
+with logs, HDF5 outputs, temporary diagnostic drivers, and JSON summaries.  A
+companion Markdown summary is kept in
+\texttt{docs/proton\_EMT/validation\_summary.md}.
+
+\subsection{Raw-Only Sequential Builder Regression}
+
+The proton EMT path uses a raw-only sequential builder:
+\texttt{create\_bw\_seq\_raw\_pyquda}.  The finalized proton sequential object is
+then produced from the raw sequential propagator by the same
+$\gamma_{5}$-hermiticity finalization used by the original qTMD-style builder.
+The regression test compared
+\begin{equation}
+  \texttt{create\_bw\_seq\_pyquda(...)}
+  \quad\text{against}\quad
+  \texttt{\_final\_seq\_from\_raw\_prop(create\_bw\_seq\_raw\_pyquda(...))}.
+\end{equation}
+The measured difference was
+\begin{equation}
+  \max |\Delta| = 0,\qquad
+  \frac{\max|\Delta|}{\max|C|} = 0,
+\end{equation}
+confirming that the memory-saving raw-only path does not change the finalized
+sequential object.
+
+\subsection{Gauge Covariance of the Connected Three-Point Function}
+
+Gauge covariance was tested by comparing observables from the original gauge field,
+a constant global SU(3) transformed field, and a deterministic local SU(3)
+transformed field.  The tested gauge-invariant outputs were the two-point function
+\texttt{C2}, the scalar/proton sequential contraction \texttt{C3\_chi}, and the EMT
+insertion \texttt{C3\_Tmunu}.
+
+For \texttt{FLOW\_STEPS=0}, \texttt{QMAX=0}, and \texttt{T\_SEPS=2}, the local
+transform relative differences were
+\begin{align}
+  \delta_{\rm rel}(C_{2}) &= 1.1443\times 10^{-10},\\
+  \delta_{\rm rel}(C_{3,\chi}) &= 5.0029\times 10^{-11},\\
+  \delta_{\rm rel}(C_{3,T_{\mu\nu}}) &= 9.2440\times 10^{-12}.
+\end{align}
+The EMT tensor was explicitly symmetric to roundoff in the stored output:
+\begin{equation}
+  \max |T_{\mu\nu} - T_{\nu\mu}| = 0.
+\end{equation}
+This is the key regression for the left-acting derivative fix: before applying the
+left derivative to the raw sequential propagator, the point-source local gauge
+transform test isolated an $\mathcal{O}(1)$ failure in \texttt{C3\_Tmunu}; after
+the fix, the difference is at solver/reduction roundoff level.
+
+\subsection{Gradient-Flow Covariance}
+
+The same baseline/global/local gauge-transform test was repeated with
+\texttt{FLOW\_STEPS=1}.  The expected output shapes were observed:
+\begin{align}
+  \texttt{C3\_chi} &: [2,1,1,2,1,32],\\
+  \texttt{C3\_Tmunu} &: [2,1,1,2,1,4,4,32].
+\end{align}
+The flow step changed the correlators nontrivially:
+\begin{align}
+  \max|C_{3,\chi}^{(1)} - C_{3,\chi}^{(0)}|
+    &= 3.7547\times 10^{-5},\\
+  \max|C_{3,T_{\mu\nu}}^{(1)} - C_{3,T_{\mu\nu}}^{(0)}|
+    &= 7.5175\times 10^{-5}.
+\end{align}
+Across the full flow-step axis, the local transform relative difference for
+\texttt{C3\_Tmunu} remained
+\begin{equation}
+  \delta_{\rm rel}(C_{3,T_{\mu\nu}}) = 9.2440\times 10^{-12}.
+\end{equation}
+
+\subsection{Momentum Phase Checks}
+
+The \texttt{QMAX=1} smoke test produced 27 unique momenta with temporal component
+zero, covering the full cube $[-1,0,1]^{3}$.  The $q=0$ slice of the \texttt{QMAX=1}
+output matched the independent \texttt{QMAX=0} baseline exactly:
+\begin{equation}
+  \max |\Delta C_{3,\chi}(q=0)| = 0,\qquad
+  \max |\Delta C_{3,T_{\mu\nu}}(q=0)| = 0.
+\end{equation}
+Additional \texttt{MomentumPhase} checks verified
+\begin{equation}
+  \Phi_{-q}(x) = \Phi_{q}(x)^{*},
+\end{equation}
+the corresponding conjugation relation for a real deterministic test field, and
+self-consistency of the shifted-delta phase ratio; all three checks had zero
+measured max difference in the test.
+
+\subsection{Up-Quark Insertion Term Sanity}
+
+The up insertion source was decomposed into the four Wick-contraction terms
+\texttt{R1}, \texttt{R2}, \texttt{R3}, and \texttt{R4}.  The optimized source in
+the production code was checked against the explicit decomposition:
+\begin{equation}
+  D_{\rm up} = -(R_{1}+R_{2}+R_{3}+R_{4}),
+\end{equation}
+with zero measured source-level difference.  After time slicing, momentum
+projection, identity smearing, and linear sequential inversion, the raw full U
+sequential propagator agreed with the sum of the four term-by-term raw sequential
+propagators with
+\begin{equation}
+  \max|\Delta| = 1.1375\times 10^{-15},\qquad
+  \delta_{\rm rel} = 6.4103\times 10^{-12}.
+\end{equation}
+The U and D raw sequential objects were finite, nonzero, and not accidentally
+identical:
+\begin{equation}
+  \delta_{\rm rel}(U_{\rm raw},D_{\rm raw}) = 0.4890.
+\end{equation}
+This confirms that the two identical-up Wick-contraction channels are present in
+the implemented U insertion and that the optimized source respects the explicit
+four-term algebra.
+
 % ---------------------------------------------------------------------------
 
 \end{document}
