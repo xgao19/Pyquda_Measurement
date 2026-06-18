@@ -184,8 +184,9 @@ def get_emt_proton_2pt_file_tag(data_dir, lat, cfg, ama, src, sm):
 
 
 # Build the proton quark EMT three-point output tag.
-def get_emt_proton_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm):
-    return str(Path(data_dir) / "EMTproton3pt" / (str(lat) + ".EMTproton3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+def get_emt_proton_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, pf, tsep):
+    kinematics = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{tsep}"
+    return str(Path(data_dir) / "EMTproton3pt" / (str(lat) + ".EMTproton3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm) + "." + kinematics))
 
 
 # Build the flowed-quark ringed-normalization output tag.

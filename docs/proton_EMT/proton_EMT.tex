@@ -1310,6 +1310,12 @@ The EMT output files are organized in subdirectories:
   \item \texttt{EMTc/} -- stochastic quark one-point loops (shared with meson);
   \item \texttt{EMTg/} -- flowed gluon one-point functions (shared with meson).
 \end{itemize}
+Connected proton three-point file names append the sink kinematics as
+\texttt{PX<px>PY<py>PZ<pz>dt<tsep>}.  For example, a zero-momentum sink with
+source--sink separation nine carries the suffix
+\texttt{PX0PY0PZ0dt9.h5}.  This prevents runs with different final momenta or
+source--sink separations from overwriting one another and follows the nucleon
+TMD output convention.
 
 % ---------------------------------------------------------------------------
 \section{Disconnected Analysis}

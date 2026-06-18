@@ -76,7 +76,9 @@ parameters = {
 }
 
 c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
-quark_3pt_tag = get_emt_proton_quark_3pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
+quark_3pt_tag = get_emt_proton_quark_3pt_file_tag(
+    data_dir, lat_tag, conf, 0, src_pos, sm_tag, pf, max(t_separations)
+)
 
 init(
     mpi_geometry,

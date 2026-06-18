@@ -234,6 +234,8 @@ validation runs and larger production-style tests.
 - qTMD-like HDF5 file names are built with tag helpers such as
   `get_qTMD_file_tag(...)`.
 - EMT file names include the standard `lat / cfg / ama / src / sm` tags.
+- Proton connected 3pt names additionally encode the sink kinematics as
+  `PX<px>PY<py>PZ<pz>dt<tsep>`, matching the nucleon TMD convention.
 
 ## EMT Notes
 

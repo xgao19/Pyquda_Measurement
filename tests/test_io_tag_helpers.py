@@ -41,5 +41,7 @@ def test_emt_tag_helpers_preserve_measurement_kind():
     src = [1, 0, 2, 3]
 
     assert get_emt_gluon_1pt_file_tag("/data", "lat", 9, "G", src, "sm") == "/data/EMTg/lat.EMTg.9.G.x1y0z2t3.sm"
-    assert get_emt_proton_quark_3pt_file_tag("/data", "lat", 9, "Q", src, "sm") == "/data/EMTproton3pt/lat.EMTproton3pt.9.Q.x1y0z2t3.sm"
+    assert get_emt_proton_quark_3pt_file_tag(
+        "/data", "lat", 9, "Q", src, "sm", [1, -2, 3, 0], 9
+    ) == "/data/EMTproton3pt/lat.EMTproton3pt.9.Q.x1y0z2t3.sm.PX1PY-2PZ3dt9"
     assert get_flowed_quark_ringed_norm_file_tag("/data", "lat", 9, "R", src, "sm") == "/data/FlowedQuarkRinged/lat.FlowedQuarkRinged.9.R.x1y0z2t3.sm"

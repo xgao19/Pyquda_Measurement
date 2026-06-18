@@ -161,3 +161,14 @@ cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Added Perlmutter helper scripts under:
   `systems/perlmutter`.
 - Validated gradient-flow smoke test on `login32`.
+
+## 2026-06-18: Encode proton EMT 3pt sink kinematics in file names
+
+- Changed `get_emt_proton_quark_3pt_file_tag(...)` to require `pf` and `tsep`.
+- Appended `PX<px>PY<py>PZ<pz>dt<tsep>` to connected proton EMT 3pt tags,
+  matching the established nucleon TMD naming convention.
+- Updated the Aurora and Perlmutter proton EMT application callers.
+- Kept proton 2pt file names unchanged because they are independent of
+  source-sink separation.
+- Updated the output-convention documentation and tag-helper regression test.
+- Verified Python compilation and all three tag-helper assertions.
