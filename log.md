@@ -164,11 +164,17 @@ cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
 ## 2026-06-18: Encode proton EMT 3pt sink kinematics in file names
 
-- Changed `get_emt_proton_quark_3pt_file_tag(...)` to require `pf` and `tsep`.
+- Changed `get_emt_proton_quark_3pt_file_tag(...)` to require `pf` and one
+  `t_sep`.
 - Appended `PX<px>PY<py>PZ<pz>dt<tsep>` to connected proton EMT 3pt tags,
   matching the established nucleon TMD naming convention.
+- Wrote multiple source-sink separations as separate HDF5 files while keeping a
+  length-one `tsep` axis in each file.
+- Added the single-value `t_separations` HDF5 attribute so it explicitly labels
+  the corresponding `C3_chi` and `C3_Tmunu` axis.
 - Updated the Aurora and Perlmutter proton EMT application callers.
 - Kept proton 2pt file names unchanged because they are independent of
   source-sink separation.
 - Updated the output-convention documentation and tag-helper regression test.
-- Verified Python compilation and all three tag-helper assertions.
+- Verified Python compilation, all three tag-helper tests, and HDF5 metadata
+  round-trip for a length-one `tsep` axis.

@@ -76,9 +76,15 @@ parameters = {
 }
 
 c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
-quark_3pt_tag = get_emt_proton_quark_3pt_file_tag(
-    data_dir, lat_tag, conf, 0, src_pos, sm_tag, pf, max(t_separations)
-)
+quark_3pt_tags = {
+    t_sep: get_emt_proton_quark_3pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag, pf, t_sep)
+    for t_sep in t_separations
+}
+quark_3pt_out = os.environ.get("EMT_PROTON_3PT_OUT")
+if quark_3pt_out is not None:
+    if len(t_separations) != 1:
+        raise ValueError("EMT_PROTON_3PT_OUT can only override a single t_sep output")
+    quark_3pt_tags[t_separations[0]] = quark_3pt_out
 
 init(mpi_geometry, enable_mps=True)
 
@@ -102,7 +108,7 @@ quark_emt.connected_3pt(
         {
             "src_idx": 0,
             "src_pos": src_pos,
-            "tag": os.environ.get("EMT_PROTON_3PT_OUT", quark_3pt_tag),
+            "tags": quark_3pt_tags,
             "c2_tag": os.environ.get("EMT_PROTON_2PT_OUT", c2_tag),
             "config": conf,
         }

@@ -163,7 +163,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         super().__init__(parameters)
         self.pol_list = parameters["pol"]
         self.t_insert = parameters["t_insert"]
-        self.t_separations = parameters.get("t_separations", [self.t_insert])
+        self.t_separations = [int(t_sep) for t_sep in parameters.get("t_separations", [self.t_insert])]
         self.save_propagators = parameters.get("save_propagators", False)
         self.boost_in = parameters.get("boost_in", self.pos_boost)
         self.boost_out = parameters.get("boost_out", self.pos_boost)
@@ -326,7 +326,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         latt_info = U.latt_info
         Nt = latt_info.global_size[3]
         src_pos = source_job["src_pos"]
-        tag = source_job["tag"]
+        tags = source_job["tags"]
         c2_tag = source_job.get("c2_tag")
         t0 = src_pos[3]
         t_separations = self.t_separations
@@ -352,12 +352,11 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
 
             Nflavor = 2
             Npol = len(self.pol_list)
-            Nts = len(t_separations)
             Nq = len(self.qlist)
-            C3_chi = np.zeros((Nflavor, Npol, Nts, Nsteps + 1, Nq, Nt), dtype=np.complex128)
-            C3_Tmunu = np.zeros((Nflavor, Npol, Nts, Nsteps + 1, Nq, 4, 4, Nt), dtype=np.complex128)
 
-            for n_ts, t_sep in enumerate(t_separations):
+            for t_sep in t_separations:
+                C3_chi = np.zeros((Nflavor, Npol, 1, Nsteps + 1, Nq, Nt), dtype=np.complex128)
+                C3_Tmunu = np.zeros((Nflavor, Npol, 1, Nsteps + 1, Nq, 4, 4, Nt), dtype=np.complex128)
                 for flavor_idx, flavor in enumerate([1, 2]):
                     flavor_name = "U" if flavor == 1 else "D"
                     mpi_print(latt_info, f"create proton sequential source flavor={flavor_name} t_sep={t_sep}")
@@ -388,7 +387,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                                 f"proton EMT contraction flavor={flavor_name} pol={pol} t_sep={t_sep} step={step}",
                             )
                             chi_t0 = perf_counter()
-                            C3_chi[flavor_idx, pol_idx, n_ts, step] += self.get_C3_chi_proton(
+                            C3_chi[flavor_idx, pol_idx, 0, step] += self.get_C3_chi_proton(
                                 latt_info,
                                 prop_fw_flow,
                                 raw_seq_prop_flow,
@@ -397,7 +396,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                             )
                             chi_seconds = perf_counter() - chi_t0
                             tmunu_t0 = perf_counter()
-                            C3_Tmunu[flavor_idx, pol_idx, n_ts, step] += self.get_C3_Tmunu_symmetrized_proton(
+                            C3_Tmunu[flavor_idx, pol_idx, 0, step] += self.get_C3_Tmunu_symmetrized_proton(
                                 U_f,
                                 prop_fw_flow,
                                 raw_seq_prop_flow,
@@ -440,38 +439,42 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                     del raw_seq_bw
                     raw_seq_bw = None
 
-            attrs = {
-                "measurement": "proton_quark_3pt",
-                "flow_type": self.flow_type,
-                "flow_epsilon": self.flow_epsilon,
-                "flow_steps": self.flow_steps,
-                "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
-                "src_t": t0,
-                "interpolator": interpolator,
-                "flavor_axis": "0=U,1=D",
-                "polarization_axis": ",".join(self.pol_list),
-                "n_qext": Nq,
-                "connected_only": True,
-                "operator_normalization": "unringed_flowed_bilinear",
-                "ringed_normalization_applied": False,
-                "ringed_factor_source": "analysis_from_quark_1pt_kinetic",
-                "quark_flow_scope": "inserted_operator_quark_legs_only",
-                "nucleon_interpolator_flowed": False,
-                "derivative_convention": "symmetric_covdev_0p5_Dplus_minus_Dminus",
-                "left_derivative_convention": "raw_seq_gamma5_hermiticity",
-                "c2_selected_momentum_index": zero_mom_idx,
-                "c2_selected_momentum": self.pilist[zero_mom_idx],
-            }
-            if latt_info.mpi_rank == 0:
-                save_emt_quark_3pt_hdf5(
-                    tag,
-                    C2_selected,
-                    C3_chi,
-                    C3_Tmunu,
-                    momentum_transfer_list=self.qlist,
-                    attrs=attrs,
-                )
-            return {"src_pos": list(src_pos), "tag": tag, "c2_tag": c2_tag}
+                attrs = {
+                    "measurement": "proton_quark_3pt",
+                    "flow_type": self.flow_type,
+                    "flow_epsilon": self.flow_epsilon,
+                    "flow_steps": self.flow_steps,
+                    "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
+                    "t_separations": np.asarray([t_sep], dtype=np.int32),
+                    "src_t": t0,
+                    "interpolator": interpolator,
+                    "flavor_axis": "0=U,1=D",
+                    "polarization_axis": ",".join(self.pol_list),
+                    "n_qext": Nq,
+                    "connected_only": True,
+                    "operator_normalization": "unringed_flowed_bilinear",
+                    "ringed_normalization_applied": False,
+                    "ringed_factor_source": "analysis_from_quark_1pt_kinetic",
+                    "quark_flow_scope": "inserted_operator_quark_legs_only",
+                    "nucleon_interpolator_flowed": False,
+                    "derivative_convention": "symmetric_covdev_0p5_Dplus_minus_Dminus",
+                    "left_derivative_convention": "raw_seq_gamma5_hermiticity",
+                    "c2_selected_momentum_index": zero_mom_idx,
+                    "c2_selected_momentum": self.pilist[zero_mom_idx],
+                }
+                if latt_info.mpi_rank == 0:
+                    save_emt_quark_3pt_hdf5(
+                        tags[t_sep],
+                        C2_selected,
+                        C3_chi,
+                        C3_Tmunu,
+                        momentum_transfer_list=self.qlist,
+                        attrs=attrs,
+                    )
+                C3_chi = None
+                C3_Tmunu = None
+                self._cleanup_source_objects()
+            return {"src_pos": list(src_pos), "tags": tags, "c2_tag": c2_tag}
         finally:
             self._cleanup_source_objects(
                 U_f,

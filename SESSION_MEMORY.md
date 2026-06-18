@@ -442,13 +442,17 @@ commit, and update `log.md` with the intended commit title and summary first.
 
 ## Proton EMT Connected 3pt Output Naming
 
-- `get_emt_proton_quark_3pt_file_tag(...)` requires final momentum `pf` and
-  source-sink separation `tsep`.
+- `get_emt_proton_quark_3pt_file_tag(...)` requires final momentum `pf` and one
+  source-sink separation `t_sep`.
 - Connected proton EMT 3pt files append the nucleon TMD-style kinematic tag:
   `PX<px>PY<py>PZ<pz>dt<tsep>`.
 - Example production suffix: `PX0PY0PZ0dt9.h5`.
+- Multiple separations are written as separate HDF5 files, for example
+  `PX0PY0PZ0dt6.h5`, `PX0PY0PZ0dt9.h5`, and `PX0PY0PZ0dt12.h5`.
+- Each HDF5 file keeps the existing length-one `tsep` axis and stores
+  `t_separations=[t_sep]`.
 - The proton 2pt tag is unchanged because the 2pt output does not depend on
   `tsep`.
 - Active Aurora and Perlmutter proton EMT application callers were updated.
-- Historical validation scripts outside the repository may still use the old
-  helper signature and should be treated as archived snapshots.
+- Historical validation scripts outside the active workflow may still use the
+  old helper signature and should be treated as archived snapshots.

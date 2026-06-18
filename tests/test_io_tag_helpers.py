@@ -1,3 +1,5 @@
+import pytest
+
 from pyquda_measurement_utils.io_corr import (
     get_c2pt_file_tag,
     get_disconnected_qTMD_1pt_file_tag,
@@ -44,4 +46,9 @@ def test_emt_tag_helpers_preserve_measurement_kind():
     assert get_emt_proton_quark_3pt_file_tag(
         "/data", "lat", 9, "Q", src, "sm", [1, -2, 3, 0], 9
     ) == "/data/EMTproton3pt/lat.EMTproton3pt.9.Q.x1y0z2t3.sm.PX1PY-2PZ3dt9"
+    assert get_emt_proton_quark_3pt_file_tag(
+        "/data", "lat", 9, "Q", src, "sm", [1, -2, 3, 0], [9]
+    ) == "/data/EMTproton3pt/lat.EMTproton3pt.9.Q.x1y0z2t3.sm.PX1PY-2PZ3dt9"
+    with pytest.raises(ValueError):
+        get_emt_proton_quark_3pt_file_tag("/data", "lat", 9, "Q", src, "sm", [0, 0, 0, 0], [6, 9, 12])
     assert get_flowed_quark_ringed_norm_file_tag("/data", "lat", 9, "R", src, "sm") == "/data/FlowedQuarkRinged/lat.FlowedQuarkRinged.9.R.x1y0z2t3.sm"

@@ -184,8 +184,13 @@ def get_emt_proton_2pt_file_tag(data_dir, lat, cfg, ama, src, sm):
 
 
 # Build the proton quark EMT three-point output tag.
-def get_emt_proton_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, pf, tsep):
-    kinematics = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{tsep}"
+def get_emt_proton_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, pf, t_sep):
+    if isinstance(t_sep, (list, tuple, np.ndarray)):
+        if len(t_sep) != 1:
+            raise ValueError("proton EMT 3pt tags encode exactly one t_sep")
+        t_sep = t_sep[0]
+    tsep_tag = str(int(t_sep))
+    kinematics = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{tsep_tag}"
     return str(Path(data_dir) / "EMTproton3pt" / (str(lat) + ".EMTproton3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm) + "." + kinematics))
 
 

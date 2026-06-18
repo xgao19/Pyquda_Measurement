@@ -236,6 +236,7 @@ validation runs and larger production-style tests.
 - EMT file names include the standard `lat / cfg / ama / src / sm` tags.
 - Proton connected 3pt names additionally encode the sink kinematics as
   `PX<px>PY<py>PZ<pz>dt<tsep>`, matching the nucleon TMD convention.
+  Multiple separations are written as separate files.
 
 ## EMT Notes
 
