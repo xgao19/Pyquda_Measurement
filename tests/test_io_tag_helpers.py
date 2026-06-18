@@ -3,6 +3,7 @@ from pyquda_measurement_utils.io_corr import (
     get_disconnected_qTMD_1pt_file_tag,
     get_emt_gluon_1pt_file_tag,
     get_emt_proton_quark_3pt_file_tag,
+    get_flowed_quark_ringed_norm_file_tag,
     get_pion_EMFF_file_tag,
     get_pion_soft_factor_file_tag,
     get_pion_soft_factor_prop_file_tag,
@@ -41,3 +42,4 @@ def test_emt_tag_helpers_preserve_measurement_kind():
 
     assert get_emt_gluon_1pt_file_tag("/data", "lat", 9, "G", src, "sm") == "/data/EMTg/lat.EMTg.9.G.x1y0z2t3.sm"
     assert get_emt_proton_quark_3pt_file_tag("/data", "lat", 9, "Q", src, "sm") == "/data/EMTproton3pt/lat.EMTproton3pt.9.Q.x1y0z2t3.sm"
+    assert get_flowed_quark_ringed_norm_file_tag("/data", "lat", 9, "R", src, "sm") == "/data/FlowedQuarkRinged/lat.FlowedQuarkRinged.9.R.x1y0z2t3.sm"

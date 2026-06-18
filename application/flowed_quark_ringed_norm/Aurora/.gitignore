@@ -1,0 +1,8 @@
+log/
+data/
+data_smoke/
+benchmark/
+.cache/
+.cache*/
+profile_*
+*.prof

@@ -267,6 +267,44 @@ components:
 In HDF5 this is obtained from \code{avg/Tmunu/T11}, \code{T22}, \code{T33},
 and \code{T44} at the \(q=0\) momentum index.
 
+The HDF5 file intentionally stores this as an unringed building block, not as an
+already-normalized operator.  Future files therefore include convention
+attributes such as
+\begin{verbatim}
+operator_normalization = unringed_flowed_bilinear
+ringed_normalization_applied = False
+ringed_kinetic_observable = K_code=-2*sum_mu avg/Tmunu/Tmumu[q0,flow,tau]
+ringed_factor_application = analysis_stage
+flavor_convention = single_flavor_trace_for_this_dirac_operator
+\end{verbatim}
+These attributes are metadata only; they do not alter the saved datasets.
+
+The analysis-stage kinetic expectation value should be formed as
+\begin{equation}
+  K_{\mathrm{code}}(\Tf)
+  =
+  -2
+  \left\langle
+    \sum_{\mu=1}^{4} L^q_{\mu\mu,\mathrm{avg}}(q=0,t;\Tf)
+  \right\rangle_{t,\mathrm{cfg}},
+  \label{eq:ringed_k_code}
+\end{equation}
+where \(t\) denotes the retained Euclidean time slice of the one-point loop.
+Then, for a single-flavor trace in fundamental \(SU(3)\),
+\begin{equation}
+  Z_{\mathrm{ring}}^{(f)}(\Tf)
+  =
+  \frac{-2N_c}
+       {(4\pi)^2 \Tf^2 K_{\mathrm{code}}^{(f)}(\Tf)}.
+  \label{eq:ringed_z_single_flavor}
+\end{equation}
+If instead the kinetic expectation value has already been summed or averaged
+over \(N_f\) degenerate flavors, the numerator and denominator must use the same
+flavor convention.  A quark EMT bilinear made from ringed fields receives one
+factor \(Z_{\mathrm{ring}}\), because the square roots from \(\chi\) and
+\(\bar\chi\) multiply to this single bilinear factor.  The \(\Tf=0\) output step
+is kept as an unflowed diagnostic and must be excluded from Eq.~\eqref{eq:ringed_z_single_flavor}.
+
 \subsection{Gradient-Flow Schedule for Quarks}
 
 The quark workflow measures before flowing.  Therefore step \(0\) is the
@@ -430,6 +468,10 @@ Attribute & Meaning \\
 & Stochastic source counts. \\
 \code{noise\_scheme}, \code{hp\_num\_vectors}, \code{hp\_ordering}
 & Source-generation scheme. \\
+\code{operator\_normalization}, \code{ringed\_normalization\_applied}
+& Whether the saved quark loop has already been ringed. \\
+\code{ringed\_kinetic\_observable}, \code{ringed\_factor\_application}
+& How to reconstruct and where to apply the ringed factor. \\
 \bottomrule
 \end{tabular}
 \end{center}

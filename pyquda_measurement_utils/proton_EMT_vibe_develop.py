@@ -116,6 +116,7 @@ from pyquda_utils import core, gamma, source, phase
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedGluon1pt,
     EMTDisconnectedQuark1pt,
+    _flow_times,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
@@ -444,12 +445,19 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 "flow_type": self.flow_type,
                 "flow_epsilon": self.flow_epsilon,
                 "flow_steps": self.flow_steps,
+                "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
                 "src_t": t0,
                 "interpolator": interpolator,
                 "flavor_axis": "0=U,1=D",
                 "polarization_axis": ",".join(self.pol_list),
                 "n_qext": Nq,
                 "connected_only": True,
+                "operator_normalization": "unringed_flowed_bilinear",
+                "ringed_normalization_applied": False,
+                "ringed_factor_source": "analysis_from_quark_1pt_kinetic",
+                "quark_flow_scope": "inserted_operator_quark_legs_only",
+                "nucleon_interpolator_flowed": False,
+                "derivative_convention": "symmetric_covdev_0p5_Dplus_minus_Dminus",
                 "left_derivative_convention": "raw_seq_gamma5_hermiticity",
                 "c2_selected_momentum_index": zero_mom_idx,
                 "c2_selected_momentum": self.pilist[zero_mom_idx],

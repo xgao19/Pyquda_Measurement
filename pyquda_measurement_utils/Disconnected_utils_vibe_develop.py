@@ -8,6 +8,7 @@ from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array
 VALID_NOISE_SCHEMES = {"zn", "hierarchical_probing"}
 VALID_HP_ORDERINGS = {
     "global_xyzt_gray_projected_to_evenodd",
+    "interleaved_xyzt_binary_projected_to_evenodd",
     "spatial_xyz_then_t_gray_projected_to_evenodd",
 }
 
@@ -93,7 +94,12 @@ def make_zn_noise_fermion(latt_info, n: int = 2):
     xi = LatticeFermion(latt_info)
     xp = _get_xp_from_array(xi.data)
     r = xp.random.randint(0, n, size=xi.data.shape)
-    xi.data[:] = xp.exp(2j * xp.pi * r / n).astype(xi.data.dtype)
+    phases = xp.exp(2j * xp.pi * r / n).astype(xi.data.dtype)
+    if xp.__name__ == "dpnp" and hasattr(xi.data, "sycl_queue"):
+        import dpnp
+
+        phases = dpnp.asarray(dpnp.asnumpy(phases), sycl_queue=xi.data.sycl_queue)
+    xi.data[:] = phases
     return xi
 
 
@@ -101,11 +107,21 @@ def hierarchical_gray_index(latt_info, hp_ordering: str):
     """Return the Gray-code site index for a hierarchical probing ordering."""
     coords = latt_info.coordinate()
     x, y, z, t = [np.asarray(coords[mu], dtype=np.int64) for mu in range(4)]
-    Gx, Gy, Gz, _Gt = latt_info.global_size
+    Gx, Gy, Gz, Gt = latt_info.global_size
 
     if hp_ordering == "global_xyzt_gray_projected_to_evenodd":
         site_id = x + Gx * (y + Gy * (z + Gz * t))
         return site_id ^ (site_id >> 1)
+
+    if hp_ordering == "interleaved_xyzt_binary_projected_to_evenodd":
+        site_id = np.zeros_like(x, dtype=np.int64)
+        out_bit = 0
+        for bit in range(max(ceil_log2(Gx), ceil_log2(Gy), ceil_log2(Gz), ceil_log2(Gt))):
+            for coord, extent in ((x, Gx), (y, Gy), (z, Gz), (t, Gt)):
+                if bit < ceil_log2(extent):
+                    site_id |= ((coord >> bit) & 1) << out_bit
+                    out_bit += 1
+        return site_id
 
     if hp_ordering == "spatial_xyz_then_t_gray_projected_to_evenodd":
         spatial_id = x + Gx * (y + Gy * z)

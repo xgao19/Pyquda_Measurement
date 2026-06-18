@@ -282,6 +282,7 @@ from pyquda_measurement_utils.io_corr import (
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedGluon1pt,
     EMTDisconnectedQuark1pt,
+    _flow_times,
     my_gammas,
 )
 from pyquda_measurement_utils.tools import mpi_print
@@ -615,6 +616,7 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             "flow_type": self.flow_type,
             "flow_epsilon": self.flow_epsilon,
             "flow_steps": self.flow_steps,
+            "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
             "n_t_separations": N_ts,
             "src_t": t0,
             "src_interpolator": src_interpolator,
@@ -622,6 +624,12 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             "contraction_convention": "B",
             "meson_sign": 1,
             "n_qext": Nq,
+            "operator_normalization": "unringed_flowed_bilinear",
+            "ringed_normalization_applied": False,
+            "ringed_factor_source": "analysis_from_quark_1pt_kinetic",
+            "quark_flow_scope": "inserted_operator_quark_legs_only",
+            "hadron_interpolator_flowed": False,
+            "derivative_convention": "symmetric_covdev_0p5_Dplus_minus_Dminus",
             "c2_selected_momentum_index": zero_mom_idx,
             "c2_selected_momentum": self.pilist[zero_mom_idx],
         }

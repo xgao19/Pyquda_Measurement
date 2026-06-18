@@ -234,6 +234,14 @@ class EMTDisconnectedQuark1pt:
             "p_2pt": np.asarray(self.pilist, dtype=np.int32),
             "volume_norm": Ns3,
             "upper_triangle_only": True,
+            "operator_normalization": "unringed_flowed_bilinear",
+            "ringed_normalization_applied": False,
+            "ringed_kinetic_observable": "K_code=-2*sum_mu avg/Tmunu/Tmumu[q0,flow,tau]",
+            "ringed_kinetic_source": "avg/Tmunu diagonal q=0",
+            "ringed_kinetic_volume_average": "spatial_volume_normalized_timeslice",
+            "ringed_factor_application": "analysis_stage",
+            "flavor_convention": "single_flavor_trace_for_this_dirac_operator",
+            "derivative_convention": "Tmunu[nu,mu]=-0.5*xi_dag*gamma_nu*(Dplus_mu-Dminus_mu)*eta; symmetrized",
             "mass": mass,
             "csw": csw,
             "tol": tol,
@@ -468,6 +476,9 @@ class EMTDisconnectedGluon1pt:
             "p_2pt": np.asarray(self.pilist, dtype=np.int32),
             "volume_norm": Ns3,
             "upper_triangle_only": True,
+            "operator_normalization": "flowed_gluon_bilinear",
+            "ringed_normalization_applied": False,
+            "ringed_factor_source": "not_applicable_to_gluon",
         }
         save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=attrs)
 

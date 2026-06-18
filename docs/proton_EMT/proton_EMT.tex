@@ -40,6 +40,7 @@
 \newcommand{\pfinal}{p_{f}}
 \newcommand{\pini}{p_{i}}
 \newcommand{\momtrans}{q}
+\newcommand{\code}[1]{\texttt{#1}}
 
 % ---------------------------------------------------------------------------
 \title{\textbf{Proton Energy-Momentum Tensor Measurement}\\[4pt]
@@ -1271,7 +1272,19 @@ The dimensions are:
 
 The attributes stored in the HDF5 file include the measurement type, spin,
 flow parameters, source time, interpolator, flavor/polarization axis labels,
-and the selected two-point momentum used for normalization.
+and the selected two-point momentum used for normalization.  Future files also
+record non-destructive convention metadata:
+\begin{itemize}
+  \item \code{operator\_normalization = unringed\_flowed\_bilinear};
+  \item \code{ringed\_normalization\_applied = False};
+  \item \code{flow\_times = flow\_epsilon * [0,\ldots,Nsteps]};
+  \item \code{quark\_flow\_scope = inserted\_operator\_quark\_legs\_only};
+  \item \code{nucleon\_interpolator\_flowed = False};
+  \item \code{ringed\_factor\_source = analysis\_from\_quark\_1pt\_kinetic}.
+\end{itemize}
+These attributes do not change any dataset or contraction.  They only make
+explicit that \code{C3\_Tmunu} is an unringed flowed bilinear and must not be
+treated as already ringed in downstream analysis.
 
 \subsection{HDF5 Output for Disconnected Pieces}
 
@@ -1372,8 +1385,30 @@ disconnected contribution to the proton matrix element is
 
 \subsection{Ringed-Fermion Normalization}
 
-The renormalization of the flowed quark EMT requires the ringed-fermion kinetic
-normalization.  At zero momentum, the diagonal quark EMT trace provides
+The connected and disconnected quark EMT outputs in this repository are
+\emph{unringed} flowed bilinears.  They do not contain the ringed-fermion
+normalization factor.  The ringed factor should be computed once in the analysis
+stage from the quark one-point kinetic expectation value, then applied
+consistently to both connected and disconnected quark EMT observables at the
+same flow time.
+
+The conventional ringed variables of Makino--Suzuki are normalized by
+\begin{equation}
+  Z_{\chi}^{\mathrm{ring}}(t)
+  =
+  \frac{-2\,\dim(R)\,N_f}
+       {(4\pi)^2 t^2\,
+        \left\langle
+        \bar{\chi}(t,x)\overleftrightarrow{\not{D}}\chi(t,x)
+        \right\rangle},
+\end{equation}
+where \(\dim(R)=N_c=3\) for fundamental QCD and \(N_f\) is the flavor
+normalization convention used in the kinetic expectation value.  Since a quark
+EMT bilinear contains one \(\chi\) and one \(\bar\chi\), the bilinear receives
+one factor \(Z_{\chi}^{\mathrm{ring}}(t)\), not its square.
+
+At zero momentum, the diagonal quark EMT trace provides the kinetic building
+block:
 \begin{equation}
   \sum_{\mu} L_{q,\,\mu\mu}(0,t)
   = -\frac{1}{2}\sum_{\mathbf{x}}
@@ -1383,9 +1418,27 @@ normalization.  At zero momentum, the diagonal quark EMT trace provides
       \chi(t,\mathbf{x})
     \big\rangle,
 \end{equation}
-up to the lattice derivative convention.  This quantity is accessible from the
-stochastic quark 1pt HDF5 output as the sum of the diagonal components
-\texttt{avg/Tmunu/T11} through \texttt{T44} at the $\momtrans = 0$ momentum index.
+up to the lattice derivative convention and the spatial-volume normalization
+documented in the one-point file.  In the current HDF5 convention,
+\begin{equation}
+  K_{\mathrm{code}}(t)
+  =
+  -2\left\langle
+  \sum_{\mu=1}^{4}
+  L_{q,\,\mu\mu}^{\mathrm{avg}}(q=0,t,\tau)
+  \right\rangle_{\tau,\mathrm{cfg}},
+\end{equation}
+where the diagonal sum is reconstructed from \code{avg/Tmunu/T11},
+\code{T22}, \code{T33}, and \code{T44}.  The average over \(\tau\) and gauge
+configurations should be performed in analysis, not inside the contraction
+kernel.  The unflowed step \(t=0\) must not be used for ringed normalization
+because the formula contains \(t^{-2}\).
+
+For isospin-degenerate light \(u/d\) measurements, the same light-quark ringed
+factor should multiply the connected \(U\) and \(D\) quark EMT observables.  If a
+future workflow uses different quark masses, the analysis must either compute
+flavor-specific factors from flavor-specific one-point files or explicitly form
+the chosen flavor-average kinetic normalization before applying it.
 
 % ===========================================================================
 \part{Appendices}

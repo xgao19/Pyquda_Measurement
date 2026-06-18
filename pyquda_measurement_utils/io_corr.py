@@ -188,6 +188,11 @@ def get_emt_proton_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm):
     return str(Path(data_dir) / "EMTproton3pt" / (str(lat) + ".EMTproton3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
 
 
+# Build the flowed-quark ringed-normalization output tag.
+def get_flowed_quark_ringed_norm_file_tag(data_dir, lat, cfg, ama, src, sm):
+    return str(Path(data_dir) / "FlowedQuarkRinged" / (str(lat) + ".FlowedQuarkRinged." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+
+
 # -----------------------------------------------------------------------------
 # Shared HDF5 helpers
 # -----------------------------------------------------------------------------
@@ -264,6 +269,35 @@ def save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=None):
         for mu in range(4):
             for nu in range(mu, 4):
                 g_t.create_dataset(f"T{mu+1}{nu+1}", data=Tmunu_t[mu, nu])
+
+
+# Save flowed-quark ringed-normalization data.
+def save_flowed_quark_ringed_norm_hdf5(
+    tag,
+    kinetic_pervec,
+    kinetic_timeslice,
+    kinetic_spacetime,
+    z_ring_field_sqrt,
+    z_ring_bilinear,
+    flow_times,
+    attrs=None,
+    source_bookkeeping=None,
+):
+    save_h5 = f"{tag}.h5"
+    with _prepare_h5_file(save_h5, attrs) as f:
+        f.create_dataset("flow_times", data=np.asarray(flow_times, dtype=np.float64))
+
+        raw = f.require_group("raw")
+        raw.create_dataset("kinetic_pervec", data=kinetic_pervec)
+        if source_bookkeeping is not None:
+            for name, values in source_bookkeeping.items():
+                raw.create_dataset(name, data=np.asarray(values, dtype=np.int32))
+
+        avg = f.require_group("avg")
+        avg.create_dataset("kinetic_timeslice", data=kinetic_timeslice)
+        avg.create_dataset("kinetic_spacetime", data=kinetic_spacetime)
+        avg.create_dataset("Z_ring_field_sqrt", data=z_ring_field_sqrt)
+        avg.create_dataset("Z_ring_bilinear", data=z_ring_bilinear)
 
 
 # -----------------------------------------------------------------------------

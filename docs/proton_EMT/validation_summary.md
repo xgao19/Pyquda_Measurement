@@ -190,6 +190,7 @@ Interpretation: all four U terms are present, nonzero, and linearly preserved th
 These validation runs do not settle:
 
 - overall Euclidean normalization and factors of `1/2` relative to a chosen publication convention
+- ringed-fermion normalization; the connected `C3_Tmunu` output is an unringed flowed bilinear
 - renormalization and quark/gluon EMT mixing
 - disconnected diagrams and vacuum subtraction
 - finite-volume or continuum extrapolation behavior

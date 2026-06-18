@@ -158,6 +158,12 @@ avg/Tmunu/T11 ... T44
 avg/CHI
 ```
 
+The saved quark loop is an unringed flowed bilinear.  New files mark this with
+`operator_normalization=unringed_flowed_bilinear` and
+`ringed_normalization_applied=False`.  The ringed factor should be computed in
+analysis from the q=0 diagonal kinetic building block, not inside this smoke
+workflow.
+
 ### Step 2: Gluon EMT 1pt
 
 ```bash
@@ -232,6 +238,20 @@ The quark merger builds cumulative loop averages:
 Lbar_N = mean(raw/Tmunu_pervec[:N], axis=0) / volume_norm
 N = 1, ..., effective_n_inversions
 ```
+
+For ringed-fermion normalization, reconstruct the kinetic expectation from the
+averaged diagonal loop:
+
+```text
+K_code(flow) = -2 * mean_tau_cfg[
+    T11(q=0,flow,tau) + T22(q=0,flow,tau)
+  + T33(q=0,flow,tau) + T44(q=0,flow,tau)
+]
+```
+
+Then apply the resulting ringed bilinear factor to quark connected and
+disconnected EMT observables at the same flow step.  Do not use the unflowed
+`flow=0` step for this factor.
 
 The single-configuration proxy is:
 

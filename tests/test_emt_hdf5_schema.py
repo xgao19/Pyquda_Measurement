@@ -25,13 +25,22 @@ def test_emt_quark_1pt_hdf5_schema_and_upper_triangle(tmp_path):
     chi_pervec = np.ones((2, 3), dtype=np.complex128)
     tmunu = np.arange(4 * 4 * 3, dtype=np.float64).reshape(4, 4, 3)
     chi = np.arange(3, dtype=np.float64)
-    attrs = {"measurement": "EMT_quark_1pt", "flow_epsilon": 0.01}
+    attrs = {
+        "measurement": "EMT_quark_1pt",
+        "flow_epsilon": 0.01,
+        "operator_normalization": "unringed_flowed_bilinear",
+        "ringed_normalization_applied": False,
+        "ringed_kinetic_observable": "K_code=-2*sum_mu avg/Tmunu/Tmumu[q0,flow,tau]",
+    }
     source_bookkeeping = {"hp_source_index": [0, 1], "hp_distance": [0, 2]}
 
     save_emt_quark_1pt_hdf5(tag, tmunu_pervec, chi_pervec, tmunu, chi, attrs=attrs, source_bookkeeping=source_bookkeeping)
 
     with h5py.File(tag + ".h5", "r") as h5:
         assert h5.attrs["measurement"] == "EMT_quark_1pt"
+        assert h5.attrs["operator_normalization"] == "unringed_flowed_bilinear"
+        assert not h5.attrs["ringed_normalization_applied"]
+        assert "K_code" in h5.attrs["ringed_kinetic_observable"]
         assert h5["raw/Tmunu_pervec"].shape == tmunu_pervec.shape
         assert h5["raw/CHI_pervec"].shape == chi_pervec.shape
         assert h5["raw/hp_source_index"].shape == (2,)
@@ -73,10 +82,23 @@ def test_emt_meson_2pt_and_quark_3pt_schema(tmp_path):
     c3_chi = np.zeros((2, 3, 4), dtype=np.complex128)
     c3_tmunu = np.zeros((2, 3, 4, 4, 4), dtype=np.complex128)
     qlist = [[0, 0, 0, 0], [1, 0, 0, 0]]
-    save_emt_quark_3pt_hdf5(c3_tag, c2, c3_chi, c3_tmunu, momentum_transfer_list=qlist, attrs={"measurement": "EMT_quark_3pt"})
+    save_emt_quark_3pt_hdf5(
+        c3_tag,
+        c2,
+        c3_chi,
+        c3_tmunu,
+        momentum_transfer_list=qlist,
+        attrs={
+            "measurement": "EMT_quark_3pt",
+            "operator_normalization": "unringed_flowed_bilinear",
+            "ringed_normalization_applied": False,
+        },
+    )
 
     with h5py.File(c3_tag + ".h5", "r") as h5:
         assert h5.attrs["measurement"] == "EMT_quark_3pt"
+        assert h5.attrs["operator_normalization"] == "unringed_flowed_bilinear"
+        assert not h5.attrs["ringed_normalization_applied"]
         assert h5["C2"].shape == c2.shape
         assert h5["C3_chi"].shape == c3_chi.shape
         assert h5["C3_Tmunu"].shape == c3_tmunu.shape
