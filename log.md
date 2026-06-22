@@ -4,6 +4,19 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit title and the main changes.  Keep reusable tips,
 cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## Pending Commit: Add Perlmutter ringed-norm HP benchmark
+
+- Added `application/flowed_quark_ringed_norm/perlmutter` with login smoke,
+  single-measurement runner, one-node S8T8 HP convergence benchmark, Slurm
+  wrapper, analyzer, PDF plotter, and intern-facing README.
+- Extended S8T8 HP convergence support to include pure stochastic, HP16, and
+  HP256 matched at 1024 solves.
+- Simplified standalone ringed-normalization HDF5 schema by removing
+  `avg/kinetic_timeslice`; consumers use `raw/kinetic_pervec` for convergence
+  analysis and `avg/kinetic_spacetime` for ringed factors.
+- Validated Python/shell syntax and `tests/test_flowed_quark_ringed_norm.py`
+  under the Aurora PyQUDA develop environment.
+
 ## Pending Commit: Add EMT disconnected full-workflow diagnostic
 
 - Added proton `C2` generation and disconnected `C2 x 1pt` merger scripts under

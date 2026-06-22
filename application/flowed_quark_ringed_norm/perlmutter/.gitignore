@@ -1,0 +1,9 @@
+benchmark/
+data/
+log/
+.quda-cache/
+.cupy-cache/
+__pycache__/
+*.pyc
+*.o
+*.e

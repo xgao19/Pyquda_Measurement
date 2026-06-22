@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Plot the S8T8 stochastic-vs-HP ringed-normalization benchmark as a PDF.
 
-This intentionally avoids matplotlib so it can run in the lean Aurora PyQUDA
+This intentionally avoids matplotlib so it can run in a lean PyQUDA
 environment.  The output is a simple vector PDF with two panels.
 """
 
+import argparse
 import csv
 import math
 from pathlib import Path
@@ -175,7 +176,11 @@ def _draw_panel(canvas, rows, panel, y_key, title, ylabel, error_key=None):
 
 
 def main():
-    root = Path(__file__).resolve().parent / "benchmark" / "s8t8_hp_convergence"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--bench-root", default=str(Path(__file__).resolve().parent / "benchmark/s8t8_hp_convergence"))
+    args = parser.parse_args()
+
+    root = Path(args.bench_root).resolve()
     rows = _read_rows(root / "summary.csv")
     canvas = PdfCanvas()
     canvas.text(306, 755, "S8T8 flowed-quark ringed normalization convergence", 15, align="center")

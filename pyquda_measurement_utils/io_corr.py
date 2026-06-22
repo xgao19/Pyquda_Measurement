@@ -281,7 +281,6 @@ def save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=None):
 def save_flowed_quark_ringed_norm_hdf5(
     tag,
     kinetic_pervec,
-    kinetic_timeslice,
     kinetic_spacetime,
     z_ring_field_sqrt,
     z_ring_bilinear,
@@ -300,7 +299,6 @@ def save_flowed_quark_ringed_norm_hdf5(
                 raw.create_dataset(name, data=np.asarray(values, dtype=np.int32))
 
         avg = f.require_group("avg")
-        avg.create_dataset("kinetic_timeslice", data=kinetic_timeslice)
         avg.create_dataset("kinetic_spacetime", data=kinetic_spacetime)
         avg.create_dataset("Z_ring_field_sqrt", data=z_ring_field_sqrt)
         avg.create_dataset("Z_ring_bilinear", data=z_ring_bilinear)

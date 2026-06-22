@@ -80,8 +80,7 @@ def test_flowed_quark_ringed_tag_helper_uses_generic_directory():
 def test_flowed_quark_ringed_hdf5_schema(tmp_path):
     tag = str(tmp_path / "FlowedQuarkRinged" / "schema")
     kinetic_pervec = np.ones((2, 3, 4), dtype=np.complex128)
-    kinetic_timeslice = np.mean(kinetic_pervec, axis=0)
-    kinetic_spacetime = np.mean(kinetic_timeslice, axis=-1)
+    kinetic_spacetime = np.mean(kinetic_pervec, axis=(0, -1))
     times = flow_times(0.1, 2)
     z_field, z_bilinear = compute_ringed_factors(-np.ones_like(kinetic_spacetime), times)
     attrs = {
@@ -99,7 +98,6 @@ def test_flowed_quark_ringed_hdf5_schema(tmp_path):
     save_flowed_quark_ringed_norm_hdf5(
         tag,
         kinetic_pervec,
-        kinetic_timeslice,
         kinetic_spacetime,
         z_field,
         z_bilinear,
@@ -115,7 +113,7 @@ def test_flowed_quark_ringed_hdf5_schema(tmp_path):
         np.testing.assert_allclose(h5["flow_times"][...], times)
         assert h5["raw/kinetic_pervec"].shape == (2, 3, 4)
         assert h5["raw/source_index"].shape == (2,)
-        assert h5["avg/kinetic_timeslice"].shape == (3, 4)
+        assert "kinetic_timeslice" not in h5["avg"]
         assert h5["avg/kinetic_spacetime"].shape == (3,)
         assert h5["avg/Z_ring_field_sqrt"].shape == (3,)
         assert h5["avg/Z_ring_bilinear"].shape == (3,)

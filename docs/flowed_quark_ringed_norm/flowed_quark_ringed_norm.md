@@ -11,20 +11,18 @@ flow schedule, and flavor convention match.
 The measured kinetic expectation value is
 
 ```text
-K(tf) = < bar chi_f(tf,x) overleftrightarrow{Dslash} chi_f(tf,x) >
+K(tf) = (1 / V4) sum_x < bar chi_f(tf,x)
+                          overleftrightarrow{Dslash}
+                          chi_f(tf,x) >
 ```
 
-The implementation uses 4D stochastic sources.  For each effective source, it
-computes the zero-momentum kinetic trace on each time slice and divides by the
-spatial volume.  The official normalization input is the additional average over
-time:
+The implementation uses 4D stochastic sources.  The official normalization
+input is the spacetime-averaged kinetic trace:
 
 ```text
-avg/kinetic_spacetime[flow] = mean_tau(avg/kinetic_timeslice[flow,tau])
+avg/kinetic_spacetime[flow]
+  = (1 / (N_eff Nt)) sum_{r,t} raw/kinetic_pervec[r, flow, t]
 ```
-
-The timeslice dataset is retained for diagnostics such as temporal-boundary or
-stochastic-noise checks.
 
 ## Ringed Factors
 
@@ -58,7 +56,6 @@ raw/kinetic_pervec              [N_eff, Nflow, Nt]
 raw/source_index                [N_eff]
 raw/base_noise_index            [N_eff]
 raw/hp_index                    [N_eff]
-avg/kinetic_timeslice           [Nflow, Nt]
 avg/kinetic_spacetime           [Nflow]
 avg/Z_ring_field_sqrt           [Nflow]
 avg/Z_ring_bilinear             [Nflow]
@@ -78,7 +75,7 @@ mass, csw, tol, maxiter
 gauge_preprocessing
 t_boundary
 noise_scheme, n_vec, n_zn, hp_num_vectors, hp_ordering
-volume_average = spacetime_average_from_spatial_timeslice_average
+volume_average = spacetime_average_from_raw_kinetic_pervec
 flow0_factor = NaN
 ```
 

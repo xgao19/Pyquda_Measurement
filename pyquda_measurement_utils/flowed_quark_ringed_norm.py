@@ -97,7 +97,7 @@ class FlowedQuarkRingedNorm:
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
 
     @staticmethod
-    def _project_zero_momentum_timeslice(latt_info, local_field, q0_phase):
+    def _project_zero_momentum_per_time(latt_info, local_field, q0_phase):
         from pyquda import getMPIComm
         from pyquda_utils import core
 
@@ -108,7 +108,7 @@ class FlowedQuarkRingedNorm:
         slice_t = getMPIComm().bcast(slice_t, root=0)
         return np.asarray(slice_t[0], dtype=np.complex128)
 
-    def _kinetic_timeslice_for_source(self, U_f, xi, eta, q0_phase, spatial_volume):
+    def _kinetic_per_time_for_source(self, U_f, xi, eta, q0_phase, spatial_volume):
         U_f.gauge_dirac.loadGauge(U_f)
         gammas = _gamma_stack_on_backend(eta.data)
         local_kinetic = None
@@ -119,8 +119,8 @@ class FlowedQuarkRingedNorm:
             local_kinetic = term if local_kinetic is None else local_kinetic + term
             del tmp, gamma_tmp, term
 
-        timeslice = self._project_zero_momentum_timeslice(U_f.latt_info, local_kinetic, q0_phase)
-        return timeslice / spatial_volume
+        per_time = self._project_zero_momentum_per_time(U_f.latt_info, local_kinetic, q0_phase)
+        return per_time / spatial_volume
 
     def _advance_flowed_pair(self, U_f, xi, eta, step):
         if self.flow_steps <= 0 or step >= self.flow_steps:
@@ -198,7 +198,7 @@ class FlowedQuarkRingedNorm:
             U_f = U.copy()
             U_f.setAntiPeriodicT()
             for step in range(n_flow):
-                kinetic_pervec[vec_picked, step] = self._kinetic_timeslice_for_source(
+                kinetic_pervec[vec_picked, step] = self._kinetic_per_time_for_source(
                     U_f,
                     xi,
                     eta,
@@ -209,8 +209,7 @@ class FlowedQuarkRingedNorm:
 
             del U_f, xi, eta
 
-        kinetic_timeslice = np.mean(kinetic_pervec, axis=0)
-        kinetic_spacetime = np.mean(kinetic_timeslice, axis=-1)
+        kinetic_spacetime = np.mean(kinetic_pervec, axis=(0, -1))
         z_field_sqrt, z_bilinear = compute_ringed_factors(kinetic_spacetime, flow_time_values, nc=self.nc)
 
         attrs = {
@@ -237,7 +236,7 @@ class FlowedQuarkRingedNorm:
             "hp_ordering": self.hp_ordering,
             "effective_n_inversions": n_eff,
             "volume_norm": spatial_volume,
-            "volume_average": "spacetime_average_from_spatial_timeslice_average",
+            "volume_average": "spacetime_average_from_raw_kinetic_pervec",
             "flow0_factor": np.nan,
             "derivative_convention": "gamma_mu*(Dplus_mu-Dminus_mu)",
             "field_factor_dataset": "avg/Z_ring_field_sqrt",
@@ -247,7 +246,6 @@ class FlowedQuarkRingedNorm:
             save_flowed_quark_ringed_norm_hdf5(
                 tag,
                 kinetic_pervec,
-                kinetic_timeslice,
                 kinetic_spacetime,
                 z_field_sqrt,
                 z_bilinear,

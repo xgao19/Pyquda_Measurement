@@ -49,6 +49,7 @@ run_case() {
   export QUDA_RESOURCE_PATH="$bench_root/cache/$case_name"
 
   mkdir -p "$FLOWED_RINGED_DATA_DIR" "$QUDA_RESOURCE_PATH"
+  local expected_h5="$FLOWED_RINGED_DATA_DIR/FlowedQuarkRinged/S8T8.FlowedQuarkRinged.${FLOWED_RINGED_CONFIG_NUM}.0.x0y0z0t0.S8T8_${case_name}.h5"
 
   echo "Running $case_name"
   echo "  gauge=$FLOWED_RINGED_GAUGE_PATH"
@@ -57,14 +58,19 @@ run_case() {
   echo "  hp_ordering=$FLOWED_RINGED_HP_ORDERING"
   echo "  data=$FLOWED_RINGED_DATA_DIR"
 
-  /usr/bin/time -p /opt/cray/pals/1.8/bin/mpiexec -n "$FLOWED_RINGED_NRANKS" -envall \
-    bash "$script_dir/run_flowed_quark_ringed_norm.sh" \
-    > "$bench_root/log/${case_name}.o" \
-    2> "$bench_root/log/${case_name}.e"
+  if [[ "${FLOWED_RINGED_SKIP_EXISTING:-0}" == "1" && -f "$expected_h5" ]]; then
+    echo "  skipping existing $expected_h5"
+  else
+    /usr/bin/time -p /opt/cray/pals/1.8/bin/mpiexec -n "$FLOWED_RINGED_NRANKS" -envall \
+      bash "$script_dir/run_flowed_quark_ringed_norm.sh" \
+      > "$bench_root/log/${case_name}.o" \
+      2> "$bench_root/log/${case_name}.e"
+  fi
 }
 
 run_case "zn1024" "zn" "1024" "1" "interleaved_xyzt_binary_projected_to_evenodd"
 run_case "hp64x16" "hierarchical_probing" "64" "16" "interleaved_xyzt_binary_projected_to_evenodd"
+run_case "hp4x256" "hierarchical_probing" "4" "256" "interleaved_xyzt_binary_projected_to_evenodd"
 
 python "$script_dir/analyze_s8t8_hp_convergence.py" --bench-root "$bench_root"
 

@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-06-10
+Last updated: 2026-06-22
 
 This file is for reusable knowledge, stable run tips, repeated pitfalls, and
 validated cluster/code/test facts.  Historical commit-style progress should go
@@ -64,6 +64,14 @@ export QUDA_PATH=/global/cfs/cdirs/m3760/xgao/software/quda/install
   - HDF5/MPI library preload settings that avoid h5py/HDF5 mismatch issues
 - Known-good GPU login node: `login32`.
 - `ssh login32` has been used successfully for small GPU smoke tests.
+- Flowed-quark ringed-normalization S8T8 HP benchmark app lives under
+  `application/flowed_quark_ringed_norm/perlmutter`; start students with
+  `run_login_smoke.sh` before Slurm benchmark runs.
+- Standalone flowed-quark ringed-normalization HDF5 schema stores
+  per-effective-solve data in `raw/kinetic_pervec` and full averages/factors in
+  `avg/kinetic_spacetime`, `avg/Z_ring_field_sqrt`, and
+  `avg/Z_ring_bilinear`; it intentionally does not write
+  `avg/kinetic_timeslice`.
 
 ## Validated QUDA / PyQUDA Facts
 
