@@ -246,11 +246,10 @@ def save_emt_quark_1pt_hdf5(tag, Tmunu_pervec, CHI_pervec, Tmunu, CHI, attrs=Non
                 g_t.create_dataset(f"T{mu+1}{nu+1}", data=Tmunu[mu, nu])
 
 
-# Save quark EMT three-point functions together with the matching two-point data.
-def save_emt_quark_3pt_hdf5(tag, C2, C3_chi, C3_Tmunu, momentum_transfer_list=None, attrs=None):
+# Save quark EMT three-point functions without embedding two-point data.
+def save_emt_quark_3pt_hdf5(tag, C3_chi, C3_Tmunu, momentum_transfer_list=None, attrs=None):
     save_h5 = f"{tag}.h5"
     with _prepare_h5_file(save_h5, attrs) as f:
-        f.create_dataset("C2", data=C2)
         f.create_dataset("C3_chi", data=C3_chi)
         f.create_dataset("C3_Tmunu", data=C3_Tmunu)
         if momentum_transfer_list is not None:

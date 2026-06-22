@@ -84,7 +84,6 @@ def test_emt_meson_2pt_and_quark_3pt_schema(tmp_path):
     qlist = [[0, 0, 0, 0], [1, 0, 0, 0]]
     save_emt_quark_3pt_hdf5(
         c3_tag,
-        c2,
         c3_chi,
         c3_tmunu,
         momentum_transfer_list=qlist,
@@ -99,7 +98,7 @@ def test_emt_meson_2pt_and_quark_3pt_schema(tmp_path):
         assert h5.attrs["measurement"] == "EMT_quark_3pt"
         assert h5.attrs["operator_normalization"] == "unringed_flowed_bilinear"
         assert not h5.attrs["ringed_normalization_applied"]
-        assert h5["C2"].shape == c2.shape
+        assert "C2" not in h5
         assert h5["C3_chi"].shape == c3_chi.shape
         assert h5["C3_Tmunu"].shape == c3_tmunu.shape
         np.testing.assert_array_equal(h5["momentum_transfer_list"][...], np.asarray(qlist, dtype=np.int32))

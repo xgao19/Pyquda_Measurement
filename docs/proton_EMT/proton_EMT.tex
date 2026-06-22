@@ -1242,17 +1242,18 @@ The key methods of \texttt{ProtonQuarkEMT} are:
 
 \subsection{HDF5 Output for Connected Proton Three-Point}
 
-The \texttt{save\_emt\_quark\_3pt\_hdf5} function saves the following datasets:
+The proton connected EMT three-point files save only three-point observables and
+their momentum-transfer metadata.  The matching two-point functions are written
+separately under the \texttt{EMTproton2pt} output tree.
 
 \begin{center}
 \begin{tabular}{lll}
 \toprule
 Dataset & Shape & Description \\
 \midrule
-\texttt{C2} & \texttt{[Nt]} & Zero-momentum, selected-gamma two-point function \\
-\texttt{C3\_chi} & \texttt{[Nflavor, Npol, Nts, Nsteps+1, Nq, Nt]}
+\texttt{C3\_chi} & \texttt{[Nflavor, Npol, Nts, Nsteps+1, Nq, t\_sep+2]}
                   & Scalar diagnostic three-point function \\
-\texttt{C3\_Tmunu} & \texttt{[Nflavor, Npol, Nts, Nsteps+1, Nq, 4, 4, Nt]}
+\texttt{C3\_Tmunu} & \texttt{[Nflavor, Npol, Nts, Nsteps+1, Nq, 4, 4, t\_sep+2]}
                     & Quark EMT three-point function \\
 \texttt{momentum\_transfer\_list} & \texttt{[Nq, 4]}
                                    & List of momentum transfer vectors \\

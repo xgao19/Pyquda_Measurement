@@ -195,6 +195,10 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
 - HDF5 tags include `lat`, `cfg`, `ama`, `src`, and `sm`.
 - `flow_epsion` was standardized to `flow_epsilon`.
 - `GEN_SIMD_WIDTH` was removed from EMT entry scripts.
+- Quark EMT 3pt files do not embed two-point data.  Use the separate
+  `EMTproton2pt` / EMT 2pt output tree for denominators and full momentum
+  coverage.  The writer signature is
+  `save_emt_quark_3pt_hdf5(tag, C3_chi, C3_Tmunu, ...)`.
 - Gradient-flow schedule convention:
   - measure first, then flow
   - `step=0` is unflowed

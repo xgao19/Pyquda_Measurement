@@ -4,6 +4,18 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit title and the main changes.  Keep reusable tips,
 cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## Pending Commit: Remove embedded C2 from EMT quark 3pt outputs
+
+- Changed `save_emt_quark_3pt_hdf5(...)` to save only `C3_chi`,
+  `C3_Tmunu`, and optional `momentum_transfer_list`; quark EMT 3pt files no
+  longer embed selected two-point data.
+- Updated proton and pion EMT quark 3pt callers to use the lighter writer
+  interface and removed `c2_selected_*` attrs from 3pt outputs.
+- Updated proton EMT documentation and schema tests to make the no-embedded-C2
+  convention explicit.
+- Validated syntax for touched Python files and ran
+  `tests/test_emt_hdf5_schema.py` successfully.
+
 ## Pending Commit: Add Perlmutter ringed-norm HP benchmark
 
 - Added `application/flowed_quark_ringed_norm/perlmutter` with login smoke,

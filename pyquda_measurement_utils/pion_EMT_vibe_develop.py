@@ -560,9 +560,6 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             tag=c2_tag,
             attrs=c2_attrs,
         )
-        sink_gamma_idx = my_gammas.index(sink_interpolator)
-        zero_mom_idx = self.pilist.index([0, 0, 0, 0]) if [0, 0, 0, 0] in self.pilist else 0
-        C2_selected = C2[sink_gamma_idx, zero_mom_idx]
 
         if self.CG_GaussSmear:
             mpi_print(latt_info, f"first sink smearing starts, boost = {self.pos_boost}")
@@ -630,10 +627,8 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             "quark_flow_scope": "inserted_operator_quark_legs_only",
             "hadron_interpolator_flowed": False,
             "derivative_convention": "symmetric_covdev_0p5_Dplus_minus_Dminus",
-            "c2_selected_momentum_index": zero_mom_idx,
-            "c2_selected_momentum": self.pilist[zero_mom_idx],
         }
-        save_emt_quark_3pt_hdf5(tag, C2_selected, C3_chi, C3_Tmunu, momentum_transfer_list=self.qlist, attrs=attrs)
+        save_emt_quark_3pt_hdf5(tag, C3_chi, C3_Tmunu, momentum_transfer_list=self.qlist, attrs=attrs)
         return C2, C3_chi, C3_Tmunu
 
 

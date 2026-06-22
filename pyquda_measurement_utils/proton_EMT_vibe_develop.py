@@ -332,7 +332,6 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         t_separations = self.t_separations
 
         prop_fw = None
-        C2 = None
         C3_chi = None
         C3_Tmunu = None
         phases_3pt = None
@@ -342,10 +341,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         raw_seq_prop_flow = None
         try:
             prop_fw = self._make_source_prop(dirac, U, src_pos)
-            C2 = self.contract_proton_2pt(latt_info, prop_fw.copy(), src_pos, tag=c2_tag, interpolator=interpolator)
-            zero_mom_idx = self.pilist.index([0, 0, 0, 0]) if [0, 0, 0, 0] in self.pilist else 0
-            sink_gamma_idx = my_gammas.index(interpolator)
-            C2_selected = C2[sink_gamma_idx, zero_mom_idx]
+            self.contract_proton_2pt(latt_info, prop_fw.copy(), src_pos, tag=c2_tag, interpolator=interpolator)
 
             qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
             phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, src_pos)
@@ -355,8 +351,9 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
             Nq = len(self.qlist)
 
             for t_sep in t_separations:
-                C3_chi = np.zeros((Nflavor, Npol, 1, Nsteps + 1, Nq, Nt), dtype=np.complex128)
-                C3_Tmunu = np.zeros((Nflavor, Npol, 1, Nsteps + 1, Nq, 4, 4, Nt), dtype=np.complex128)
+                Ninsert = int(t_sep) + 2
+                C3_chi = np.zeros((Nflavor, Npol, 1, Nsteps + 1, Nq, Ninsert), dtype=np.complex128)
+                C3_Tmunu = np.zeros((Nflavor, Npol, 1, Nsteps + 1, Nq, 4, 4, Ninsert), dtype=np.complex128)
                 for flavor_idx, flavor in enumerate([1, 2]):
                     flavor_name = "U" if flavor == 1 else "D"
                     mpi_print(latt_info, f"create proton sequential source flavor={flavor_name} t_sep={t_sep}")
@@ -393,7 +390,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                                 raw_seq_prop_flow,
                                 phases_3pt,
                                 t0,
-                            )
+                            )[..., :Ninsert]
                             chi_seconds = perf_counter() - chi_t0
                             tmunu_t0 = perf_counter()
                             C3_Tmunu[flavor_idx, pol_idx, 0, step] += self.get_C3_Tmunu_symmetrized_proton(
@@ -402,7 +399,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                                 raw_seq_prop_flow,
                                 phases_3pt,
                                 t0,
-                            )
+                            )[..., :Ninsert]
                             tmunu_seconds = perf_counter() - tmunu_t0
 
                             flow_seconds = 0.0
@@ -447,6 +444,8 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                     "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
                     "t_separations": np.asarray([t_sep], dtype=np.int32),
                     "src_t": t0,
+                    "time_insertion_range": "0..t_sep+1",
+                    "time_insertion_count": Ninsert,
                     "interpolator": interpolator,
                     "flavor_axis": "0=U,1=D",
                     "polarization_axis": ",".join(self.pol_list),
@@ -459,13 +458,10 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                     "nucleon_interpolator_flowed": False,
                     "derivative_convention": "symmetric_covdev_0p5_Dplus_minus_Dminus",
                     "left_derivative_convention": "raw_seq_gamma5_hermiticity",
-                    "c2_selected_momentum_index": zero_mom_idx,
-                    "c2_selected_momentum": self.pilist[zero_mom_idx],
                 }
                 if latt_info.mpi_rank == 0:
                     save_emt_quark_3pt_hdf5(
                         tags[t_sep],
-                        C2_selected,
                         C3_chi,
                         C3_Tmunu,
                         momentum_transfer_list=self.qlist,
@@ -484,7 +480,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 phases_3pt,
                 prop_fw,
             )
-            del C2, C3_chi, C3_Tmunu
+            del C3_chi, C3_Tmunu
 
     def connected_3pt(self, gauge, invPara, source_jobs, interpolator="5"):
         """Compute connected proton U/D quark EMT 3pt functions for source jobs."""
