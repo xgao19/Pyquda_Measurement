@@ -30,8 +30,16 @@ S8T8 stochastic-vs-HP convergence benchmark from an interactive node:
 bash run_s8t8_hp_convergence.sh
 ```
 
-This runs 1024 pure stochastic solves and 64 base noises times 16
-interleaved-4D HP vectors, then writes a matched-cost convergence summary under
+This runs four estimator cases:
+
+```text
+zn1024        pure stochastic, 1024 solves
+hp64x16       HP16, 1024 solves
+hp4x256       HP256, 1024 solves
+hp6x16sc12    HP16 plus spin-color point dilution, 1152 solves
+```
+
+It then writes a matched-cost-style convergence summary and PDF under
 `benchmark/s8t8_hp_convergence/`.
 
 Important controls:
@@ -51,6 +59,7 @@ FLOWED_RINGED_N_ZN
 FLOWED_RINGED_NOISE_SCHEME
 FLOWED_RINGED_HP_NUM_VECTORS
 FLOWED_RINGED_HP_ORDERING
+FLOWED_RINGED_SPIN_COLOR_DILUTION
 ```
 
 For l64 connected-production matching, use the same gauge preprocessing, mass,

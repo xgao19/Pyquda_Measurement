@@ -482,3 +482,29 @@ commit, and update `log.md` with the intended commit title and summary first.
   completion logging keep their previous behavior.
 - The l64 `EMT_proton_connected_UD` production driver uses this hook outside
   the repo to log one completed source at a time.
+
+## Flowed-Quark Ringed Norm Spin-Color Dilution
+
+- The standalone `FlowedQuarkRingedNorm` workflow now supports
+  `spin_color_dilution=point`.
+- Default `spin_color_dilution=none` preserves the previous full
+  site-spin-color stochastic source behavior.
+- In point dilution mode, the stochastic noise and HP patterns are site-only,
+  then broadcast into one exact spin/color basis channel at a time.
+- Effective solve counting is
+  `n_vec * hp_factor * spin_color_dilution_factor`, with factor `12` for
+  point spin-color dilution and `1` for the default mode.
+- HDF5 `raw/` output now records `spin_index` and `color_index`; default
+  non-diluted data fills them with `-1`.
+- HDF5 attrs now include `spin_color_dilution`,
+  `spin_color_dilution_factor`, `site_noise_scope`, and
+  `spin_color_trace_factor`.
+- The official spacetime kinetic average multiplies by
+  `spin_color_trace_factor`; point spin-color dilution therefore sums the
+  spin-color trace rather than averaging it away.
+- Aurora and Perlmutter S8T8 HP convergence helpers include a fourth case:
+  `hp6x16sc12`, with `N_VEC=6`, `HP_NUM_VECTORS=16`,
+  `spin_color_dilution=point`, and 1152 effective solves.
+- Analysis and plotting helpers report complete 192-solve blocks for the
+  spin-color-diluted case and keep the old matched-cost rows for the
+  previous three cases.

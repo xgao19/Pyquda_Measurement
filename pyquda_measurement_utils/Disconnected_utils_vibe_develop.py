@@ -6,6 +6,8 @@ from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array
 
 
 VALID_NOISE_SCHEMES = {"zn", "hierarchical_probing"}
+VALID_SPIN_COLOR_DILUTIONS = {"none", "point"}
+SPIN_COLOR_POINT_FACTOR = 12
 VALID_HP_ORDERINGS = {
     "global_xyzt_gray_projected_to_evenodd",
     "interleaved_xyzt_binary_projected_to_evenodd",
@@ -34,6 +36,17 @@ def normalize_noise_scheme(noise_scheme: str) -> str:
     return scheme
 
 
+def normalize_spin_color_dilution(spin_color_dilution: str) -> str:
+    """Normalize and validate the spin-color dilution mode."""
+    mode = str(spin_color_dilution).strip().lower()
+    if mode not in VALID_SPIN_COLOR_DILUTIONS:
+        raise ValueError(
+            f"spin_color_dilution should be one of {VALID_SPIN_COLOR_DILUTIONS}, "
+            f"got {spin_color_dilution!r}"
+        )
+    return mode
+
+
 def is_power_of_two(value: int) -> bool:
     """Return whether value is a positive power of two."""
     return value > 0 and (value & (value - 1)) == 0
@@ -54,18 +67,29 @@ def validate_hierarchical_probing_options(hp_num_vectors: int, hp_ordering: str)
         raise ValueError(f"hp_num_vectors should be a positive power of two, got {hp_num_vectors}")
 
 
-def effective_n_inversions(n_vec: int, noise_scheme: str, hp_num_vectors: int) -> int:
+def spin_color_dilution_factor(spin_color_dilution: str = "none") -> int:
+    """Return the solve multiplier for the spin-color dilution mode."""
+    mode = normalize_spin_color_dilution(spin_color_dilution)
+    return SPIN_COLOR_POINT_FACTOR if mode == "point" else 1
+
+
+def effective_n_inversions(n_vec: int, noise_scheme: str, hp_num_vectors: int, spin_color_dilution: str = "none") -> int:
     """Return the number of effective stochastic inversions."""
-    return n_vec * hp_num_vectors if noise_scheme == "hierarchical_probing" else n_vec
+    hp_factor = hp_num_vectors if noise_scheme == "hierarchical_probing" else 1
+    return n_vec * hp_factor * spin_color_dilution_factor(spin_color_dilution)
 
 
-def source_bookkeeping_arrays(n_eff: int):
+def source_bookkeeping_arrays(n_eff: int, include_spin_color: bool = False):
     """Create common source bookkeeping arrays."""
-    return {
+    bookkeeping = {
         "source_index": np.arange(n_eff, dtype=np.int32),
         "base_noise_index": np.zeros(n_eff, dtype=np.int32),
         "hp_index": np.zeros(n_eff, dtype=np.int32),
     }
+    if include_spin_color:
+        bookkeeping["spin_index"] = np.full(n_eff, -1, dtype=np.int32)
+        bookkeeping["color_index"] = np.full(n_eff, -1, dtype=np.int32)
+    return bookkeeping
 
 
 def create_gi_qtmd_wilsonline_index_lists(eta_list, max_b_z: int, max_b_T: int):
@@ -101,6 +125,34 @@ def make_zn_noise_fermion(latt_info, n: int = 2):
         phases = dpnp.asarray(dpnp.asnumpy(phases), sycl_queue=xi.data.sycl_queue)
     xi.data[:] = phases
     return xi
+
+
+def make_site_zn_noise_fermion(latt_info, n: int = 2):
+    """Create one stochastic fermion source with site-only Z_n phases."""
+    from pyquda.field import LatticeFermion
+
+    xi = LatticeFermion(latt_info)
+    xp = _get_xp_from_array(xi.data)
+    r = xp.random.randint(0, n, size=xi.data.shape[:-2])
+    phases = xp.exp(2j * xp.pi * r / n).astype(xi.data.dtype)
+    if xp.__name__ == "dpnp" and hasattr(xi.data, "sycl_queue"):
+        import dpnp
+
+        phases = dpnp.asarray(dpnp.asnumpy(phases), sycl_queue=xi.data.sycl_queue)
+    xi.data[:] = phases[..., None, None]
+    return xi
+
+
+def apply_spin_color_point_dilution(xi, spin_idx: int, color_idx: int):
+    """Keep only one spin-color channel of a site-noise source."""
+    diluted = xi.copy()
+    if not (0 <= int(spin_idx) < diluted.data.shape[-2]):
+        raise ValueError(f"spin_idx {spin_idx} outside spin dimension {diluted.data.shape[-2]}")
+    if not (0 <= int(color_idx) < diluted.data.shape[-1]):
+        raise ValueError(f"color_idx {color_idx} outside color dimension {diluted.data.shape[-1]}")
+    diluted.data[:] = 0
+    diluted.data[..., int(spin_idx), int(color_idx)] = xi.data[..., int(spin_idx), int(color_idx)]
+    return diluted
 
 
 def hierarchical_gray_index(latt_info, hp_ordering: str):
@@ -162,15 +214,53 @@ def apply_hierarchical_probe(xi, hp_idx: int, hp_ordering: str):
     return probed
 
 
-def iter_noise_sources(latt_info, n_vec: int, n_zn: int, noise_scheme: str, hp_num_vectors: int, hp_ordering: str):
+def iter_noise_sources(
+    latt_info,
+    n_vec: int,
+    n_zn: int,
+    noise_scheme: str,
+    hp_num_vectors: int,
+    hp_ordering: str,
+    spin_color_dilution: str = "none",
+    include_spin_color: bool = False,
+):
     """Yield effective stochastic sources with optional hierarchical probing."""
+    spin_color_dilution = normalize_spin_color_dilution(spin_color_dilution)
+
+    def make_output(effective_idx, base_idx, hp_idx, spin_idx, color_idx, source):
+        if include_spin_color:
+            return effective_idx, base_idx, hp_idx, spin_idx, color_idx, source
+        return effective_idx, base_idx, hp_idx, source
+
+    def iter_spin_color_sources(effective_base_idx, base_idx, hp_idx, source):
+        if spin_color_dilution == "none":
+            yield make_output(effective_base_idx, base_idx, hp_idx, -1, -1, source)
+            return
+        for spin_idx in range(source.data.shape[-2]):
+            for color_idx in range(source.data.shape[-1]):
+                effective_idx = effective_base_idx * SPIN_COLOR_POINT_FACTOR + spin_idx * source.data.shape[-1] + color_idx
+                yield make_output(
+                    effective_idx,
+                    base_idx,
+                    hp_idx,
+                    spin_idx,
+                    color_idx,
+                    apply_spin_color_point_dilution(source, spin_idx, color_idx),
+                )
+
     if noise_scheme == "zn":
         for base_idx in range(n_vec):
-            yield base_idx, base_idx, 0, make_zn_noise_fermion(latt_info, n=n_zn)
+            source = make_site_zn_noise_fermion(latt_info, n=n_zn) if spin_color_dilution == "point" else make_zn_noise_fermion(latt_info, n=n_zn)
+            yield from iter_spin_color_sources(base_idx, base_idx, 0, source)
         return
 
     for base_idx in range(n_vec):
-        base_noise = make_zn_noise_fermion(latt_info, n=n_zn)
+        base_noise = make_site_zn_noise_fermion(latt_info, n=n_zn) if spin_color_dilution == "point" else make_zn_noise_fermion(latt_info, n=n_zn)
         for hp_idx in range(hp_num_vectors):
-            effective_idx = base_idx * hp_num_vectors + hp_idx
-            yield effective_idx, base_idx, hp_idx, apply_hierarchical_probe(base_noise, hp_idx, hp_ordering)
+            effective_base_idx = base_idx * hp_num_vectors + hp_idx
+            yield from iter_spin_color_sources(
+                effective_base_idx,
+                base_idx,
+                hp_idx,
+                apply_hierarchical_probe(base_noise, hp_idx, hp_ordering),
+            )

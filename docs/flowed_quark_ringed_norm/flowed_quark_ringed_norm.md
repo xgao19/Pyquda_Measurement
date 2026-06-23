@@ -21,8 +21,25 @@ input is the spacetime-averaged kinetic trace:
 
 ```text
 avg/kinetic_spacetime[flow]
-  = (1 / (N_eff Nt)) sum_{r,t} raw/kinetic_pervec[r, flow, t]
+  = (spin_color_trace_factor / (N_eff Nt))
+    sum_{r,t} raw/kinetic_pervec[r, flow, t]
 ```
+
+Two spin-color source modes are supported:
+
+```text
+spin_color_dilution = none
+  Z_n noise is assigned on site * spin * color.  This is the default and
+  preserves the original behavior.
+
+spin_color_dilution = point
+  Z_n noise is assigned on 4D sites only, then multiplied by exact spin-color
+  basis vectors.  This costs 4*3 = 12 solves for each base site-noise/HP vector.
+```
+
+HP vectors are site-only in both modes and are broadcast to spin/color.  For
+`spin_color_dilution = point`, each raw entry is one spin-color basis source,
+so the final trace average uses `spin_color_trace_factor = 12`.
 
 ## Ringed Factors
 
@@ -56,6 +73,8 @@ raw/kinetic_pervec              [N_eff, Nflow, Nt]
 raw/source_index                [N_eff]
 raw/base_noise_index            [N_eff]
 raw/hp_index                    [N_eff]
+raw/spin_index                  [N_eff]
+raw/color_index                 [N_eff]
 avg/kinetic_spacetime           [Nflow]
 avg/Z_ring_field_sqrt           [Nflow]
 avg/Z_ring_bilinear             [Nflow]
@@ -75,7 +94,8 @@ mass, csw, tol, maxiter
 gauge_preprocessing
 t_boundary
 noise_scheme, n_vec, n_zn, hp_num_vectors, hp_ordering
-volume_average = spacetime_average_from_raw_kinetic_pervec
+spin_color_dilution, spin_color_dilution_factor, spin_color_trace_factor, site_noise_scope
+volume_average = spin_color_trace_factor_times_spacetime_average_from_raw_kinetic_pervec
 flow0_factor = NaN
 ```
 

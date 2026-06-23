@@ -14,7 +14,9 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     effective_n_inversions,
     iter_noise_sources,
     normalize_noise_scheme,
+    normalize_spin_color_dilution,
     source_bookkeeping_arrays,
+    spin_color_dilution_factor,
     validate_hierarchical_probing_options,
 )
 from pyquda_measurement_utils.io_corr import save_flowed_quark_ringed_norm_hdf5
@@ -56,6 +58,11 @@ def compute_ringed_factors(kinetic_spacetime, flow_time_values, nc=3):
     return z_field_sqrt, z_bilinear
 
 
+def kinetic_spacetime_from_raw(kinetic_pervec, spin_color_trace_factor=1):
+    """Return the spin-color traced spacetime average from raw per-source data."""
+    return float(spin_color_trace_factor) * np.mean(kinetic_pervec, axis=(0, -1))
+
+
 def _gamma_matrix(gamma_like):
     if hasattr(gamma_like, "matrix"):
         return gamma_like.matrix
@@ -90,6 +97,8 @@ class FlowedQuarkRingedNorm:
         self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
         self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
         self.hp_ordering = parameters.get("hp_ordering", "global_xyzt_gray_projected_to_evenodd")
+        self.spin_color_dilution = normalize_spin_color_dilution(parameters.get("spin_color_dilution", "none"))
+        self.spin_color_dilution_factor = spin_color_dilution_factor(self.spin_color_dilution)
         self.nc = int(parameters.get("Nc", 3))
         self.multigrid = parameters.get("multigrid", [[8, 8, 4, 4]])
         self.gauge_preprocessing = parameters.get("gauge_preprocessing", "unspecified")
@@ -166,9 +175,9 @@ class FlowedQuarkRingedNorm:
         dirac.loadGauge(U)
         mpi_print(latt_info, "Flowed-quark ringed normalization inverter ready.")
 
-        n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
+        n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors, self.spin_color_dilution)
         kinetic_pervec = np.zeros((n_eff, n_flow, nt), dtype=np.complex128)
-        source_bookkeeping = source_bookkeeping_arrays(n_eff)
+        source_bookkeeping = source_bookkeeping_arrays(n_eff, include_spin_color=True)
 
         rng_probe = None
         try:
@@ -181,17 +190,21 @@ class FlowedQuarkRingedNorm:
             del rng_probe
 
         q0_phase = phase.MomentumPhase(latt_info).getPhases([[0, 0, 0]], [0, 0, 0, 0])
-        for vec_picked, base_idx, hp_idx, xi in iter_noise_sources(
+        for vec_picked, base_idx, hp_idx, spin_idx, color_idx, xi in iter_noise_sources(
             latt_info,
             n_vec,
             n_zn,
             self.noise_scheme,
             self.hp_num_vectors,
             self.hp_ordering,
+            spin_color_dilution=self.spin_color_dilution,
+            include_spin_color=True,
         ):
-            mpi_print(latt_info, f"ringed norm vec {vec_picked} base {base_idx} hp {hp_idx}")
+            mpi_print(latt_info, f"ringed norm vec {vec_picked} base {base_idx} hp {hp_idx} spin {spin_idx} color {color_idx}")
             source_bookkeeping["base_noise_index"][vec_picked] = base_idx
             source_bookkeeping["hp_index"][vec_picked] = hp_idx
+            source_bookkeeping["spin_index"][vec_picked] = spin_idx
+            source_bookkeeping["color_index"][vec_picked] = color_idx
             dirac.loadGauge(U)
             eta = dirac.invert(xi)
 
@@ -209,7 +222,7 @@ class FlowedQuarkRingedNorm:
 
             del U_f, xi, eta
 
-        kinetic_spacetime = np.mean(kinetic_pervec, axis=(0, -1))
+        kinetic_spacetime = kinetic_spacetime_from_raw(kinetic_pervec, self.spin_color_dilution_factor)
         z_field_sqrt, z_bilinear = compute_ringed_factors(kinetic_spacetime, flow_time_values, nc=self.nc)
 
         attrs = {
@@ -234,9 +247,13 @@ class FlowedQuarkRingedNorm:
             "rand_seed": randseed,
             "hp_num_vectors": self.hp_num_vectors,
             "hp_ordering": self.hp_ordering,
+            "spin_color_dilution": self.spin_color_dilution,
+            "spin_color_dilution_factor": self.spin_color_dilution_factor,
+            "spin_color_trace_factor": self.spin_color_dilution_factor,
+            "site_noise_scope": "site_spin_color" if self.spin_color_dilution == "none" else "site_only",
             "effective_n_inversions": n_eff,
             "volume_norm": spatial_volume,
-            "volume_average": "spacetime_average_from_raw_kinetic_pervec",
+            "volume_average": "spin_color_trace_factor_times_spacetime_average_from_raw_kinetic_pervec",
             "flow0_factor": np.nan,
             "derivative_convention": "gamma_mu*(Dplus_mu-Dminus_mu)",
             "field_factor_dataset": "avg/Z_ring_field_sqrt",

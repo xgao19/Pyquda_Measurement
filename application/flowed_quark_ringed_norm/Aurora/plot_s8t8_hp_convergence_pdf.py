@@ -10,16 +10,18 @@ import math
 from pathlib import Path
 
 
-CASES = ["zn1024", "hp64x16", "hp4x256"]
+CASES = ["zn1024", "hp64x16", "hp4x256", "hp6x16sc12"]
 COLORS = {
     "zn1024": (0.10, 0.32, 0.70),
     "hp64x16": (0.80, 0.24, 0.12),
     "hp4x256": (0.25, 0.55, 0.20),
+    "hp6x16sc12": (0.45, 0.24, 0.62),
 }
 LABELS = {
     "zn1024": "pure stochastic",
     "hp64x16": "stochastic HP16",
     "hp4x256": "stochastic HP256",
+    "hp6x16sc12": "HP16 + spin-color dilution",
 }
 
 
@@ -29,8 +31,10 @@ def _read_rows(csv_path):
         for row in csv.DictReader(fp):
             converted = {}
             for key, value in row.items():
-                if key in {"case", "label"}:
+                if key in {"case", "label", "spin_color_dilution"}:
                     converted[key] = value
+                elif value == "":
+                    converted[key] = None
                 elif value == "nan":
                     converted[key] = value
                 else:
@@ -182,7 +186,7 @@ def main():
     canvas.text(
         306,
         736,
-        "Pure stochastic vs stochastic HP16/HP256; flow step 1; matched solves",
+        "Pure stochastic vs HP16/HP256 and HP16+spin-color dilution; flow step 1",
         10,
         color=(0.25, 0.25, 0.25),
         align="center",
@@ -191,7 +195,7 @@ def main():
     _draw_panel(canvas, rows, (82, 115, 494, 255), "Z_bilinear_real", "Z_ring_bilinear(flow=1), real part", "Z real")
 
     for idx, case in enumerate(CASES):
-        y = 704 - 16 * idx
+        y = 704 - 14 * idx
         canvas.line(365, y, 393, y, COLORS[case], 1.8)
         canvas.circle(379, y, 3.2, COLORS[case])
         canvas.text(401, y - 3, LABELS[case], 9)

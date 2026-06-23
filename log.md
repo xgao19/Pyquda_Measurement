@@ -214,3 +214,22 @@ cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Preserved the existing batch API behavior when no callback is supplied, so
   active Aurora and Perlmutter template callers remain compatible.
 - Verified the modified proton EMT module with Python compilation.
+
+## 2026-06-23: Add spin-color dilution to flowed ringed norm
+
+- Added `spin_color_dilution=point` to the flowed-quark ringed-normalization
+  source bookkeeping while preserving the default full spin-color stochastic
+  noise behavior.
+- Kept HP site-only and applied it before broadcasting into exact spin/color
+  basis channels.
+- Extended effective inversion counting, HDF5 raw bookkeeping, and metadata
+  with spin/color indices and spin-color dilution factors.
+- Corrected point-diluted kinetic normalization to use a spin-color trace
+  factor of `12` in the spacetime kinetic average and in convergence analysis.
+- Added the `hp6x16sc12` S8T8 convergence benchmark case to Aurora and
+  Perlmutter helpers and updated the PDF/CSV/JSON analysis.
+- Updated flowed ringed-norm documentation and Perlmutter intern README to
+  describe full spin-color noise, site-only HP, point spin-color dilution, and
+  the benchmark interpretation.
+- Verified Python compilation, shell syntax, and focused tests for flowed
+  ringed norm plus disconnected noise bookkeeping.

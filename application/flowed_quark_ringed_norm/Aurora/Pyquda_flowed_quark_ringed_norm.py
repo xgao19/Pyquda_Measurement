@@ -57,6 +57,7 @@ parameters = {
     "noise_scheme": os.environ.get("FLOWED_RINGED_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("FLOWED_RINGED_HP_NUM_VECTORS", "1")),
     "hp_ordering": os.environ.get("FLOWED_RINGED_HP_ORDERING", "global_xyzt_gray_projected_to_evenodd"),
+    "spin_color_dilution": os.environ.get("FLOWED_RINGED_SPIN_COLOR_DILUTION", "none"),
     "Nc": int(os.environ.get("FLOWED_RINGED_NC", "3")),
     "multigrid": parse_mg_block(os.environ.get("FLOWED_RINGED_MG_BLOCK", "8.8.4.4")),
     "gauge_preprocessing": gauge_preprocessing,
@@ -109,6 +110,7 @@ mpi_print(latt_info, f"--flow_epsilon {parameters['flow_epsilon']}")
 mpi_print(latt_info, f"--flow_steps {parameters['flow_steps']}")
 mpi_print(latt_info, f"--noise_scheme {parameters['noise_scheme']}")
 mpi_print(latt_info, f"--hp_num_vectors {parameters['hp_num_vectors']}")
+mpi_print(latt_info, f"--spin_color_dilution {parameters['spin_color_dilution']}")
 mpi_print(latt_info, f"--gauge_preprocessing {gauge_preprocessing}")
 
 ringed_norm = FlowedQuarkRingedNorm(parameters)

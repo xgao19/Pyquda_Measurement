@@ -28,6 +28,7 @@ run_case() {
   local n_vec="$3"
   local hp_vectors="$4"
   local hp_ordering="$5"
+  local spin_color_dilution="${6:-none}"
 
   local data_dir="$bench_root/data/$case_name"
   local quda_cache="$bench_root/cache/$case_name"
@@ -42,6 +43,7 @@ run_case() {
   echo "  ranks=$ranks geometry=$mpi_geometry"
   echo "  noise=$noise_scheme n_vec=$n_vec hp=$hp_vectors"
   echo "  hp_ordering=$hp_ordering"
+  echo "  spin_color_dilution=$spin_color_dilution"
   echo "  data=$data_dir"
 
   if [[ "${FLOWED_RINGED_SKIP_EXISTING:-0}" == "1" && -f "$expected_h5" ]]; then
@@ -59,6 +61,7 @@ run_case() {
       FLOWED_RINGED_N_VEC="$n_vec" \
       FLOWED_RINGED_HP_NUM_VECTORS="$hp_vectors" \
       FLOWED_RINGED_HP_ORDERING="$hp_ordering" \
+      FLOWED_RINGED_SPIN_COLOR_DILUTION="$spin_color_dilution" \
       QUDA_RESOURCE_PATH="$quda_cache" \
       CUPY_CACHE_DIR="$cupy_cache" \
       bash "$script_dir/run_flowed_quark_ringed_norm.sh" \
@@ -67,9 +70,10 @@ run_case() {
   fi
 }
 
-run_case "zn1024" "zn" "1024" "1" "interleaved_xyzt_binary_projected_to_evenodd"
-run_case "hp64x16" "hierarchical_probing" "64" "16" "interleaved_xyzt_binary_projected_to_evenodd"
-run_case "hp4x256" "hierarchical_probing" "4" "256" "interleaved_xyzt_binary_projected_to_evenodd"
+run_case "zn1024" "zn" "1024" "1" "interleaved_xyzt_binary_projected_to_evenodd" "none"
+run_case "hp64x16" "hierarchical_probing" "64" "16" "interleaved_xyzt_binary_projected_to_evenodd" "none"
+run_case "hp4x256" "hierarchical_probing" "4" "256" "interleaved_xyzt_binary_projected_to_evenodd" "none"
+run_case "hp6x16sc12" "hierarchical_probing" "6" "16" "interleaved_xyzt_binary_projected_to_evenodd" "point"
 
 python3 "$script_dir/analyze_s8t8_hp_convergence.py" --bench-root "$bench_root"
 python3 "$script_dir/plot_s8t8_hp_convergence_pdf.py" --bench-root "$bench_root"

@@ -7,12 +7,13 @@ factor is computed from a kinetic expectation value called `K`.  Once that goal
 is stated, the work here is mostly a numerical linear algebra and code
 pipeline problem.
 
-The benchmark compares three estimators on the same S8T8 test gauge:
+The benchmark compares four estimators on the same S8T8 test gauge:
 
 ```text
 pure stochastic @ 1024 solves
 stochastic HP16 @ 1024 solves
 stochastic HP256 @ 1024 solves
+stochastic HP16 + spin-color point dilution @ 1152 solves
 ```
 
 This is a one-gauge estimator benchmark.  It is meant to help you understand
@@ -106,9 +107,21 @@ same number of expensive Dirac solves.
 
 ## Code Estimator
 
-The code estimates the trace with 4D stochastic volume sources.  In
-`make_zn_noise_fermion(...)`, random `Z_n` phases are assigned over the full
-`LatticeFermion` data array, including the time direction.
+The code estimates the trace with 4D stochastic volume sources.  The default
+mode assigns random `Z_n` phases over the full `LatticeFermion` data array:
+site, spin, and color.
+
+The benchmark also includes one spin-color point-diluted case.  In that mode,
+the random `Z_n` phases live only on the 4D sites, and the spin/color trace is
+covered by exact basis sources:
+
+```text
+site-only Z_n noise * one exact (spin, color) basis vector
+```
+
+There are `4 spin * 3 color = 12` spin-color basis vectors, so this costs 12
+solves per base site-noise/HP vector.  HP vectors are still site-only and are
+broadcast to spin/color.
 
 For each source `xi`, the code solves the unflowed Dirac equation
 
@@ -124,7 +137,9 @@ sum_mu xi(t_f)^\dagger gamma_mu (Dplus_mu - Dminus_mu) eta(t_f)
 ```
 
 using the flowed gauge field.  The implementation records this in
-`raw/kinetic_pervec` and averages that dataset to obtain `K`.
+`raw/kinetic_pervec`.  The stored `K` is the raw spacetime average multiplied by
+`spin_color_trace_factor`; this factor is `1` for full spin-color noise and `12`
+for spin-color point dilution.
 
 The derivative convention written to HDF5 is:
 
@@ -177,25 +192,29 @@ bits.  With `HP_NUM_VECTORS=256`, each complete block covers the next larger
 HP level used in this test.  Only complete HP blocks should be used when
 judging convergence.
 
-The three benchmark cases are:
+The benchmark cases are:
 
 ```text
-case       noise_scheme            N_VEC   HP_NUM_VECTORS   effective solves
-zn1024     zn                      1024    1                1024
-hp64x16    hierarchical_probing    64      16               1024
-hp4x256    hierarchical_probing    4       256              1024
+case          noise_scheme            N_VEC   HP_NUM_VECTORS   spin-color   effective solves
+zn1024        zn                      1024    1                none         1024
+hp64x16       hierarchical_probing    64      16               none         1024
+hp4x256       hierarchical_probing    4       256              none         1024
+hp6x16sc12    hierarchical_probing    6       16               point        1152
 ```
 
 For matched-cost analysis:
 
 ```text
-zn1024:   blocks of 16 independent noises
-hp64x16: complete 16-vector HP cycles
-hp4x256: complete 256-vector HP cycles
+zn1024:     blocks of 16 independent noises
+hp64x16:    complete 16-vector HP cycles
+hp4x256:    complete 256-vector HP cycles
+hp6x16sc12: complete 16-vector HP cycles times 12 spin-color basis sources
 ```
 
-That is why HP256 appears only at 256, 512, and 1024 solves in the summary and
-plot.
+That is why HP256 appears only at 256, 512, and 1024 solves, while the
+spin-color-diluted case appears at 192, 384, 576, 768, 960, and 1152 solves.
+This is a matched-cost-style comparison, not a claim that spin-color dilution is
+always better.
 
 ## HDF5 Layout
 
@@ -214,6 +233,8 @@ raw/kinetic_pervec
 raw/source_index
 raw/base_noise_index
 raw/hp_index
+raw/spin_index
+raw/color_index
 
 avg/kinetic_spacetime
 avg/Z_ring_field_sqrt
@@ -225,7 +246,7 @@ possible to redo block averages and convergence studies after the run.  The
 `avg/` group keeps the full-sample averages and the ringed factors computed
 from those averages.
 
-For the 1024-solve benchmark, the expected shapes are:
+For the original 1024-solve benchmark cases, the expected shapes are:
 
 ```text
 raw/kinetic_pervec      (1024, 2, 8)
@@ -235,12 +256,20 @@ avg/Z_ring_bilinear     (2,)
 flow_times              (2,)
 ```
 
+For the spin-color-diluted benchmark case, the raw shape is:
+
+```text
+raw/kinetic_pervec      (1152, 2, 8)
+```
+
 The bookkeeping datasets mean:
 
 ```text
 source_index      effective source index after HP expansion
 base_noise_index  original stochastic base-noise index
 hp_index          HP sign-vector index for that base noise
+spin_index        exact spin basis index, or -1 for full spin-color noise
+color_index       exact color basis index, or -1 for full spin-color noise
 ```
 
 Important attrs include:
@@ -256,8 +285,9 @@ mass, csw, tol, maxiter
 gauge_preprocessing
 t_boundary
 noise_scheme, n_vec, n_zn, hp_num_vectors, hp_ordering
+spin_color_dilution, spin_color_dilution_factor, spin_color_trace_factor, site_noise_scope
 effective_n_inversions
-volume_average = spacetime_average_from_raw_kinetic_pervec
+volume_average = spin_color_trace_factor_times_spacetime_average_from_raw_kinetic_pervec
 derivative_convention = gamma_mu*(Dplus_mu-Dminus_mu)
 ```
 
@@ -350,7 +380,8 @@ benchmark/s8t8_hp_convergence/s8t8_hp_convergence_results.pdf
 The analyzer uses:
 
 ```text
-K_spacetime(flow=1) = mean(raw/kinetic_pervec[:, 1, :])
+K_spacetime(flow=1)
+  = spin_color_trace_factor * mean(raw/kinetic_pervec[:, 1, :])
 ```
 
 and recomputes
@@ -362,9 +393,10 @@ Z_ring_bilinear(flow=1) = -2 Nc / ((4 pi)^2 t^2 K_spacetime(flow=1)).
 Expected matched solve rows:
 
 ```text
-zn1024:   16, 32, 64, 128, 256, 512, 1024
-hp64x16: 16, 32, 64, 128, 256, 512, 1024
-hp4x256: 256, 512, 1024
+zn1024:     16, 32, 64, 128, 256, 512, 1024
+hp64x16:    16, 32, 64, 128, 256, 512, 1024
+hp4x256:    256, 512, 1024
+hp6x16sc12: 192, 384, 576, 768, 960, 1152
 ```
 
 The PDF has two panels:

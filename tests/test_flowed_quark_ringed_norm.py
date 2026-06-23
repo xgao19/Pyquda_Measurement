@@ -16,7 +16,7 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     hierarchical_probe_pattern,
     validate_hierarchical_probing_options,
 )
-from pyquda_measurement_utils.flowed_quark_ringed_norm import compute_ringed_factors, flow_times
+from pyquda_measurement_utils.flowed_quark_ringed_norm import compute_ringed_factors, flow_times, kinetic_spacetime_from_raw
 from pyquda_measurement_utils.io_corr import (
     get_flowed_quark_ringed_norm_file_tag,
     save_flowed_quark_ringed_norm_hdf5,
@@ -72,6 +72,13 @@ def test_hp_inversion_count_and_power_of_two_validation():
         raise AssertionError("non-power-of-two HP vector count should fail")
 
 
+def test_spin_color_trace_factor_scales_raw_average():
+    raw = np.ones((2, 3, 4), dtype=np.complex128)
+
+    np.testing.assert_allclose(kinetic_spacetime_from_raw(raw, 1), [1.0, 1.0, 1.0])
+    np.testing.assert_allclose(kinetic_spacetime_from_raw(raw, 12), [12.0, 12.0, 12.0])
+
+
 def test_flowed_quark_ringed_tag_helper_uses_generic_directory():
     tag = get_flowed_quark_ringed_norm_file_tag("/data", "lat", 9, "ama", [1, 2, 3, 4], "sm")
     assert tag == "/data/FlowedQuarkRinged/lat.FlowedQuarkRinged.9.ama.x1y2z3t4.sm"
@@ -88,11 +95,17 @@ def test_flowed_quark_ringed_hdf5_schema(tmp_path):
         "normalization_scope": "all_flowed_quark_fields",
         "operator": "bar_chi_overleftrightarrow_Dslash_chi",
         "flow0_factor": np.nan,
+        "spin_color_dilution": "point",
+        "spin_color_dilution_factor": 12,
+        "spin_color_trace_factor": 12,
+        "site_noise_scope": "site_only",
     }
     source_bookkeeping = {
         "source_index": [0, 1],
         "base_noise_index": [0, 1],
         "hp_index": [0, 0],
+        "spin_index": [0, 0],
+        "color_index": [0, 1],
     }
 
     save_flowed_quark_ringed_norm_hdf5(
@@ -109,10 +122,16 @@ def test_flowed_quark_ringed_hdf5_schema(tmp_path):
     with h5py.File(tag + ".h5", "r") as h5:
         assert h5.attrs["measurement"] == "flowed_quark_ringed_norm"
         assert h5.attrs["normalization_scope"] == "all_flowed_quark_fields"
+        assert h5.attrs["spin_color_dilution"] == "point"
+        assert h5.attrs["spin_color_dilution_factor"] == 12
+        assert h5.attrs["spin_color_trace_factor"] == 12
+        assert h5.attrs["site_noise_scope"] == "site_only"
         assert np.isnan(h5.attrs["flow0_factor"])
         np.testing.assert_allclose(h5["flow_times"][...], times)
         assert h5["raw/kinetic_pervec"].shape == (2, 3, 4)
         assert h5["raw/source_index"].shape == (2,)
+        np.testing.assert_array_equal(h5["raw/spin_index"][...], [0, 0])
+        np.testing.assert_array_equal(h5["raw/color_index"][...], [0, 1])
         assert "kinetic_timeslice" not in h5["avg"]
         assert h5["avg/kinetic_spacetime"].shape == (3,)
         assert h5["avg/Z_ring_field_sqrt"].shape == (3,)
