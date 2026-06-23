@@ -468,3 +468,17 @@ commit, and update `log.md` with the intended commit title and summary first.
 - Active Aurora and Perlmutter proton EMT application callers were updated.
 - Historical validation scripts outside the active workflow may still use the
   old helper signature and should be treated as archived snapshots.
+
+## Proton EMT Per-Source Completion Callback
+
+- `ProtonQuarkEMT.connected_3pt(...)` now accepts an optional
+  `on_source_done` callback.
+- The callback is invoked immediately after one source finishes
+  `_connected_3pt_one_source(...)`, before the next source begins.
+- This preserves the batch workflow and single multigrid setup while allowing
+  run drivers to update per-source `sample_log` entries as soon as a source is
+  complete.
+- The callback is optional, so existing proton EMT callers that do not need
+  completion logging keep their previous behavior.
+- The l64 `EMT_proton_connected_UD` production driver uses this hook outside
+  the repo to log one completed source at a time.

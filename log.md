@@ -203,3 +203,14 @@ cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Updated the output-convention documentation and tag-helper regression test.
 - Verified Python compilation, all three tag-helper tests, and HDF5 metadata
   round-trip for a length-one `tsep` axis.
+
+## 2026-06-23: Add proton EMT per-source completion callback
+
+- Added an optional `on_source_done` callback to
+  `ProtonQuarkEMT.connected_3pt(...)`.
+- The callback runs after each source finishes successfully, allowing external
+  run drivers to record per-source completion without waiting for the full
+  source batch to return.
+- Preserved the existing batch API behavior when no callback is supplied, so
+  active Aurora and Perlmutter template callers remain compatible.
+- Verified the modified proton EMT module with Python compilation.

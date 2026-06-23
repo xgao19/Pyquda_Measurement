@@ -482,7 +482,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
             )
             del C3_chi, C3_Tmunu
 
-    def connected_3pt(self, gauge, invPara, source_jobs, interpolator="5"):
+    def connected_3pt(self, gauge, invPara, source_jobs, interpolator="5", on_source_done=None):
         """Compute connected proton U/D quark EMT 3pt functions for source jobs."""
         U = gauge
         latt_info = U.latt_info
@@ -499,7 +499,10 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
             src_pos = source_job["src_pos"]
             source_t0 = perf_counter()
             mpi_print(latt_info, f"--source_start index={src_idx} src_pos={src_pos}")
-            results.append(self._connected_3pt_one_source(dirac, U, source_job, interpolator=interpolator))
+            result = self._connected_3pt_one_source(dirac, U, source_job, interpolator=interpolator)
+            results.append(result)
+            if on_source_done is not None:
+                on_source_done(source_job, result)
             timer_fields = {"src_idx": src_idx, "src_pos": src_pos}
             if "config" in source_job:
                 timer_fields["config"] = source_job["config"]
