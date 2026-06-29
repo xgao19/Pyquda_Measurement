@@ -65,3 +65,105 @@ FLOWED_RINGED_SPIN_COLOR_DILUTION
 For l64 connected-production matching, use the same gauge preprocessing, mass,
 clover coefficient, and flow schedule as the quark operator data being
 normalized.
+
+## l64c64a076 Real-Volume Benchmark Note
+
+The scripts in this directory remain the S8T8/S8T32 Aurora application.  The
+real l64 benchmark was staged outside the repository under:
+
+```text
+/lus/flare/projects/StructNGB/xgao/run/l64c64a076/EMT_proton/flowed_ringed_l64_prod256_benchmark/
+```
+
+The current partial convergence plot from that run is archived here:
+
+```text
+application/flowed_quark_ringed_norm/Aurora/l64_hp_convergence_prod256_results.pdf
+```
+
+That l64 test used config `1050` and the connected-proton production quark
+inversion conventions:
+
+```text
+FLOWED_RINGED_LAT_TAG=l64c64a076
+FLOWED_RINGED_CONFIG_NUM=1050
+FLOWED_RINGED_FLOW_TYPE=symanzik
+FLOWED_RINGED_FLOW_EPSILON=0.09
+FLOWED_RINGED_FLOW_STEPS=1
+FLOWED_RINGED_MASS=-0.049
+FLOWED_RINGED_CSW=1.0372
+FLOWED_RINGED_TOL=1e-10
+FLOWED_RINGED_MAXITER=5000
+FLOWED_RINGED_MG_BLOCK=4.4.4.4;4.4.2.2
+FLOWED_RINGED_HYP_PROJECT=-1
+FLOWED_RINGED_T_BOUNDARY=-1
+FLOWED_RINGED_MPI_GEOMETRY=2.2.4.4
+```
+
+The production-queue benchmark was organized as 32 independent shards:
+
+```text
+4 estimator cases x 8 random-seed shards
+8 Aurora nodes / 64 ranks per shard
+256 nodes total
+```
+
+The estimator cases were:
+
+```text
+zn1024        pure stochastic, 1024 solves per seed shard
+hp64x16       stochastic HP16, 1024 solves per seed shard
+hp4x256       stochastic HP256, 1024 solves per seed shard
+hp6x16sc12    HP16 plus spin-color point dilution, 1152 solves per seed shard
+```
+
+Block HDF5 checkpointing was enabled for this run:
+
+```text
+FLOWED_RINGED_BLOCK_WRITE=1
+FLOWED_RINGED_BLOCK_MIN_SOLVES=256
+FLOWED_RINGED_SAVE_FULL=0
+```
+
+The block sizes were `256` solves for `zn1024`, `hp64x16`, and `hp4x256`, and
+`384` solves for `hp6x16sc12`.  This means walltime kills preserve completed
+block files, but work inside an unfinished block is not included in the HDF5
+data product.
+
+The 7-hour prod job was killed by walltime after `07:01:28`.  The checkpoint
+files preserved these completed solves:
+
+```text
+zn1024:       1536 / 8192 solves
+hp64x16:      1792 / 8192 solves
+hp4x256:      1536 / 8192 solves
+hp6x16sc12:    384 / 9216 solves
+```
+
+All written block files confirm `mass=-0.049`, `csw=1.0372`, `tol=1e-10`, and
+`maxiter=5000` in their HDF5 attributes.  The one fully completed shard,
+`hp64x16_seed04`, took `21773.63 s` for `1024` solves, or about `21.3 s/solve`.
+Across the 32 concurrent shards, however, the observed throughput varied by
+more than an order of magnitude.  This is the main reason most shards did not
+finish in 7 hours.
+
+Current partial-data conclusion:
+
+```text
+At matched available solve counts, HP256 has the smallest observed block SEM.
+HP16 is clearly better than pure stochastic.
+HP16 plus spin-color dilution is not yet fairly comparable because only
+384 completed solves were written.
+```
+
+Representative relative SEM values from the partial summary are:
+
+```text
+pure stochastic @ 1024 solves: 4.11e-5
+HP16            @ 1024 solves: 2.46e-5
+HP256           @ 1024 solves: 1.42e-5
+HP16+SC         @  384 solves: 2.68e-5
+```
+
+The current numerical values are mutually consistent, with
+`K_spacetime(flow=1) ~= 1.4189` and `Z_ring_bilinear(flow=1) ~= -3.3059`.

@@ -63,6 +63,38 @@ def kinetic_spacetime_from_raw(kinetic_pervec, spin_color_trace_factor=1):
     return float(spin_color_trace_factor) * np.mean(kinetic_pervec, axis=(0, -1))
 
 
+def natural_estimator_block_size(noise_scheme, hp_num_vectors, spin_color_dilution="none"):
+    """Return the smallest complete estimator unit in solves."""
+    scheme = normalize_noise_scheme(noise_scheme)
+    hp_factor = int(hp_num_vectors) if scheme == "hierarchical_probing" else 1
+    return hp_factor * spin_color_dilution_factor(spin_color_dilution)
+
+
+def complete_block_size_ge_min(natural_block_size, min_solves=256):
+    """Return the smallest multiple of natural_block_size no smaller than min_solves."""
+    natural = int(natural_block_size)
+    minimum = int(min_solves)
+    if natural <= 0:
+        raise ValueError(f"natural_block_size should be positive, got {natural_block_size}")
+    if minimum <= 0:
+        raise ValueError(f"min_solves should be positive, got {min_solves}")
+    return ((minimum + natural - 1) // natural) * natural
+
+
+def flowed_quark_ringed_norm_block_tag(tag, block_index, block_start, block_stop_exclusive):
+    """Return the output tag for a complete block HDF5 file."""
+    return (
+        f"{tag}.block{int(block_index):04d}"
+        f".src{int(block_start):06d}-{int(block_stop_exclusive) - 1:06d}"
+    )
+
+
+def _as_bool(value):
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def _gamma_matrix(gamma_like):
     if hasattr(gamma_like, "matrix"):
         return gamma_like.matrix
@@ -103,7 +135,103 @@ class FlowedQuarkRingedNorm:
         self.multigrid = parameters.get("multigrid", [[8, 8, 4, 4]])
         self.gauge_preprocessing = parameters.get("gauge_preprocessing", "unspecified")
         self.flavor_convention = parameters.get("flavor_convention", "single_flavor_trace_for_this_dirac_operator")
+        self.block_write = _as_bool(parameters.get("block_write", False))
+        self.block_min_solves = int(parameters.get("block_min_solves", 256))
+        self.save_full = _as_bool(parameters.get("save_full", True))
+        self.natural_block_size = natural_estimator_block_size(
+            self.noise_scheme,
+            self.hp_num_vectors,
+            self.spin_color_dilution,
+        )
+        self.block_size = complete_block_size_ge_min(self.natural_block_size, self.block_min_solves)
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
+
+    def _metadata_attrs(self, latt_info, invPara, randPara, n_eff, spatial_volume):
+        n_vec, n_zn, randseed = randPara
+        mass, csw, tol, maxiter = invPara
+        flow_time_values = flow_times(self.flow_epsilon, self.flow_steps)
+        return {
+            "measurement": "flowed_quark_ringed_norm",
+            "normalization_scope": "all_flowed_quark_fields",
+            "operator": "bar_chi_overleftrightarrow_Dslash_chi",
+            "Nc": self.nc,
+            "flavor_convention": self.flavor_convention,
+            "flow_type": self.flow_type,
+            "flow_epsilon": self.flow_epsilon,
+            "flow_steps": self.flow_steps,
+            "flow_times": flow_time_values,
+            "mass": mass,
+            "csw": csw,
+            "tol": tol,
+            "maxiter": maxiter,
+            "gauge_preprocessing": self.gauge_preprocessing,
+            "t_boundary": latt_info.t_boundary,
+            "noise_scheme": self.noise_scheme,
+            "n_vec": n_vec,
+            "n_zn": n_zn,
+            "rand_seed": randseed,
+            "hp_num_vectors": self.hp_num_vectors,
+            "hp_ordering": self.hp_ordering,
+            "spin_color_dilution": self.spin_color_dilution,
+            "spin_color_dilution_factor": self.spin_color_dilution_factor,
+            "spin_color_trace_factor": self.spin_color_dilution_factor,
+            "site_noise_scope": "site_spin_color" if self.spin_color_dilution == "none" else "site_only",
+            "effective_n_inversions": n_eff,
+            "effective_n_inversions_total": n_eff,
+            "volume_norm": spatial_volume,
+            "volume_average": "spin_color_trace_factor_times_spacetime_average_from_raw_kinetic_pervec",
+            "flow0_factor": np.nan,
+            "derivative_convention": "gamma_mu*(Dplus_mu-Dminus_mu)",
+            "field_factor_dataset": "avg/Z_ring_field_sqrt",
+            "bilinear_factor_dataset": "avg/Z_ring_bilinear",
+            "block_output": False,
+            "block_complete_policy": "smallest_complete_estimator_block_ge_min_solves",
+            "natural_block_size": self.natural_block_size,
+            "block_min_solves": self.block_min_solves,
+            "configured_block_size": self.block_size,
+            "monolithic_full_output": self.save_full,
+        }
+
+    def _write_block_file(
+        self,
+        tag,
+        kinetic_pervec,
+        flow_time_values,
+        base_attrs,
+        source_bookkeeping,
+        block_index,
+        block_start,
+        block_stop,
+    ):
+        block_raw = kinetic_pervec[block_start:block_stop]
+        block_kinetic = kinetic_spacetime_from_raw(block_raw, self.spin_color_dilution_factor)
+        block_z_field, block_z_bilinear = compute_ringed_factors(block_kinetic, flow_time_values, nc=self.nc)
+        block_attrs = dict(base_attrs)
+        block_attrs.update(
+            {
+                "block_output": True,
+                "block_index": int(block_index),
+                "block_start": int(block_start),
+                "block_stop_exclusive": int(block_stop),
+                "block_size": int(block_stop - block_start),
+                "block_source_count": int(block_stop - block_start),
+                "monolithic_full_output": self.save_full,
+            }
+        )
+        block_bookkeeping = {
+            name: np.asarray(values[block_start:block_stop], dtype=np.int32)
+            for name, values in source_bookkeeping.items()
+        }
+        save_flowed_quark_ringed_norm_hdf5(
+            flowed_quark_ringed_norm_block_tag(tag, block_index, block_start, block_stop),
+            block_raw,
+            block_kinetic,
+            block_z_field,
+            block_z_bilinear,
+            flow_time_values,
+            attrs=block_attrs,
+            source_bookkeeping=block_bookkeeping,
+        )
 
     @staticmethod
     def _project_zero_momentum_per_time(latt_info, local_field, q0_phase):
@@ -178,6 +306,16 @@ class FlowedQuarkRingedNorm:
         n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors, self.spin_color_dilution)
         kinetic_pervec = np.zeros((n_eff, n_flow, nt), dtype=np.complex128)
         source_bookkeeping = source_bookkeeping_arrays(n_eff, include_spin_color=True)
+        attrs = self._metadata_attrs(latt_info, invPara, randPara, n_eff, spatial_volume)
+        if self.block_write:
+            mpi_print(
+                latt_info,
+                (
+                    "Flowed-quark ringed normalization block output enabled: "
+                    f"natural_block_size={self.natural_block_size}, block_size={self.block_size}, "
+                    f"save_full={self.save_full}"
+                ),
+            )
 
         rng_probe = None
         try:
@@ -222,44 +360,30 @@ class FlowedQuarkRingedNorm:
 
             del U_f, xi, eta
 
+            if self.block_write and (vec_picked + 1) % self.block_size == 0:
+                block_stop = vec_picked + 1
+                block_start = block_stop - self.block_size
+                block_index = block_start // self.block_size
+                mpi_print(
+                    latt_info,
+                    f"writing ringed norm block {block_index} sources {block_start}:{block_stop}",
+                )
+                if tag is not None and latt_info.mpi_rank == 0:
+                    self._write_block_file(
+                        tag,
+                        kinetic_pervec,
+                        flow_time_values,
+                        attrs,
+                        source_bookkeeping,
+                        block_index,
+                        block_start,
+                        block_stop,
+                    )
+
         kinetic_spacetime = kinetic_spacetime_from_raw(kinetic_pervec, self.spin_color_dilution_factor)
         z_field_sqrt, z_bilinear = compute_ringed_factors(kinetic_spacetime, flow_time_values, nc=self.nc)
 
-        attrs = {
-            "measurement": "flowed_quark_ringed_norm",
-            "normalization_scope": "all_flowed_quark_fields",
-            "operator": "bar_chi_overleftrightarrow_Dslash_chi",
-            "Nc": self.nc,
-            "flavor_convention": self.flavor_convention,
-            "flow_type": self.flow_type,
-            "flow_epsilon": self.flow_epsilon,
-            "flow_steps": self.flow_steps,
-            "flow_times": flow_time_values,
-            "mass": mass,
-            "csw": csw,
-            "tol": tol,
-            "maxiter": maxiter,
-            "gauge_preprocessing": self.gauge_preprocessing,
-            "t_boundary": latt_info.t_boundary,
-            "noise_scheme": self.noise_scheme,
-            "n_vec": n_vec,
-            "n_zn": n_zn,
-            "rand_seed": randseed,
-            "hp_num_vectors": self.hp_num_vectors,
-            "hp_ordering": self.hp_ordering,
-            "spin_color_dilution": self.spin_color_dilution,
-            "spin_color_dilution_factor": self.spin_color_dilution_factor,
-            "spin_color_trace_factor": self.spin_color_dilution_factor,
-            "site_noise_scope": "site_spin_color" if self.spin_color_dilution == "none" else "site_only",
-            "effective_n_inversions": n_eff,
-            "volume_norm": spatial_volume,
-            "volume_average": "spin_color_trace_factor_times_spacetime_average_from_raw_kinetic_pervec",
-            "flow0_factor": np.nan,
-            "derivative_convention": "gamma_mu*(Dplus_mu-Dminus_mu)",
-            "field_factor_dataset": "avg/Z_ring_field_sqrt",
-            "bilinear_factor_dataset": "avg/Z_ring_bilinear",
-        }
-        if tag is not None and latt_info.mpi_rank == 0:
+        if tag is not None and latt_info.mpi_rank == 0 and self.save_full:
             save_flowed_quark_ringed_norm_hdf5(
                 tag,
                 kinetic_pervec,
@@ -275,7 +399,10 @@ class FlowedQuarkRingedNorm:
 
 __all__ = [
     "FlowedQuarkRingedNorm",
+    "complete_block_size_ge_min",
     "compute_ringed_factors",
+    "flowed_quark_ringed_norm_block_tag",
     "flow_times",
+    "natural_estimator_block_size",
     "normalize_flow_type",
 ]

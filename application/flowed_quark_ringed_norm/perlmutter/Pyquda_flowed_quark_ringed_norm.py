@@ -24,6 +24,13 @@ def parse_mg_block(text):
     return blocks or None
 
 
+def parse_bool_env(name, default):
+    text = os.environ.get(name)
+    if text is None:
+        return default
+    return str(text).strip().lower() in {"1", "true", "yes", "on"}
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, default=int(os.environ.get("FLOWED_RINGED_CONFIG_NUM", "0")))
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("FLOWED_RINGED_MPI_GEOMETRY", "1.1.1.1"))
@@ -66,6 +73,9 @@ parameters = {
         "FLOWED_RINGED_FLAVOR_CONVENTION",
         "single_flavor_trace_for_this_dirac_operator",
     ),
+    "block_write": parse_bool_env("FLOWED_RINGED_BLOCK_WRITE", False),
+    "block_min_solves": int(os.environ.get("FLOWED_RINGED_BLOCK_MIN_SOLVES", "256")),
+    "save_full": parse_bool_env("FLOWED_RINGED_SAVE_FULL", True),
 }
 
 init(mpi_geometry, enable_mps=True)
@@ -107,6 +117,9 @@ mpi_print(latt_info, f"--noise_scheme {parameters['noise_scheme']}")
 mpi_print(latt_info, f"--hp_num_vectors {parameters['hp_num_vectors']}")
 mpi_print(latt_info, f"--hp_ordering {parameters['hp_ordering']}")
 mpi_print(latt_info, f"--spin_color_dilution {parameters['spin_color_dilution']}")
+mpi_print(latt_info, f"--block_write {parameters['block_write']}")
+mpi_print(latt_info, f"--block_min_solves {parameters['block_min_solves']}")
+mpi_print(latt_info, f"--save_full {parameters['save_full']}")
 mpi_print(latt_info, f"--gauge_preprocessing {gauge_preprocessing}")
 
 ringed_norm = FlowedQuarkRingedNorm(parameters)

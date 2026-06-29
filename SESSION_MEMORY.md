@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-06-22
+Last updated: 2026-06-29
 
 This file is for reusable knowledge, stable run tips, repeated pitfalls, and
 validated cluster/code/test facts.  Historical commit-style progress should go
@@ -216,10 +216,28 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
     `C3_Tmunu max_rel ~ 4.8e-16`
   - q=0 explicit-q output matched old no-q baseline at the true q=0 index.
 - Ringed fermion normalization data:
-  - reconstruct from quark 1pt diagonal `Tmunu` at q=0:
-    `avg/Tmunu/T11`, `T22`, `T33`, `T44`
-  - `CHI` is a scalar trace/noise diagnostic, not the standard ringed-fermion
-    normalization by itself.
+  - use the standalone flowed-quark ringed-normalization workflow under
+    `application/flowed_quark_ringed_norm`.
+  - HDF5 data live under `FlowedQuarkRinged/` and store
+    `raw/kinetic_pervec`, `avg/kinetic_spacetime`,
+    `avg/Z_ring_field_sqrt`, and `avg/Z_ring_bilinear`.
+  - `Z_ring_bilinear` is the factor for ordinary flowed quark bilinears; it
+    should be applied only when the consumer's flow schedule, Dirac operator,
+    gauge preprocessing, and flavor convention match the normalization file.
+  - Optional block checkpointing is controlled by
+    `FLOWED_RINGED_BLOCK_WRITE`, `FLOWED_RINGED_BLOCK_MIN_SOLVES`, and
+    `FLOWED_RINGED_SAVE_FULL`.
+  - Complete-block output keeps old monolithic output disabled only when
+    requested; default workflows still write the final monolithic HDF5.
+  - l64c64a076 prod256 benchmark outputs were staged under
+    `/lus/flare/projects/StructNGB/xgao/run/l64c64a076/EMT_proton/flowed_ringed_l64_prod256_benchmark/`.
+    The archived partial convergence plot is
+    `application/flowed_quark_ringed_norm/Aurora/l64_hp_convergence_prod256_results.pdf`.
+  - In the partial l64 benchmark, all written block files confirmed
+    `mass=-0.049`, `csw=1.0372`, `tol=1e-10`, and `maxiter=5000`.
+    Existing data favored HP256 over HP16 and pure stochastic by block SEM,
+    while HP16 plus spin-color dilution did not yet have enough completed
+    solves for a fair comparison.
 - Gluon 1pt code saves the full gluonic building block, not a traceless EMT
   projection.  `_F_clover_traceless` only projects field-strength matrices onto
   the su(3) algebra.

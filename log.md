@@ -1,10 +1,60 @@
 # PyQUDA Measurement Work Log
 
 This file records commit-oriented history.  Before each commit, add a short
-entry with the intended commit title and the main changes.  Keep reusable tips,
-cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
+entry with the intended commit date, title, and main changes.  Keep reusable
+tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
-## Pending Commit: Remove embedded C2 from EMT quark 3pt outputs
+## 2026-06-29: Add flowed ringed-norm block checkpoints
+
+- Added optional complete-block HDF5 checkpoint output for standalone
+  flowed-quark ringed normalization, preserving the existing monolithic output
+  path by default.
+- Added block sizing and filename helpers so pure stochastic, HP16, HP256, and
+  HP16 plus spin-color point dilution write complete estimator blocks at or
+  above the configured minimum solve count.
+- Exposed `FLOWED_RINGED_BLOCK_WRITE`, `FLOWED_RINGED_BLOCK_MIN_SOLVES`, and
+  `FLOWED_RINGED_SAVE_FULL` in the Aurora and Perlmutter ringed-norm drivers.
+- Added unit/schema tests for block sizing, block file naming, and block HDF5
+  metadata.
+- Updated the Aurora ringed-norm README with the l64c64a076 prod256 benchmark
+  setup, partial-data conclusions, and archived convergence PDF.
+- Added a `.gitattributes` rule so archived PDFs are treated as binary files
+  during Git diff checks.
+- Verified Python compilation, shell syntax for the prod256 helpers, focused
+  flowed ringed-norm tests in the Aurora PyQUDA develop environment, and a
+  synthetic block-file analyzer smoke.
+
+## 2026-06-23: Add spin-color dilution for flowed ringed norm
+
+- Added `spin_color_dilution=point` to the flowed-quark ringed-normalization
+  source bookkeeping while preserving the default full spin-color stochastic
+  noise behavior.
+- Kept HP site-only and applied it before broadcasting into exact spin/color
+  basis channels.
+- Extended effective inversion counting, HDF5 raw bookkeeping, and metadata
+  with spin/color indices and spin-color dilution factors.
+- Corrected point-diluted kinetic normalization to use a spin-color trace
+  factor of `12` in the spacetime kinetic average and in convergence analysis.
+- Added the `hp6x16sc12` S8T8 convergence benchmark case to Aurora and
+  Perlmutter helpers and updated the PDF/CSV/JSON analysis.
+- Updated flowed ringed-norm documentation and Perlmutter intern README to
+  describe full spin-color noise, site-only HP, point spin-color dilution, and
+  the benchmark interpretation.
+- Verified Python compilation, shell syntax, and focused tests for flowed
+  ringed norm plus disconnected noise bookkeeping.
+
+## 2026-06-23: Add proton EMT source completion callback
+
+- Added an optional `on_source_done` callback to
+  `ProtonQuarkEMT.connected_3pt(...)`.
+- The callback runs after each source finishes successfully, allowing external
+  run drivers to record per-source completion without waiting for the full
+  source batch to return.
+- Preserved the existing batch API behavior when no callback is supplied, so
+  active Aurora and Perlmutter template callers remain compatible.
+- Verified the modified proton EMT module with Python compilation.
+
+## 2026-06-22: Remove embedded C2 from EMT quark 3pt outputs
 
 - Changed `save_emt_quark_3pt_hdf5(...)` to save only `C3_chi`,
   `C3_Tmunu`, and optional `momentum_transfer_list`; quark EMT 3pt files no
@@ -16,7 +66,7 @@ cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Validated syntax for touched Python files and ran
   `tests/test_emt_hdf5_schema.py` successfully.
 
-## Pending Commit: Add Perlmutter ringed-norm HP benchmark
+## 2026-06-22: Add Perlmutter ringed-norm HP benchmark
 
 - Added `application/flowed_quark_ringed_norm/perlmutter` with login smoke,
   single-measurement runner, one-node S8T8 HP convergence benchmark, Slurm
@@ -29,7 +79,24 @@ cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Validated Python/shell syntax and `tests/test_flowed_quark_ringed_norm.py`
   under the Aurora PyQUDA develop environment.
 
-## Pending Commit: Add EMT disconnected full-workflow diagnostic
+## 2026-06-18: Encode proton EMT 3pt sink kinematics in file names
+
+- Changed `get_emt_proton_quark_3pt_file_tag(...)` to require `pf` and one
+  `t_sep`.
+- Appended `PX<px>PY<py>PZ<pz>dt<tsep>` to connected proton EMT 3pt tags,
+  matching the established nucleon TMD naming convention.
+- Wrote multiple source-sink separations as separate HDF5 files while keeping a
+  length-one `tsep` axis in each file.
+- Added the single-value `t_separations` HDF5 attribute so it explicitly labels
+  the corresponding `C3_chi` and `C3_Tmunu` axis.
+- Updated the Aurora and Perlmutter proton EMT application callers.
+- Kept proton 2pt file names unchanged because they are independent of
+  source-sink separation.
+- Updated the output-convention documentation and tag-helper regression test.
+- Verified Python compilation, all three tag-helper tests, and HDF5 metadata
+  round-trip for a length-one `tsep` axis.
+
+## 2026-06-10: Add EMT disconnected full-workflow diagnostic
 
 - Added proton `C2` generation and disconnected `C2 x 1pt` merger scripts under
   `application/EMT_disconnected_1pt/perlmutter`.
@@ -38,15 +105,7 @@ cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Validated syntax, `login32` S8T32 quark/gluon/C2/build smoke workflow, and
   one-config plus fake two-config HDF5 schema behavior.
 
-## Pending Commit: Add Aurora proton EMT connected workflow
-
-- Added `application/EMT_proton/Aurora` for connected quark EMT 3pt plus proton
-  2pt only.
-- Added Aurora/SYCL driver, run script, PBS submit script, README, and ignore
-  rules for data/cache/log outputs.
-- Validated Python and shell syntax locally; no Aurora runtime test was run.
-
-## Pending Commit: Fix proton EMT left derivative and raw-only sequential builder
+## 2026-06-02: Fix proton EMT left derivative and raw-only sequential builder
 
 - Fixed proton connected EMT `C3_Tmunu` left-acting derivative by differentiating
   the raw sequential propagator before the final gamma5-hermiticity/index
@@ -60,6 +119,14 @@ cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Validated on Aurora S8T32 point-source gauge-covariance tests: local
   `C3_Tmunu` relative diff improved from `0.4599556563267348` to
   `9.244013511964703e-12`; `C2` and `C3_chi` stayed unchanged.
+
+## 2026-05-29: Add Aurora proton EMT connected workflow
+
+- Added `application/EMT_proton/Aurora` for connected quark EMT 3pt plus proton
+  2pt only.
+- Added Aurora/SYCL driver, run script, PBS submit script, README, and ignore
+  rules for data/cache/log outputs.
+- Validated Python and shell syntax locally; no Aurora runtime test was run.
 
 ## 2026-05-21: Generalize pion current-response docs
 
@@ -186,50 +253,3 @@ cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Added Perlmutter helper scripts under:
   `systems/perlmutter`.
 - Validated gradient-flow smoke test on `login32`.
-
-## 2026-06-18: Encode proton EMT 3pt sink kinematics in file names
-
-- Changed `get_emt_proton_quark_3pt_file_tag(...)` to require `pf` and one
-  `t_sep`.
-- Appended `PX<px>PY<py>PZ<pz>dt<tsep>` to connected proton EMT 3pt tags,
-  matching the established nucleon TMD naming convention.
-- Wrote multiple source-sink separations as separate HDF5 files while keeping a
-  length-one `tsep` axis in each file.
-- Added the single-value `t_separations` HDF5 attribute so it explicitly labels
-  the corresponding `C3_chi` and `C3_Tmunu` axis.
-- Updated the Aurora and Perlmutter proton EMT application callers.
-- Kept proton 2pt file names unchanged because they are independent of
-  source-sink separation.
-- Updated the output-convention documentation and tag-helper regression test.
-- Verified Python compilation, all three tag-helper tests, and HDF5 metadata
-  round-trip for a length-one `tsep` axis.
-
-## 2026-06-23: Add proton EMT per-source completion callback
-
-- Added an optional `on_source_done` callback to
-  `ProtonQuarkEMT.connected_3pt(...)`.
-- The callback runs after each source finishes successfully, allowing external
-  run drivers to record per-source completion without waiting for the full
-  source batch to return.
-- Preserved the existing batch API behavior when no callback is supplied, so
-  active Aurora and Perlmutter template callers remain compatible.
-- Verified the modified proton EMT module with Python compilation.
-
-## 2026-06-23: Add spin-color dilution to flowed ringed norm
-
-- Added `spin_color_dilution=point` to the flowed-quark ringed-normalization
-  source bookkeeping while preserving the default full spin-color stochastic
-  noise behavior.
-- Kept HP site-only and applied it before broadcasting into exact spin/color
-  basis channels.
-- Extended effective inversion counting, HDF5 raw bookkeeping, and metadata
-  with spin/color indices and spin-color dilution factors.
-- Corrected point-diluted kinetic normalization to use a spin-color trace
-  factor of `12` in the spacetime kinetic average and in convergence analysis.
-- Added the `hp6x16sc12` S8T8 convergence benchmark case to Aurora and
-  Perlmutter helpers and updated the PDF/CSV/JSON analysis.
-- Updated flowed ringed-norm documentation and Perlmutter intern README to
-  describe full spin-color noise, site-only HP, point spin-color dilution, and
-  the benchmark interpretation.
-- Verified Python compilation, shell syntax, and focused tests for flowed
-  ringed norm plus disconnected noise bookkeeping.
