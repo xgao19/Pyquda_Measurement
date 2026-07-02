@@ -36,7 +36,12 @@ run_case() {
   local sm_tag="S8T8_${case_name}"
 
   mkdir -p "$data_dir" "$quda_cache" "$cupy_cache"
-  local expected_h5="$data_dir/FlowedQuarkRinged/S8T8.FlowedQuarkRinged.${config_num}.0.x0y0z0t0.${sm_tag}.h5"
+  local expected_h5
+  if [[ "$case_name" == "hp6x16sc12" ]]; then
+    expected_h5="$data_dir/FlowedQuarkRinged/S8T8.FlowedQuarkRinged.${config_num}.0.${sm_tag}.block0017.src001088-001151.h5"
+  else
+    expected_h5="$data_dir/FlowedQuarkRinged/S8T8.FlowedQuarkRinged.${config_num}.0.${sm_tag}.block0015.src000960-001023.h5"
+  fi
 
   echo "Running $case_name"
   echo "  gauge=$gauge_path"

@@ -51,7 +51,12 @@ run_case() {
   export QUDA_RESOURCE_PATH="$bench_root/cache/$case_name"
 
   mkdir -p "$FLOWED_RINGED_DATA_DIR" "$QUDA_RESOURCE_PATH"
-  local expected_h5="$FLOWED_RINGED_DATA_DIR/FlowedQuarkRinged/S8T8.FlowedQuarkRinged.${FLOWED_RINGED_CONFIG_NUM}.0.x0y0z0t0.S8T8_${case_name}.h5"
+  local expected_h5
+  if [[ "$case_name" == "hp6x16sc12" ]]; then
+    expected_h5="$FLOWED_RINGED_DATA_DIR/FlowedQuarkRinged/S8T8.FlowedQuarkRinged.${FLOWED_RINGED_CONFIG_NUM}.0.S8T8_${case_name}.block0017.src001088-001151.h5"
+  else
+    expected_h5="$FLOWED_RINGED_DATA_DIR/FlowedQuarkRinged/S8T8.FlowedQuarkRinged.${FLOWED_RINGED_CONFIG_NUM}.0.S8T8_${case_name}.block0015.src000960-001023.h5"
+  fi
 
   echo "Running $case_name"
   echo "  gauge=$FLOWED_RINGED_GAUGE_PATH"

@@ -218,7 +218,7 @@ always better.
 
 ## HDF5 Layout
 
-Each run writes one file under:
+Each run writes fixed-interval block files under:
 
 ```text
 benchmark/s8t8_hp_convergence/data/<case>/FlowedQuarkRinged/
@@ -241,26 +241,28 @@ avg/Z_ring_field_sqrt
 avg/Z_ring_bilinear
 ```
 
-The `raw/` group keeps the per-effective-solve data.  This is what makes it
-possible to redo block averages and convergence studies after the run.  The
-`avg/` group keeps the full-sample averages and the ringed factors computed
-from those averages.
+The `raw/` group keeps the per-effective-solve data for one interval.  This is
+what makes it possible to redo block averages and convergence studies after the
+run by concatenating `.block*.h5` files.  The `avg/` group keeps that interval's
+averages and the ringed factors computed from those averages.
 
-For the original 1024-solve benchmark cases, the expected shapes are:
+With the default `FLOWED_RINGED_BLOCK_INTERVAL_SOLVES=64`, each benchmark block
+has:
 
 ```text
-raw/kinetic_pervec      (1024, 2, 8)
+raw/kinetic_pervec      (64, 2, 8)
 avg/kinetic_spacetime   (2,)
 avg/Z_ring_field_sqrt   (2,)
 avg/Z_ring_bilinear     (2,)
 flow_times              (2,)
 ```
 
-For the spin-color-diluted benchmark case, the raw shape is:
-
-```text
-raw/kinetic_pervec      (1152, 2, 8)
-```
+The full 1024- or 1152-solve sample is reconstructed by the analysis helper from
+all interval files.  Each interval is identified by the
+`.blockXXXX.srcSTART-END.h5` file name and the range attrs `block_index`,
+`block_start`, and `block_stop_exclusive`.  Whether an interval is a complete HP
+estimator is recorded in the attrs `estimator_complete`,
+`complete_estimator_units`, and `estimator_remainder`.
 
 The bookkeeping datasets mean:
 
@@ -315,7 +317,7 @@ N_VEC:       1
 Expected smoke output:
 
 ```text
-benchmark/login_smoke/data/FlowedQuarkRinged/S8T8.FlowedQuarkRinged.0.0.x0y0z0t0.S8T8_login_smoke.h5
+benchmark/login_smoke/data/FlowedQuarkRinged/S8T8.FlowedQuarkRinged.0.0.S8T8_login_smoke.block0000.src000000-000000.h5
 ```
 
 This is only an environment and schema check.  Do not use it to judge HP

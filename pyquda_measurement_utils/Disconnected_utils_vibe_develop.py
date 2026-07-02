@@ -214,6 +214,16 @@ def apply_hierarchical_probe(xi, hp_idx: int, hp_ordering: str):
     return probed
 
 
+def _seed_backend_random(latt_info, seed: int):
+    """Seed the active array backend random generator for this lattice."""
+    from pyquda.field import LatticeFermion
+
+    probe = LatticeFermion(latt_info)
+    xp = _get_xp_from_array(probe.data)
+    xp.random.seed(int(seed))
+    del probe
+
+
 def iter_noise_sources(
     latt_info,
     n_vec: int,
@@ -223,9 +233,24 @@ def iter_noise_sources(
     hp_ordering: str,
     spin_color_dilution: str = "none",
     include_spin_color: bool = False,
+    skip_base_indices=None,
+    base_seed_start=None,
+    base_seed_fn=None,
 ):
     """Yield effective stochastic sources with optional hierarchical probing."""
     spin_color_dilution = normalize_spin_color_dilution(spin_color_dilution)
+    skip_base_indices = set() if skip_base_indices is None else {int(idx) for idx in skip_base_indices}
+
+    def prepare_base_noise(base_idx):
+        if int(base_idx) in skip_base_indices:
+            return None
+        if base_seed_fn is not None:
+            _seed_backend_random(latt_info, int(base_seed_fn(base_idx)))
+        elif base_seed_start is not None:
+            _seed_backend_random(latt_info, int(base_seed_start) + int(base_idx))
+        if spin_color_dilution == "point":
+            return make_site_zn_noise_fermion(latt_info, n=n_zn)
+        return make_zn_noise_fermion(latt_info, n=n_zn)
 
     def make_output(effective_idx, base_idx, hp_idx, spin_idx, color_idx, source):
         if include_spin_color:
@@ -250,12 +275,16 @@ def iter_noise_sources(
 
     if noise_scheme == "zn":
         for base_idx in range(n_vec):
-            source = make_site_zn_noise_fermion(latt_info, n=n_zn) if spin_color_dilution == "point" else make_zn_noise_fermion(latt_info, n=n_zn)
+            source = prepare_base_noise(base_idx)
+            if source is None:
+                continue
             yield from iter_spin_color_sources(base_idx, base_idx, 0, source)
         return
 
     for base_idx in range(n_vec):
-        base_noise = make_site_zn_noise_fermion(latt_info, n=n_zn) if spin_color_dilution == "point" else make_zn_noise_fermion(latt_info, n=n_zn)
+        base_noise = prepare_base_noise(base_idx)
+        if base_noise is None:
+            continue
         for hp_idx in range(hp_num_vectors):
             effective_base_idx = base_idx * hp_num_vectors + hp_idx
             yield from iter_spin_color_sources(

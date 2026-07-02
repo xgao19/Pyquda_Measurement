@@ -117,18 +117,17 @@ hp4x256       stochastic HP256, 1024 solves per seed shard
 hp6x16sc12    HP16 plus spin-color point dilution, 1152 solves per seed shard
 ```
 
-Block HDF5 checkpointing was enabled for this run:
+Current interval-block output always writes HDF5 files.  The interval length is controlled by:
 
 ```text
-FLOWED_RINGED_BLOCK_WRITE=1
-FLOWED_RINGED_BLOCK_MIN_SOLVES=256
-FLOWED_RINGED_SAVE_FULL=0
+FLOWED_RINGED_BLOCK_INTERVAL_SOLVES=64
 ```
 
-The block sizes were `256` solves for `zn1024`, `hp64x16`, and `hp4x256`, and
-`384` solves for `hp6x16sc12`.  This means walltime kills preserve completed
-block files, but work inside an unfinished block is not included in the HDF5
-data product.
+Each `.blockXXXX.srcSTART-END.h5` file contains one fixed interval.  The file
+name and the range attrs `block_index`, `block_start`, and
+`block_stop_exclusive` identify the interval.  The attrs
+`estimator_complete`, `complete_estimator_units`, and `estimator_remainder`
+state whether that interval is a complete estimator block.
 
 The 7-hour prod job was killed by walltime after `07:01:28`.  The checkpoint
 files preserved these completed solves:

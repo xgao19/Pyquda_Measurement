@@ -4,6 +4,21 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-02: Add HP256 ringed-norm sample resume
+
+- Tightened standalone flowed-quark ringed normalization to fixed-interval
+  block HDF5 output as the only persistent data product.
+- Added deterministic HP256 sample-log resume support so complete base-noise
+  samples can be skipped while partial interval blocks remain available for
+  diagnostics.
+- Added base-range controls for l64 production-style runs and per-base
+  deterministic stochastic seeds independent of skipped samples.
+- Updated Aurora and Perlmutter S8T8 analyzers, drivers, docs, and tests for
+  interval block files, removed obsolete block-output metadata assumptions,
+  and kept the ringed normalization dataset layout unchanged.
+- Added and validated tests for fixed interval metadata, HP256 sample logs,
+  base-range selection, deterministic sample seeds, and updated tag naming.
+
 ## 2026-06-29: Add flowed ringed-norm block checkpoints
 
 - Added optional complete-block HDF5 checkpoint output for standalone

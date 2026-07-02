@@ -51,4 +51,4 @@ def test_emt_tag_helpers_preserve_measurement_kind():
     ) == "/data/EMTproton3pt/lat.EMTproton3pt.9.Q.x1y0z2t3.sm.PX1PY-2PZ3dt9"
     with pytest.raises(ValueError):
         get_emt_proton_quark_3pt_file_tag("/data", "lat", 9, "Q", src, "sm", [0, 0, 0, 0], [6, 9, 12])
-    assert get_flowed_quark_ringed_norm_file_tag("/data", "lat", 9, "R", src, "sm") == "/data/FlowedQuarkRinged/lat.FlowedQuarkRinged.9.R.x1y0z2t3.sm"
+    assert get_flowed_quark_ringed_norm_file_tag("/data", "lat", 9, "R", "sm") == "/data/FlowedQuarkRinged/lat.FlowedQuarkRinged.9.R.sm"

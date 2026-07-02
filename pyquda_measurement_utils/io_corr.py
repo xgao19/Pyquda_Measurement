@@ -195,8 +195,8 @@ def get_emt_proton_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, pf, t_se
 
 
 # Build the flowed-quark ringed-normalization output tag.
-def get_flowed_quark_ringed_norm_file_tag(data_dir, lat, cfg, ama, src, sm):
-    return str(Path(data_dir) / "FlowedQuarkRinged" / (str(lat) + ".FlowedQuarkRinged." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+def get_flowed_quark_ringed_norm_file_tag(data_dir, lat, cfg, ama, sm):
+    return str(Path(data_dir) / "FlowedQuarkRinged" / (str(lat) + ".FlowedQuarkRinged." + str(cfg) + "." + str(ama) + "." + str(sm)))
 
 
 # -----------------------------------------------------------------------------

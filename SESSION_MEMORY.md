@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-06-29
+Last updated: 2026-07-02
 
 This file is for reusable knowledge, stable run tips, repeated pitfalls, and
 validated cluster/code/test facts.  Historical commit-style progress should go
@@ -72,6 +72,23 @@ export QUDA_PATH=/global/cfs/cdirs/m3760/xgao/software/quda/install
   `avg/kinetic_spacetime`, `avg/Z_ring_field_sqrt`, and
   `avg/Z_ring_bilinear`; it intentionally does not write
   `avg/kinetic_timeslice`.
+
+## Aurora l64 Flowed Ringed-Norm Production Notes
+
+- Clean l64 HP256 production-style workflow lives outside the repo at:
+  `/lus/flare/projects/StructNGB/xgao/run/l64c64a076/EMT_flowed_ringed`.
+- The repo-side `FlowedQuarkRingedNorm` now writes fixed-interval `.block*.h5`
+  files as the only persistent output.  The interval is controlled by
+  `block_interval_solves`, defaulting to `64`.
+- HP256 sample-log resume is intentionally narrow: `noise_scheme` must be
+  `hierarchical_probing`, `hp_num_vectors == 256`, and
+  `spin_color_dilution == "none"`.
+- A sample-log entry represents one complete HP256 base-noise sample, not a
+  partial interval file.  Skipping a sample requires both the log tag and its
+  interval block files.
+- Per-base random seeds use the deterministic
+  `flowed_quark_ringed_norm_sample_seed(randseed, base_idx)` helper, so reruns
+  and skipped bases do not depend on previous RNG consumption.
 
 ## Validated QUDA / PyQUDA Facts
 
