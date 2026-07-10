@@ -69,6 +69,7 @@ quark_emt = QuarkEMT(parameters)
 invPara = [0.236, 1.0372, 1e-10, 300]
 # Stochastic-source knobs: number of vectors, Z_n, counter-noise stream salt.
 randPara = [1, 4, 0]
+output_mode = os.environ.get("EMT_OUTPUT_MODE", "base_shards")
 
 quark_emt.flowed_fermionic_1pt(
     gauge,
@@ -76,4 +77,9 @@ quark_emt.flowed_fermionic_1pt(
     randPara,
     tag=os.environ.get("EMT_QUARK_1PT_OUT", quark_1pt_tag),
     ringed_tag=os.environ.get("EMT_RINGED_OUT", ringed_tag),
+    output_mode=output_mode,
+    shard_dir=os.environ.get("EMT_SHARD_DIR", os.path.join(data_dir, "EMTc", "shards")),
+    base_start=int(os.environ.get("EMT_BASE_START", "0")),
+    base_stop=int(os.environ.get("EMT_BASE_STOP", str(randPara[0]))),
+    block_interval_solves=int(os.environ.get("EMT_BLOCK_INTERVAL_SOLVES", "64")),
 )

@@ -7,6 +7,10 @@ disconnected diagrams in analysis:
     C3_disc = < C2 L > - < C2 > < L >.
 """
 
+import os
+from pathlib import Path
+
+import h5py
 import numpy as np
 from opt_einsum import contract
 
@@ -23,6 +27,21 @@ from pyquda_measurement_utils.io_corr import (
 from pyquda_measurement_utils.flowed_quark_ringed_norm import (
     kinetic_spacetime_from_raw,
     natural_estimator_block_size,
+)
+from pyquda_measurement_utils.disconnected_shards import (
+    base_completion_path,
+    base_part_ranges,
+    canonical_temp_path,
+    completion_payload,
+    expected_part_attrs,
+    hp_vectors_per_base,
+    normalize_output_mode,
+    read_base_completion_marker,
+    selected_base_range,
+    shard_part_path,
+    validate_raw_part_hdf5,
+    write_base_completion_marker,
+    write_raw_part_hdf5,
 )
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
@@ -198,6 +217,158 @@ class EMTDisconnectedQuark1pt:
 
         return Tmunu, CHI
 
+    def _measure_flowed_source(self, U, xi, eta, phases_3pt):
+        n_flow = self.flow_steps + 1
+        nt = U.latt_info.global_size[3]
+        tmunu = np.zeros((4, 4, len(self.qlist), n_flow, nt), dtype=np.complex128)
+        chi = np.zeros((2, len(self.qlist), n_flow, nt), dtype=np.complex128)
+        U_f = U.copy()
+        U_f.setAntiPeriodicT()
+        for step in range(n_flow):
+            mpi_print(U_f.latt_info, f"calc Tmunu, step = {step}")
+            tmunu[:, :, :, step], chi[:, :, step] = self._get_Tmunu_symmetrized_P_Breit_slice(
+                U_f, xi, eta, phases_3pt
+            )
+            if step < self.flow_steps:
+                if step == 0:
+                    n_steps, step_size = 10, self.flow_epsilon / 10
+                else:
+                    n_steps, step_size = 1, self.flow_epsilon
+                flowed = U_f.gradientFlow(convert.multiField([xi, eta]), self.flow_type, n_steps, step_size)
+                xi, eta = flowed[0], flowed[1]
+        return tmunu, chi
+
+    def _measurement_attrs(self, latt_info, invPara, randPara, counter_config, counter_stream, n_eff, spatial_volume):
+        n_vec, n_zn, _ = randPara
+        mass, csw, tol, maxiter = invPara
+        return {
+            "measurement": "quark_1pt",
+            "flow_type": self.flow_type,
+            "flow_epsilon": self.flow_epsilon,
+            "flow_steps": self.flow_steps,
+            "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
+            "qext": np.asarray(self.qlist, dtype=np.int32),
+            "pf": np.asarray(self.pf, dtype=np.int32),
+            "p_2pt": np.asarray(self.pilist, dtype=np.int32),
+            "volume_norm": spatial_volume,
+            "upper_triangle_only": True,
+            "operator_normalization": "unrenormalized_flowed_quark_bilinear",
+            "renormalization_applied": False,
+            "renormalization_stage": "analysis_stage",
+            "flavor_convention": self.flavor_convention,
+            "derivative_convention": "Tmunu[nu,mu]=-0.5*xi_dag*gamma_nu*(Dplus_mu-Dminus_mu)*eta; symmetrized",
+            "mass": mass,
+            "csw": csw,
+            "tol": tol,
+            "maxiter": maxiter,
+            "gauge_preprocessing": self.gauge_preprocessing,
+            "t_boundary": latt_info.t_boundary,
+            "n_vec": n_vec,
+            "n_base_noise": n_vec,
+            "effective_n_inversions": n_eff,
+            "n_zn": n_zn,
+            "config_num": counter_config,
+            "rand_seed": counter_stream,
+            "noise_stream": counter_stream,
+            "noise_generator": COUNTER_NOISE_ALGORITHM,
+            "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
+            "noise_scheme": self.noise_scheme,
+            "hp_num_vectors": self.hp_num_vectors,
+            "hp_ordering": self.hp_ordering,
+        }
+
+    def _measure_base_shards(
+        self, U, dirac, invPara, randPara, tag, phases_3pt, attrs,
+        shard_dir, base_start, base_stop, block_interval_solves,
+    ):
+        n_vec, n_zn, _ = randPara
+        hp_count = hp_vectors_per_base(self.noise_scheme, self.hp_num_vectors)
+        shard_dir = Path(shard_dir) if shard_dir else Path(tag).parent / "shards"
+        common_attrs = {
+            key: value for key, value in attrs.items()
+            if key not in {"n_vec", "n_base_noise", "effective_n_inversions"}
+        }
+        common_attrs["output_kind"] = "emt_quark_1pt"
+        common_attrs["block_interval_solves"] = int(block_interval_solves)
+        nt = U.latt_info.global_size[3]
+        n_flow = self.flow_steps + 1
+        comm = getMPIComm()
+
+        for base_idx in selected_base_range(n_vec, base_start, base_stop):
+            part_paths = []
+            for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
+                count = hp_stop - hp_start
+                path = shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop)
+                part_paths.append(path)
+                expected_attrs = expected_part_attrs(common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count)
+                raw_shapes = {
+                    "Tmunu_pervec": (count, 4, 4, len(self.qlist), n_flow, nt),
+                    "CHI_pervec": (count, 2, len(self.qlist), n_flow, nt),
+                    "source_index": (count,),
+                    "base_noise_index": (count,),
+                    "hp_index": (count,),
+                }
+                if U.latt_info.mpi_rank == 0:
+                    present = validate_raw_part_hdf5(path, expected_attrs, raw_shapes)
+                else:
+                    present = None
+                present = comm.bcast(present, root=0)
+                if present:
+                    mpi_print(U.latt_info, f"EMT shard SKIP: {path.name}")
+                    continue
+
+                tmunu_part = np.zeros(raw_shapes["Tmunu_pervec"], dtype=np.complex128)
+                chi_part = np.zeros(raw_shapes["CHI_pervec"], dtype=np.complex128)
+                global_indices = np.arange(base_idx * hp_count + hp_start, base_idx * hp_count + hp_stop, dtype=np.int32)
+                bookkeeping = {
+                    "source_index": global_indices,
+                    "base_noise_index": np.full(count, base_idx, dtype=np.int32),
+                    "hp_index": np.arange(hp_start, hp_stop, dtype=np.int32),
+                }
+                skip_bases = set(range(n_vec)) - {base_idx}
+                keep_indices = set(int(idx) for idx in global_indices)
+                skip_effective = set(range(n_vec * hp_count)) - keep_indices
+                for vec_picked, _, hp_idx, xi in iter_noise_sources(
+                    U.latt_info, n_vec, n_zn, self.noise_scheme, self.hp_num_vectors,
+                    self.hp_ordering, skip_base_indices=skip_bases,
+                    skip_effective_indices=skip_effective,
+                    counter_noise_config=int(attrs["config_num"]),
+                    counter_noise_stream=int(attrs["noise_stream"]),
+                ):
+                    local_idx = hp_idx - hp_start
+                    dirac.loadGauge(U)
+                    eta = dirac.invert(xi)
+                    tmunu_part[local_idx], chi_part[local_idx] = self._measure_flowed_source(
+                        U, xi, eta, phases_3pt
+                    )
+                if U.latt_info.mpi_rank == 0:
+                    write_attrs = dict(expected_attrs)
+                    write_attrs["configured_n_base_noise"] = int(n_vec)
+                    write_raw_part_hdf5(
+                        path,
+                        {"Tmunu_pervec": tmunu_part, "CHI_pervec": chi_part},
+                        write_attrs,
+                        bookkeeping,
+                    )
+                comm.Barrier()
+
+            if U.latt_info.mpi_rank == 0:
+                for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
+                    count = hp_stop - hp_start
+                    path = shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop)
+                    expected_attrs = expected_part_attrs(common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count)
+                    validate_raw_part_hdf5(path, expected_attrs, {
+                        "Tmunu_pervec": (count, 4, 4, len(self.qlist), n_flow, nt),
+                        "CHI_pervec": (count, 2, len(self.qlist), n_flow, nt),
+                        "source_index": (count,), "base_noise_index": (count,), "hp_index": (count,),
+                    })
+                write_base_completion_marker(
+                    base_completion_path(shard_dir, tag, base_idx),
+                    completion_payload(tag, base_idx, hp_count, block_interval_solves, part_paths),
+                )
+            comm.Barrier()
+        return None, None
+
     def flowed_fermionic_1pt(
         self,
         gauge: LatticeGauge,
@@ -205,13 +376,18 @@ class EMTDisconnectedQuark1pt:
         randPara,
         tag: str = "",
         ringed_tag=None,
+        output_mode="monolithic",
+        shard_dir=None,
+        base_start=0,
+        base_stop=None,
+        block_interval_solves=64,
     ):
         """Compute quark flowed 1pt observables with stochastic sources."""
         n_vec, n_zn, randseed = randPara
         mass, csw, tol, maxiter = invPara
         U = gauge
-        stepsize = self.flow_epsilon
         Nsteps = self.flow_steps
+        output_mode = normalize_output_mode(output_mode)
         latt_info = U.latt_info
 
         global_size = latt_info.global_size
@@ -247,11 +423,18 @@ class EMTDisconnectedQuark1pt:
             counter_stream = int(randseed)
 
         n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
+        qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
+        phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, [0, 0, 0, 0])
+        attrs = self._measurement_attrs(latt_info, invPara, randPara, counter_config, counter_stream, n_eff, Ns3)
+        if output_mode == "base_shards":
+            return self._measure_base_shards(
+                U, dirac, invPara, randPara, tag, phases_3pt, attrs,
+                shard_dir, base_start, base_stop, block_interval_solves,
+            )
+
         Tmunu = np.zeros([n_eff, 4, 4, len(self.qlist), Nsteps + 1, Nt], dtype=np.complex128)
         CHI = np.zeros([n_eff, 2, len(self.qlist), Nsteps + 1, Nt], dtype=np.complex128)
         source_bookkeeping = source_bookkeeping_arrays(n_eff)
-        qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
-        phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, [0, 0, 0, 0])
         for vec_picked, base_idx, hp_idx, xi in iter_noise_sources(
             latt_info,
             n_vec,
@@ -265,62 +448,12 @@ class EMTDisconnectedQuark1pt:
             mpi_print(U.latt_info, f"vec {vec_picked} base {base_idx} hp {hp_idx}")
             source_bookkeeping["base_noise_index"][vec_picked] = base_idx
             source_bookkeeping["hp_index"][vec_picked] = hp_idx
+            dirac.loadGauge(U)
             eta = dirac.invert(xi)
-
-            U_f = U.copy()
-            U_f.setAntiPeriodicT()
-
-            for step in range(Nsteps + 1):
-                mpi_print(U_f.latt_info, f"calc Tmunu, step = {step}")
-                tmpt, tmps = self._get_Tmunu_symmetrized_P_Breit_slice(U_f, xi, eta, phases_3pt)
-                Tmunu[vec_picked, :, :, :, step, :] += tmpt
-                CHI[vec_picked, :, :, step, :] += tmps
-
-                if Nsteps > 0 and step == 0:
-                    temp = convert.multiField([xi, eta])
-                    temp_flow = U_f.gradientFlow(temp, self.flow_type, 10, stepsize / 10)
-                    xi, eta = temp_flow[0], temp_flow[1]
-
-                elif Nsteps > 0 and step < Nsteps:
-                    temp = convert.multiField([xi, eta])
-                    temp_flow = U_f.gradientFlow(temp, self.flow_type, 1, stepsize)
-                    xi, eta = temp_flow[0], temp_flow[1]
+            Tmunu[vec_picked], CHI[vec_picked] = self._measure_flowed_source(U, xi, eta, phases_3pt)
 
         mpi_print(U.latt_info, "random vectors done.")
 
-        attrs = {
-            "measurement": "quark_1pt",
-            "flow_type": self.flow_type,
-            "flow_epsilon": self.flow_epsilon,
-            "flow_steps": self.flow_steps,
-            "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
-            "qext": np.asarray(self.qlist, dtype=np.int32),
-            "pf": np.asarray(self.pf, dtype=np.int32),
-            "p_2pt": np.asarray(self.pilist, dtype=np.int32),
-            "volume_norm": Ns3,
-            "upper_triangle_only": True,
-            "operator_normalization": "unrenormalized_flowed_quark_bilinear",
-            "renormalization_applied": False,
-            "renormalization_stage": "analysis_stage",
-            "flavor_convention": self.flavor_convention,
-            "derivative_convention": "Tmunu[nu,mu]=-0.5*xi_dag*gamma_nu*(Dplus_mu-Dminus_mu)*eta; symmetrized",
-            "mass": mass,
-            "csw": csw,
-            "tol": tol,
-            "maxiter": maxiter,
-            "n_vec": n_vec,
-            "n_base_noise": n_vec,
-            "effective_n_inversions": n_eff,
-            "n_zn": n_zn,
-            "config_num": counter_config,
-            "rand_seed": counter_stream,
-            "noise_stream": counter_stream,
-            "noise_generator": COUNTER_NOISE_ALGORITHM,
-            "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
-            "noise_scheme": self.noise_scheme,
-            "hp_num_vectors": self.hp_num_vectors,
-            "hp_ordering": self.hp_ordering,
-        }
         Tmunu_avg = np.mean(Tmunu, axis=0) / Ns3
         CHI_avg = np.mean(CHI, axis=0) / Ns3
         if ringed_tag is not None:
@@ -490,6 +623,177 @@ class EMTDisconnectedQuark1pt:
                 flow_type=self.flow_type,
             )
         return prop_fw_flow, seq_bw_prop_flow
+
+
+def _copy_h5_attrs(obj, attrs):
+    for key, value in attrs.items():
+        if value is not None:
+            obj.attrs[key] = value
+
+
+def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, ringed_tag, n_base_noise):
+    """Validate complete EMT base shards and atomically build canonical outputs."""
+    shard_dir = Path(shard_dir)
+    n_base_noise = int(n_base_noise)
+    if n_base_noise <= 0:
+        raise ValueError(f"n_base_noise should be positive, got {n_base_noise}")
+
+    markers = []
+    for base_idx in range(n_base_noise):
+        marker_path = base_completion_path(shard_dir, canonical_tag, base_idx)
+        marker = read_base_completion_marker(marker_path)
+        if marker is None:
+            raise ValueError(f"missing completion marker for base {base_idx}: {marker_path}")
+        if int(marker.get("base_noise_index", -1)) != base_idx:
+            raise ValueError(f"completion marker has wrong base index: {marker_path}")
+        markers.append(marker)
+
+    hp_count = int(markers[0]["hp_vectors_per_base"])
+    interval = int(markers[0]["block_interval_solves"])
+    all_parts = []
+    reference_attrs = None
+    source_shape = None
+    compatibility_excluded = {
+        "base_noise_index", "part_index", "hp_start", "hp_stop_exclusive",
+        "part_complete", "configured_n_base_noise",
+    }
+    for base_idx, marker in enumerate(markers):
+        if int(marker["hp_vectors_per_base"]) != hp_count or int(marker["block_interval_solves"]) != interval:
+            raise ValueError(f"base {base_idx} completion marker has incompatible part layout")
+        expected_names = []
+        for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, interval):
+            path = shard_part_path(shard_dir, canonical_tag, base_idx, part_idx, hp_start, hp_stop)
+            expected_names.append(path.name)
+            if not path.exists():
+                raise ValueError(f"missing EMT shard part {path}")
+            with h5py.File(path, "r") as h5:
+                if not bool(h5.attrs.get("part_complete", False)):
+                    raise ValueError(f"incomplete EMT shard part {path}")
+                attrs = {key: h5.attrs[key] for key in h5.attrs}
+                common = {key: value for key, value in attrs.items() if key not in compatibility_excluded}
+                if reference_attrs is None:
+                    reference_attrs = common
+                    source_shape = tuple(h5["raw/Tmunu_pervec"].shape[1:])
+                else:
+                    for key, value in reference_attrs.items():
+                        if key not in common or not np.array_equal(np.asarray(common[key]), np.asarray(value)):
+                            raise ValueError(f"EMT shard {path} has incompatible attribute {key}")
+                count = hp_stop - hp_start
+                if tuple(h5["raw/Tmunu_pervec"].shape) != (count,) + source_shape:
+                    raise ValueError(f"EMT shard {path} has incompatible Tmunu shape")
+                if tuple(h5["raw/CHI_pervec"].shape)[0] != count:
+                    raise ValueError(f"EMT shard {path} has incompatible CHI shape")
+                expected_sources = np.arange(base_idx * hp_count + hp_start, base_idx * hp_count + hp_stop)
+                if not np.array_equal(h5["raw/source_index"][()], expected_sources):
+                    raise ValueError(f"EMT shard {path} has incompatible source indices")
+                if not np.array_equal(h5["raw/base_noise_index"][()], np.full(count, base_idx)):
+                    raise ValueError(f"EMT shard {path} has incompatible base indices")
+                if not np.array_equal(h5["raw/hp_index"][()], np.arange(hp_start, hp_stop)):
+                    raise ValueError(f"EMT shard {path} has incompatible HP indices")
+            all_parts.append((base_idx, hp_start, hp_stop, path))
+        if marker.get("parts") != expected_names:
+            raise ValueError(f"base {base_idx} completion marker has incompatible part list")
+
+    total_sources = n_base_noise * hp_count
+    canonical_attrs = {
+        key: value for key, value in reference_attrs.items()
+        if key not in {"shard_schema", "output_kind", "block_interval_solves", "hp_vectors_per_base"}
+    }
+    canonical_attrs.update({
+        "measurement": "quark_1pt",
+        "n_vec": n_base_noise,
+        "n_base_noise": n_base_noise,
+        "effective_n_inversions": total_sources,
+    })
+    q0_index = _unique_zero_momentum_index(canonical_attrs["qext"])
+    spatial_volume = int(canonical_attrs["volume_norm"])
+    n_flow = source_shape[-2]
+    nt = source_shape[-1]
+
+    final_path, temp_path = canonical_temp_path(canonical_tag)
+    ringed_path, ringed_temp = canonical_temp_path(ringed_tag)
+    with h5py.File(temp_path, "w") as out, h5py.File(ringed_temp, "w") as ringed:
+        _copy_h5_attrs(out, canonical_attrs)
+        raw = out.require_group("raw")
+        raw_t = raw.create_dataset("Tmunu_pervec", shape=(total_sources,) + source_shape, dtype=np.complex128)
+        chi_shape = None
+        raw_chi = None
+        source_datasets = {
+            name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
+            for name in ("source_index", "base_noise_index", "hp_index")
+        }
+        t_sum = np.zeros(source_shape, dtype=np.complex128)
+        chi_sum = None
+
+        ringed_attrs = dict(canonical_attrs)
+        ringed_attrs.update({
+            "measurement": "flowed_quark_ringed_norm",
+            "producer": "emt_quark_1pt",
+            "content": "kinetic_only",
+            "normalization_scope": "all_flowed_quark_fields",
+            "operator": "bar_chi_overleftrightarrow_Dslash_chi",
+            "Nc": 3,
+            "spin_color_dilution": "none",
+            "spin_color_dilution_factor": 1,
+            "spin_color_trace_factor": 1,
+            "site_noise_scope": "site_spin_color",
+            "kinetic_source": "raw_Tmunu_pervec_zero_momentum_diagonal_trace",
+            "kinetic_relation": "K_pervec=-2*sum_mu(Tmunu_pervec[mu,mu,q0])/spatial_volume",
+            "zero_momentum_index": q0_index,
+            "ringed_factors_stored": False,
+            "ringed_factor_stage": "ensemble_analysis_from_configuration_averaged_kinetic",
+        })
+        _copy_h5_attrs(ringed, ringed_attrs)
+        ringed.create_dataset("flow_times", data=np.asarray(canonical_attrs["flow_times"], dtype=np.float64))
+        ring_raw = ringed.require_group("raw")
+        ring_k = ring_raw.create_dataset("kinetic_pervec", shape=(total_sources, n_flow, nt), dtype=np.complex128)
+        ring_sources = {
+            name: ring_raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
+            for name in ("source_index", "base_noise_index", "hp_index", "spin_index", "color_index")
+        }
+        kinetic_sum = np.zeros(n_flow, dtype=np.complex128)
+
+        for base_idx, hp_start, hp_stop, path in all_parts:
+            start = base_idx * hp_count + hp_start
+            stop = base_idx * hp_count + hp_stop
+            with h5py.File(path, "r") as part:
+                t_data = part["raw/Tmunu_pervec"][()]
+                chi_data = part["raw/CHI_pervec"][()]
+                if raw_chi is None:
+                    chi_shape = tuple(chi_data.shape[1:])
+                    raw_chi = raw.create_dataset("CHI_pervec", shape=(total_sources,) + chi_shape, dtype=np.complex128)
+                    chi_sum = np.zeros(chi_shape, dtype=np.complex128)
+                raw_t[start:stop] = t_data
+                raw_chi[start:stop] = chi_data
+                t_sum += np.sum(t_data, axis=0)
+                chi_sum += np.sum(chi_data, axis=0)
+                for name, dataset in source_datasets.items():
+                    dataset[start:stop] = part[f"raw/{name}"][()]
+                kinetic = ringed_kinetic_pervec_from_emt(t_data, q0_index, spatial_volume)
+                ring_k[start:stop] = kinetic
+                kinetic_sum += np.sum(kinetic, axis=(0, -1))
+                for name in ("source_index", "base_noise_index", "hp_index"):
+                    ring_sources[name][start:stop] = part[f"raw/{name}"][()]
+                ring_sources["spin_index"][start:stop] = -1
+                ring_sources["color_index"][start:stop] = -1
+
+        avg = out.require_group("avg")
+        avg.create_dataset("CHI", data=chi_sum / total_sources / spatial_volume)
+        avg_t = avg.require_group("Tmunu")
+        avg_t.attrs["upper_triangle_only"] = True
+        t_avg = t_sum / total_sources / spatial_volume
+        for mu in range(4):
+            for nu in range(mu, 4):
+                avg_t.create_dataset(f"T{mu+1}{nu+1}", data=t_avg[mu, nu])
+        ringed.require_group("avg").create_dataset(
+            "kinetic_spacetime", data=kinetic_sum / total_sources / nt
+        )
+        out.flush()
+        ringed.flush()
+
+    os.replace(ringed_temp, ringed_path)
+    os.replace(temp_path, final_path)
+    return str(final_path), str(ringed_path)
 
 
 class EMTDisconnectedGluon1pt:

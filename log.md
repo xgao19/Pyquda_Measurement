@@ -4,6 +4,18 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-10: Add base-resumable EMT quark loop shards
+
+- Added base/HP-interval atomic shards, resume validation, complete-base
+  markers, and an explicit streaming finalizer for canonical EMTc and kinetic
+  companion files.
+- Kept monolithic library output for compatibility while making production
+  wrappers default to shard mode with independently schedulable base ranges.
+- Fixed stochastic runs after positive fermion flow by restoring the original
+  QUDA resident gauge before every new inversion.
+- Verified `120 passed, 12 skipped`, rebuilt three EMT PDFs, and compared two
+  independent S8T8 base jobs plus finalize against monolithic GPU output.
+
 ## 2026-07-10: Integrate ringed kinetic into EMT quark loops
 
 - Derived the flowed-quark kinetic trace directly from the zero-momentum

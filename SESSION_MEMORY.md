@@ -104,6 +104,10 @@ python tests/run_smoke_tests.py
   `eta_f=K(t_f)D^{-1}xi`, a fixed-time loop estimates
   `Tr[P_tau Gamma K D^{-1} K^dag]`: the observable is spatially summed at fixed
   `tau`, but the initial stochastic source must cover every time slice.
+- Flow contractions load the flowed gauge into QUDA's global resident state.
+  Restore the original gauge before the next stochastic inversion; loading it
+  only once before the source loop causes later inversions to use the wrong
+  resident gauge.
 - A single initial-time projector is incomplete at nonzero flow time.  A
   complete time-dilution basis is unbiased only after all projectors are
   summed, with the corresponding inversion cost.
@@ -117,6 +121,9 @@ python tests/run_smoke_tests.py
   same raw zero-momentum diagonal tensor; this adds no solves or derivatives.
   `CHI` remains only a scalar/noise diagnostic.  Compute the physical ringed
   factor after ensemble-averaging the kinetic expectation value.
+- Production quark EMT 1pt is base-oriented: base-internal part files are only
+  checkpoints, a base is complete only after all HP vectors validate, and an
+  explicit streaming finalizer publishes canonical EMTc/ringed files.
 
 ## qTMD Conventions And Pitfalls
 

@@ -338,10 +338,12 @@ def iter_noise_sources(
     base_seed_fn=None,
     counter_noise_config=None,
     counter_noise_stream: int = 0,
+    skip_effective_indices=None,
 ):
     """Yield effective stochastic sources with optional hierarchical probing."""
     spin_color_dilution = normalize_spin_color_dilution(spin_color_dilution)
     skip_base_indices = set() if skip_base_indices is None else {int(idx) for idx in skip_base_indices}
+    skip_effective_indices = set() if skip_effective_indices is None else {int(idx) for idx in skip_effective_indices}
 
     def prepare_base_noise(base_idx):
         if int(base_idx) in skip_base_indices:
@@ -370,12 +372,16 @@ def iter_noise_sources(
         return effective_idx, base_idx, hp_idx, source
 
     def iter_spin_color_sources(effective_base_idx, base_idx, hp_idx, source):
+        if spin_color_dilution == "none" and effective_base_idx in skip_effective_indices:
+            return
         if spin_color_dilution == "none":
             yield make_output(effective_base_idx, base_idx, hp_idx, -1, -1, source)
             return
         for spin_idx in range(source.data.shape[-2]):
             for color_idx in range(source.data.shape[-1]):
                 effective_idx = effective_base_idx * SPIN_COLOR_POINT_FACTOR + spin_idx * source.data.shape[-1] + color_idx
+                if effective_idx in skip_effective_indices:
+                    continue
                 yield make_output(
                     effective_idx,
                     base_idx,

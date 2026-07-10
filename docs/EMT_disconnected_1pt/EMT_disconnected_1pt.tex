@@ -588,6 +588,45 @@ standalone output.  The counter-noise configuration, stream, algorithm, HP
 ordering, Dirac parameters, gauge preprocessing, boundary condition, flow
 schedule, and exact EMT-to-kinetic relation are recorded alongside it.
 
+\subsection{Base-Oriented Production, Checkpoints, and Finalization}
+
+The production wrapper defaults to \code{output\_mode=base\_shards}.  A base
+noise and all of its hierarchical-probing vectors form the natural complete
+estimator unit,
+\begin{equation}
+  L_b=\frac{1}{N_{\mathrm{HP}}}\sum_{h=0}^{N_{\mathrm{HP}}-1}L_{b,h}.
+\end{equation}
+Inside one base the code writes fixed solve intervals, defaulting to 64
+inversions.  Thus HP256 normally produces four part files, while HP16 and plain
+\(\mathbb Z_4\) produce one.  A partial HP part is a recovery checkpoint and is
+not marked as a complete estimator.
+
+Part names encode the base, part, and HP interval, for example
+\begin{verbatim}
+<canonical-stem>.base000003.part0001.hp0064-0127.h5
+\end{verbatim}
+Only MPI rank zero writes HDF5.  Each part is first written to a unique temporary
+path and then atomically renamed.  Resume reopens existing parts and validates
+their physics metadata, shapes, and source indices; compatible parts are
+skipped, while conflicting or corrupt files cause an error.  A base completion
+marker is published only after every expected part has been revalidated.
+
+Measurement jobs do not update the canonical file.  A separate serial
+finalizer requires complete coverage of bases \(0,\ldots,N_{\mathrm{base}}-1\),
+streams the raw datasets into a temporary canonical EMTc file, accumulates the
+averages without holding the complete source axis in memory, and derives the
+kinetic companion from the \(q=0\) diagonal tensor.  The completed companion is
+published before the canonical EMTc file, so downstream analysis never sees a
+new loop without its matching kinetic data.  Non-overlapping base ranges may be
+scheduled independently; overlapping jobs are unsupported.
+
+One runtime detail is essential: evaluating a flowed contraction loads the
+flowed gauge into QUDA's global resident gauge state.  Before inverting the next
+stochastic source, the code therefore reloads the original unflowed input gauge.
+The input Python gauge object is unchanged, but omitting this resident-state
+restore makes later inversions use the wrong gauge and can trigger precision
+mismatch failures.
+
 The exact quark dataset and attribute names used by downstream scripts are:
 \begin{verbatim}
 raw/Tmunu_pervec

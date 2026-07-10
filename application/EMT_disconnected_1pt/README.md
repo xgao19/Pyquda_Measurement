@@ -9,6 +9,16 @@ bash perlmutter/run_quark_1pt.sh
 bash perlmutter/run_gluon_1pt.sh
 ```
 
+Quark production runs default to base-oriented shards.  A measurement job
+writes only recoverable parts; after every requested base is complete, run:
+
+```bash
+bash perlmutter/run_finalize_quark_1pt.sh
+```
+
+The finalizer validates every base/HP interval before atomically publishing the
+canonical EMTc and kinetic-only FlowedQuarkRinged files.
+
 The default smoke-test gauge is:
 
 ```text
@@ -249,3 +259,26 @@ raw/source_index = [0, 1]
 raw/base_noise_index = [0, 0]
 raw/hp_index = [0, 1]
 ```
+
+## Base Shards And Resume
+
+Production controls are:
+
+```text
+EMT_1PT_OUTPUT_MODE=base_shards
+EMT_1PT_BASE_START=0
+EMT_1PT_BASE_STOP=EMT_1PT_N_VEC
+EMT_1PT_BLOCK_INTERVAL_SOLVES=64
+EMT_1PT_SHARD_DIR=<data>/EMTc/shards
+```
+
+Each part is named with its base, part, and half-open HP interval, for example
+`base000003.part0001.hp0064-0127.h5`.  Existing compatible parts are skipped;
+missing parts are computed.  A base completion marker is written only after
+all its parts are reopened and validated.  Partial HP parts are checkpoints,
+not complete estimators.  Jobs may process non-overlapping base ranges in
+parallel, but overlapping ranges are unsupported.
+
+`EMT_1PT_OUTPUT_MODE=monolithic` retains the legacy library/output path for
+small comparisons.  The production shard path never overwrites a conflicting
+or corrupt part automatically.

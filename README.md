@@ -280,6 +280,10 @@ For quark/gluon one-point data:
   available for dedicated high-statistics, dilution, block-output, and resume
   runs.  Final ringed factors are computed from the ensemble-averaged kinetic
   expectation value, not by averaging per-configuration inverse factors.
+- Production quark 1pt wrappers default to base/HP interval shards.  Completed
+  bases can be resumed independently, and an explicit streaming finalizer
+  publishes the canonical EMTc and FlowedQuarkRinged files only after complete
+  base coverage is validated.
 - Gluon 1pt stores the flowed gluonic EMT building block.
 - Renormalized gradient-flow EMT combinations, vacuum subtractions, and mixing
   coefficients are applied in downstream analysis, not inside these kernels.
