@@ -9,6 +9,7 @@ from pyquda.field import LatticeInfo, LatticeGauge, LatticeMom
 from pyquda_utils import core, gamma, io
 # from pyquda_measurement_utils import EMT_quark_1pt
 from pyquda_measurement_utils.pion_EMT_vibe_develop import QuarkEMT, GluonEMT
+from pyquda_measurement_utils.io_corr import get_emt_quark_loop_file_tag
 from pyquda_measurement_utils.tools import mpi_print
 
 import argparse
@@ -37,6 +38,8 @@ init(mpi_geometry, enable_mps=True)
 
 parameters = {
 
+    "config_num": conf,
+
     "qext": [[x,y,z,0] for x in [-2,-1,0,1,2] for y in [-2,-1,0,1,2] for z in [-2,-1,0,1,2]], # momentum transfer for TMD, pf = pi + q
     "pf": [0,0,0,0],
     "p_2pt": [[x,y,z,0] for x in [-2,-1,0,1,2] for y in [-2,-1,0,1,2] for z in [-2,-1,0,1,2]], # 2pt momentum
@@ -64,8 +67,8 @@ latt_info = gauge.latt_info
 ###################### test wilson flow: fermion part ######################
 
 gaugePara = [0.076, conf, gauge]
-randPara = [1, 2, int(conf)] # Nv, n_input, randseed
-invPara = [0.236, 1.0372, 1e-15, 300] # mf, csw, prec, cgMax
+randPara = [1, 4, 0] # Nv, n_input, noise stream
+invPara = [0.236, 1.0372, 1e-10, 300] # mf, csw, prec, cgMax
 flowPara = [0.207936, 10, False, 1] # stepsize, Nsteps, improve, division
 
 # QuarkEMT.flowed_fermionic_1pt(
@@ -78,10 +81,11 @@ flowPara = [0.207936, 10, False, 1] # stepsize, Nsteps, improve, division
 # )
 
 quark_emt = QuarkEMT(parameters)
+quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
 
 quark_emt.flowed_fermionic_1pt(
     gauge,
     invPara,
     randPara,
-    datfile="/ccs/home/xiangg/latwork/l64c64a076/EMT_meson_pyquda/data/EMTc",
+    tag=quark_1pt_tag,
 )

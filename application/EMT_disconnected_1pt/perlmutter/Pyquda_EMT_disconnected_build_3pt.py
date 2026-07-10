@@ -9,7 +9,7 @@ import numpy as np
 from pyquda_measurement_utils.io_corr import (
     get_emt_gluon_1pt_file_tag,
     get_emt_proton_2pt_file_tag,
-    get_emt_quark_1pt_file_tag,
+    get_emt_quark_loop_file_tag,
 )
 
 
@@ -50,7 +50,7 @@ def infer_paths(kind, configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_sm_ta
         if kind == "c2":
             tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, cfg, 0, src_pos, c2_sm_tag)
         elif kind == "quark":
-            tag = get_emt_quark_1pt_file_tag(data_dir, lat_tag, cfg, 0, src_pos, loop_sm_tag)
+            tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, cfg, 0, loop_sm_tag)
         elif kind == "gluon":
             tag = get_emt_gluon_1pt_file_tag(data_dir, lat_tag, cfg, 0, src_pos, loop_sm_tag)
         else:

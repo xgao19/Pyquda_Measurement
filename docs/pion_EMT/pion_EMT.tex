@@ -870,6 +870,42 @@ The one-point flow schedule mirrors the connected 3pt schedule (measure-before-f
           U_flow.wilsonFlow(1, epsilon=stepsize)       # or symanzik
 \end{verbatim}
 
+\subsubsection{Full-volume source for a time-resolved flowed loop}
+
+The quark one-point estimator retains the absolute insertion time even though
+its initial stochastic source is four dimensional.  Let \(K(t_f)\) be the
+gauge-covariant fermion-flow kernel and \(P_\tau\) the projector onto the
+absolute insertion time \(\tau\).  The flowed stochastic fields and estimator
+are
+\begin{equation}
+  \xi_f=K(t_f)\xi,
+  \qquad
+  \eta_f=K(t_f)D^{-1}\xi,
+  \qquad
+  \widehat L(\tau,t_f)
+  =\xi^\dagger K^\dagger P_\tau\Gamma K D^{-1}\xi.
+\end{equation}
+Consequently,
+\begin{equation}
+  \mathbb{E}_\xi[\widehat L(\tau,t_f)]
+  =\Tr\!\left[P_\tau\Gamma K(t_f)D^{-1}K^\dagger(t_f)\right].
+  \label{eq:pion_full_volume_flowed_loop}
+\end{equation}
+The projector keeps a spatial trace at fixed \(\tau\); it does not sum over
+insertion time.  Nevertheless, fermion flow uses the four-dimensional
+covariant Laplacian and spreads in time with characteristic radius
+approximately \(\sqrt{8t_f}\).  Restricting the initial source to one time
+projector generally omits finite-flow contributions.  A complete time-dilution
+basis would remain unbiased only after summing every projector, with the
+corresponding inversion cost.  The current workflow instead uses full-volume
+counter-based \(Z_4\) noise and stores all \(\tau\).  The complete derivation is
+given in
+\code{docs/EMT\_disconnected\_1pt/EMT\_disconnected\_1pt.tex}.
+
+Spatial and four-dimensional hierarchical probing do not change the source
+support.  Both multiply a full-volume base noise; spatial HP only makes the
+probing sign independent of time.
+
 \subsection{Disconnected Matrix Element Analysis}
 \label{sec:analysis}
 
@@ -924,9 +960,11 @@ $x_0 = (t_0, \vec{x}_0)$.  The source time $t_0$ is encoded in the file tag
 $t_{\text{sink}} \in [0, N_t - 1]$.
 
 The 1pt loops $L_{\mu\nu}(q, \tau)$ also use \textbf{absolute lattice time}
-$\tau \in [0, N_t - 1]$ for the operator insertion.  Although the 1pt
-measurement itself does not involve a source, its file tag shares the same
-\code{src} label for bookkeeping, so $t_0$ can be read from it identically.
+$\tau \in [0, N_t - 1]$ for the operator insertion.  The 1pt measurement is
+source independent: its canonical EMTc file omits the \code{src} label and one
+full-time loop file per configuration is reused for every two-point source
+time.  The value of $t_0$ must therefore be read from the corresponding hadron
+two-point file, not from the EMTc file.
 
 The physically meaningful time coordinates are \emph{relative to the source}:
 
@@ -942,12 +980,16 @@ extracts $C_2$ at $t_{\text{sink}} = t_0 + t_{\text{sep}}$ and $L$ at
 $\tau_{\text{abs}} = t_0 + \tau_{\text{rel}}$ (with trivial wrap-around handling).
 
 \textbf{Location of $t_0$ in the HDF5 files.}
-The source position $x_0$ is stored in:
+For source-dependent hadron correlators, the source position $x_0$ is stored in:
 \begin{itemize}[nosep]
   \item The file name (e.g., \code{...x0y0z0t32...} -- the $t$ component is $t_0$).
   \item The HDF5 attribute \code{src\_interpolator} or \code{source\_position}
-    (convention varies by file type; the file name is the authoritative source).
+    (convention varies by file type; the hadron-correlator file name is the
+    authoritative source).
 \end{itemize}
+The canonical quark loop name is
+\code{EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5} and intentionally contains no
+source position.
 
 Parsing example (Python pseudocode):
 \begin{verbatim}

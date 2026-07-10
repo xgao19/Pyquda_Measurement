@@ -147,8 +147,11 @@ Each component of \(\xi\) is drawn independently from
   \right\},
   \label{eq:zn_noise}
 \end{equation}
-where \(n=\code{n\_zn}\).  The default smoke-test choice is usually
-\(\mathbb{Z}_2\) noise.
+where \(n=\code{n\_zn}\).  The EMT quark one-point workflow now defaults to
+full-volume \(\mathbb{Z}_4\) noise.  Its counter-based generator hashes the
+global four-dimensional coordinate, spin, color, configuration number,
+base-noise index, and optional stream salt.  Consequently the global source is
+reproducible and independent of the chosen MPI decomposition.
 
 \subsection{Quark EMT Operator Implemented in Code}
 
@@ -326,6 +329,111 @@ for step in range(Nsteps + 1):
 The stochastic source \(\xi\) and solution \(\eta\) are flowed together as one
 \code{MultiField}.  This keeps both fields on the same flowed gauge background.
 
+\subsection{Four-Dimensional Fermion Flow and the Time-Slice Projector}
+\label{sec:full_volume_flow_source}
+
+Let \(K(\Tf)\) denote the gauge-covariant fermion-flow kernel from flow time
+zero to \(\Tf\).  Suppressing source labels, the fields measured by the code
+are
+\begin{equation}
+  \xi_f = K(\Tf)\xi,
+  \qquad
+  \eta_f = K(\Tf)D^{-1}\xi.
+  \label{eq:flowed_noise_solution}
+\end{equation}
+The fermion flow is four dimensional: its covariant Laplacian couples all four
+Euclidean directions, including time.  Its characteristic smoothing radius is
+approximately \(\sqrt{8\Tf}\).  This radius is a diffusion scale, not a strict
+compact-support boundary.
+
+Let \(P_\tau\) project the measured output field onto the absolute Euclidean
+time slice \(\tau\), while leaving spatial, spin, and color indices unchanged.
+For an EMT kernel \(\Gamma\) on the flowed gauge background, one stochastic
+measurement can be written as
+\begin{align}
+  \widehat L(\tau,\Tf)
+  &=
+  \xi_f^\dagger P_\tau\Gamma\eta_f
+  \nonumber\\
+  &=
+  \xi^\dagger K^\dagger(\Tf)P_\tau\Gamma
+  K(\Tf)D^{-1}\xi.
+  \label{eq:flowed_timeslice_estimator}
+\end{align}
+Using the full-volume noise identity in Eq.~\eqref{eq:noise_identity},
+\begin{align}
+  \mathbb{E}_\xi[\widehat L(\tau,\Tf)]
+  &=
+  \Tr\!\left[
+    K^\dagger(\Tf)P_\tau\Gamma K(\Tf)D^{-1}
+  \right]
+  \nonumber\\
+  &=
+  \Tr\!\left[
+    P_\tau\Gamma K(\Tf)D^{-1}K^\dagger(\Tf)
+  \right].
+  \label{eq:flowed_timeslice_trace}
+\end{align}
+The projector \(P_\tau\) means that the physical observable remains a spatial
+sum at a resolved insertion time; Eq.~\eqref{eq:flowed_timeslice_trace} is not a
+sum over insertion time.  Nevertheless, the initial source must cover the full
+four-dimensional vector space because \(K^\dagger P_\tau\Gamma K D^{-1}\)
+connects the measured time slice to source components at other times.
+
+Equivalently, define
+\begin{equation}
+  A_\tau = K^\dagger(\Tf)P_\tau\Gamma K(\Tf)D^{-1}.
+\end{equation}
+For finite noise count, the off-diagonal stochastic contribution is
+\begin{equation}
+  \widehat L(\tau,\Tf)-L(\tau,\Tf)
+  =
+  \sum_{i\ne j}\xi_i^*(A_\tau)_{ij}\xi_j.
+  \label{eq:flowed_timeslice_noise}
+\end{equation}
+The left index is constrained by the flowed time-slice operator, but the right
+index can originate from any Euclidean time.  These terms vanish in the noise
+expectation; their finite-sample size is a variance question.
+
+\subsection{Why a Single Initial-Time Projector Is Not the Current Estimator}
+
+Suppose one replaces the full-volume source by only one time-diluted source
+\(\xi_d=P_d\xi\).  At nonzero flow time its expectation value is
+\begin{equation}
+  \mathbb{E}_\xi\!\left[
+    \xi^\dagger P_d K^\dagger P_\tau\Gamma K D^{-1}P_d\xi
+  \right]
+  =
+  \Tr\!\left[
+    P_d K^\dagger P_\tau\Gamma K D^{-1}P_d
+  \right],
+  \label{eq:single_time_projector}
+\end{equation}
+which is generally not Eq.~\eqref{eq:flowed_timeslice_trace}.  Four-dimensional
+fermion flow spreads the endpoint time slice over several initial-time
+components, so choosing only \(d=\tau\) omits contributions.
+
+Time dilution is not invalid in principle.  For a complete orthogonal family
+\begin{equation}
+  \sum_d P_d = \mathbf{1},
+  \qquad
+  P_dP_{d'}=\delta_{dd'}P_d,
+\end{equation}
+summing all diluted estimators reconstructs the full trace:
+\begin{equation}
+  \sum_d
+  \Tr\!\left[P_dA_\tau P_d\right]
+  =
+  \Tr A_\tau.
+  \label{eq:complete_time_dilution}
+\end{equation}
+It requires all projectors and additional inversions.  The present EMT workflow
+therefore uses one full-volume base source per stochastic solve and retains all
+absolute insertion times.  In the unflowed limit \(\Tf=0\), where
+\(K(0)=\mathbf{1}\), a local loop at \(\tau\) can be obtained from the matching
+exact-time projector; this special case does not justify dropping the other
+projectors for the finite-flow measurements stored in the same file.
+
 \section{Hierarchical Probing and Source Bookkeeping}
 
 The quark one-point workflow supports
@@ -333,7 +441,7 @@ The quark one-point workflow supports
   \code{noise\_scheme}\in
   \{\code{zn},\code{hierarchical\_probing}\}.
 \end{equation}
-Hierarchical probing starts from a base noise vector \(\xi_b\) and multiplies it
+Hierarchical probing starts from a full-volume base noise vector \(\xi_b\) and multiplies it
 by deterministic site-only Rademacher vectors \(h_k(x)=\pm 1\):
 \begin{equation}
   \xi_{b,k}(x) = h_k(x)\,\xi_b(x).
@@ -362,7 +470,7 @@ This value is stored as \code{effective\_n\_inversions}.
 
 \subsection{Ordering Choices}
 
-Two HP orderings are currently implemented:
+Four HP orderings are currently implemented:
 \begin{center}
 \begin{tabular}{ll}
 \toprule
@@ -370,13 +478,25 @@ Ordering & Meaning \\
 \midrule
 \code{global\_xyzt\_gray\_projected\_to\_evenodd}
 & Gray-code the full \(x,y,z,t\) site id. \\
+\code{interleaved\_xyzt\_binary\_projected\_to\_evenodd}
+& Interleave binary bits from \(x,y,z,t\). \\
+\code{interleaved\_xyz\_binary\_projected\_to\_evenodd}
+& Interleave only spatial bits; the HP sign is time independent. \\
 \code{spatial\_xyz\_then\_t\_gray\_projected\_to\_evenodd}
 & Gray-code spatial sites first, then append time bits. \\
 \bottomrule
 \end{tabular}
 \end{center}
-The spatial-first option is useful when early HP vectors should emphasize
-spatial locality before time locality.
+For the spatial ordering,
+\begin{equation}
+  h_k(x,y,z,t)=h_k(x,y,z),
+\end{equation}
+whereas a four-dimensional ordering has signs that also vary with \(t\).  Both
+cases multiply the same full-volume base noise and remain nonzero on every time
+slice; neither is time dilution.  Spatial HP devotes all available probing bits
+to spatial locality, while isotropic 4D HP can suppress temporal off-diagonal
+noise at the cost of allocating fewer early bits to space.  Their efficiency is
+observable dependent and should be compared at fixed inversion cost.
 
 \subsection{Bookkeeping Datasets}
 
@@ -431,6 +551,13 @@ The averaged datasets are
 Only \(\mu\leq\nu\) tensor components are written in the averaged
 \code{avg/Tmunu} group.
 
+The canonical loop file is source independent:
+\begin{center}
+  \code{EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5}.
+\end{center}
+It stores every absolute insertion time and is reused for all hadron two-point
+source times on the same configuration.
+
 The exact quark dataset and attribute names used by downstream scripts are:
 \begin{verbatim}
 raw/Tmunu_pervec
@@ -468,6 +595,10 @@ Attribute & Meaning \\
 & Stochastic source counts. \\
 \code{noise\_scheme}, \code{hp\_num\_vectors}, \code{hp\_ordering}
 & Source-generation scheme. \\
+\code{n\_zn}, \code{config\_num}, \code{noise\_stream}
+& Counter-noise order, configuration key, and independent stream salt. \\
+\code{noise\_generator}, \code{noise\_counter\_order}
+& Fixed hash algorithm and the fields entering its counter. \\
 \code{operator\_normalization}, \code{ringed\_normalization\_applied}
 & Whether the saved quark loop has already been ringed. \\
 \code{ringed\_kinetic\_observable}, \code{ringed\_factor\_application}

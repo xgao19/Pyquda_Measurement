@@ -5,6 +5,7 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     apply_hierarchical_probe,
     apply_spin_color_point_dilution,
     ceil_log2,
+    counter_zn_phase_indices,
     effective_n_inversions,
     hierarchical_probe_pattern,
     is_power_of_two,
@@ -36,6 +37,24 @@ class FakeFermion:
         return FakeFermion(self.data.copy(), self.latt_info)
 
 
+class PartitionedTinyLatticeInfo(TinyLatticeInfo):
+    def __init__(self, x_start, x_stop):
+        self.x_start = int(x_start)
+        self.x_stop = int(x_stop)
+
+    def coordinate(self, mu=None):
+        axes = [
+            np.arange(self.x_start, self.x_stop),
+            np.arange(self.global_size[1]),
+            np.arange(self.global_size[2]),
+            np.arange(self.global_size[3]),
+        ]
+        coords = np.meshgrid(*axes, indexing="ij")
+        if mu is None:
+            return coords
+        return coords[mu]
+
+
 def test_noise_scheme_and_hp_validation():
     assert normalize_noise_scheme(" ZN ") == "zn"
     assert normalize_noise_scheme("Hierarchical_Probing") == "hierarchical_probing"
@@ -58,6 +77,43 @@ def test_noise_scheme_and_hp_validation():
         pass
     else:
         raise AssertionError("invalid spin-color dilution mode should fail")
+
+
+def test_counter_z4_is_deterministic_and_uses_all_counter_fields():
+    latt_info = TinyLatticeInfo()
+    reference = counter_zn_phase_indices(latt_info, 17, 3, stream_seed=5, n=4)
+    repeated = counter_zn_phase_indices(latt_info, 17, 3, stream_seed=5, n=4)
+
+    np.testing.assert_array_equal(reference, repeated)
+    assert set(np.unique(reference)) <= {0, 1, 2, 3}
+    phases = np.asarray([1.0, 1.0j, -1.0, -1.0j])[reference]
+    assert set(np.unique(phases)) <= {1.0, 1.0j, -1.0, -1.0j}
+    assert np.unique(reference[0, 0, 0, 0]).size > 1
+
+    assert not np.array_equal(reference, counter_zn_phase_indices(latt_info, 18, 3, stream_seed=5, n=4))
+    assert not np.array_equal(reference, counter_zn_phase_indices(latt_info, 17, 4, stream_seed=5, n=4))
+    assert not np.array_equal(reference, counter_zn_phase_indices(latt_info, 17, 3, stream_seed=6, n=4))
+
+
+def test_counter_z4_is_independent_of_lattice_partitioning():
+    full = counter_zn_phase_indices(TinyLatticeInfo(), 23, 2, stream_seed=7, n=4)
+    left = counter_zn_phase_indices(PartitionedTinyLatticeInfo(0, 1), 23, 2, stream_seed=7, n=4)
+    right = counter_zn_phase_indices(PartitionedTinyLatticeInfo(1, 2), 23, 2, stream_seed=7, n=4)
+
+    np.testing.assert_array_equal(np.concatenate([left, right], axis=0), full)
+    assert not np.array_equal(left, right)
+
+
+def test_hierarchical_probes_reuse_one_counter_base_source():
+    latt_info = TinyLatticeInfo()
+    indices = counter_zn_phase_indices(latt_info, 31, 6, stream_seed=4, n=4)
+    base = FakeFermion(np.asarray([1.0, 1.0j, -1.0, -1.0j])[indices], latt_info)
+    hp0 = apply_hierarchical_probe(base, 0, "interleaved_xyzt_binary_projected_to_evenodd")
+    hp1 = apply_hierarchical_probe(base, 1, "interleaved_xyzt_binary_projected_to_evenodd")
+    pattern = hierarchical_probe_pattern(latt_info, 1, "interleaved_xyzt_binary_projected_to_evenodd")
+
+    np.testing.assert_array_equal(hp0.data, base.data)
+    np.testing.assert_array_equal(hp1.data, base.data * pattern[..., None, None])
 
 
 def test_effective_inversions_and_source_bookkeeping_arrays():
@@ -85,6 +141,25 @@ def test_hierarchical_probe_patterns_are_rademacher():
         assert set(np.unique(pattern1)) <= {-1.0, 1.0}
         assert np.any(pattern1 == -1.0)
         assert np.any(pattern1 == 1.0)
+
+
+def test_interleaved_xyz_hp_pattern_is_time_independent():
+    latt_info = TinyLatticeInfo()
+    for hp_idx in range(8):
+        pattern = hierarchical_probe_pattern(latt_info, hp_idx, "interleaved_xyz_binary_projected_to_evenodd")
+        np.testing.assert_array_equal(pattern[:, :, :, 0], pattern[:, :, :, 1])
+
+
+def test_interleaved_xyz_hp_pattern_resolves_spatial_bits_first():
+    latt_info = TinyLatticeInfo()
+
+    pattern_x = hierarchical_probe_pattern(latt_info, 1, "interleaved_xyz_binary_projected_to_evenodd")
+    pattern_y = hierarchical_probe_pattern(latt_info, 2, "interleaved_xyz_binary_projected_to_evenodd")
+    pattern_z = hierarchical_probe_pattern(latt_info, 4, "interleaved_xyz_binary_projected_to_evenodd")
+
+    np.testing.assert_array_equal(pattern_x[0, :, :, :], -pattern_x[1, :, :, :])
+    np.testing.assert_array_equal(pattern_y[:, 0, :, :], -pattern_y[:, 1, :, :])
+    np.testing.assert_array_equal(pattern_z[:, :, 0, :], -pattern_z[:, :, 1, :])
 
 
 def test_spin_color_point_dilution_keeps_one_channel():

@@ -168,6 +168,11 @@ def get_emt_quark_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
     return str(Path(data_dir) / "EMTc" / (str(lat) + ".EMTc." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
 
 
+# Build the canonical source-independent quark EMT loop output tag.
+def get_emt_quark_loop_file_tag(data_dir, lat, cfg, ama, sm):
+    return str(Path(data_dir) / "EMTc" / (str(lat) + ".EMTc." + str(cfg) + "." + str(ama) + "." + str(sm)))
+
+
 # Build the pion/meson quark EMT three-point output tag.
 def get_emt_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, spin):
     return str(Path(data_dir) / "EMT3pt" / (str(lat) + ".EMT3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm) + ".spin" + str(spin)))
@@ -226,7 +231,7 @@ def _prepare_h5_file(path, attrs=None):
 # EMT HDF5 writers
 # -----------------------------------------------------------------------------
 
-# Save flowed quark EMT one-point data and ringed-fermion CHI building blocks.
+# Save flowed quark EMT one-point data and scalar CHI diagnostics.
 def save_emt_quark_1pt_hdf5(tag, Tmunu_pervec, CHI_pervec, Tmunu, CHI, attrs=None, source_bookkeeping=None):
     save_h5 = f"{tag}.h5"
     with _prepare_h5_file(save_h5, attrs) as f:

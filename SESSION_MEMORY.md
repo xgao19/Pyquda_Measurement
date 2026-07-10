@@ -209,7 +209,9 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
 - Runtime working directory used earlier:
   `/global/cfs/cdirs/m3760/xgao/software/EMT_meson`
 - EMT output is HDF5-only in vibe paths; `.npy` was removed.
-- HDF5 tags include `lat`, `cfg`, `ama`, `src`, and `sm`.
+- Hadron-correlator HDF5 tags include `lat`, `cfg`, `ama`, `src`, and `sm`.
+  Source-independent EMT quark-loop tags omit `src` and use one file per
+  configuration.
 - `flow_epsion` was standardized to `flow_epsilon`.
 - `GEN_SIMD_WIDTH` was removed from EMT entry scripts.
 - Quark EMT 3pt files do not embed two-point data.  Use the separate
@@ -302,12 +304,28 @@ PYQUDA_RUN_TINY_GAUGE_SMOKE=1 python -c "from tests.test_tiny_gauge_smoke_workfl
   4. `run_build_disconnected_3pt.sh`
 - The builder combines proton `C2` with quark/gluon one-point loops into
   disconnected diagnostic three-point building blocks.
+- Quark loops use decomposition-independent full-volume counter-based `Z4`
+  sources.  The counter contains global `x,y,z,t`, spin, color, configuration,
+  base-noise index, and an optional stream salt.
+- Fermion flow is four dimensional.  With `xi_f=K(t_f)xi` and
+  `eta_f=K(t_f)D^{-1}xi`, a loop at fixed absolute time estimates
+  `Tr[P_tau Gamma K D^{-1} K^dag]`.  The insertion time remains explicit, but
+  the initial source must cover all times because `K(t_f)` spreads temporally.
+- The current workflow does not use time dilution.  One isolated initial-time
+  projector is incomplete at nonzero flow time; a complete dilution basis
+  would remain unbiased only after all projectors are summed.
+- Spatial and 4D HP both multiply the same full-volume base noise.  Spatial HP
+  has time-independent probing signs and must not be described as a 3D or
+  time-diluted source.
 - Single-configuration output is intentionally unsubtracted-proxy only:
   `quark/C3_disc_cumulative`, `quark/R_disc_cumulative`, `gluon/C3_disc`, and
   `gluon/R_disc` are only written for `Ncfg >= 2`.
-- Validated on `login32` with S8T32:
+- Historical diagnostic workflow baseline was validated on `login32` with S8T32:
   `EMT_1PT_FLOW_STEPS=1`, `EMT_1PT_QMAX=0`, `EMT_1PT_N_VEC=2`,
   `EMT_1PT_NOISE_SCHEME=zn`, and `EMT_DISC_T_SEPS=2`.
+- The counter-based `Z4` migration was validated with virtual-partition
+  decomposition tests and the full unit suite (`112 passed, 12 skipped`).  A
+  real multi-rank GPU smoke remains to be run inside a valid Slurm allocation.
 - Validation baseline:
   - C2 file contains `SS/5/PX0PY0PZ0` with shape `(32,)`.
   - `quark/source_count = [1, 2]`.

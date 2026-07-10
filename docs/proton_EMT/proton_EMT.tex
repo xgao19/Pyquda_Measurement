@@ -1169,6 +1169,11 @@ small-flow-time expansion to extract renormalized matrix elements.  This analysi
 is performed \emph{outside} the contraction kernel; the kernel only produces the
 flowed data at each \texttt{step}.
 
+The fermion-flow kernel is four dimensional, so the quoted radius includes the
+Euclidean time direction and is a diffusion scale rather than a strict support
+boundary.  This matters for stochastic disconnected loops, as summarized in
+Sec.~\ref{sec:proton_disc_full_volume_source}.
+
 % ---------------------------------------------------------------------------
 \section{Code Structure Overview}
 % ---------------------------------------------------------------------------
@@ -1311,6 +1316,10 @@ The EMT output files are organized in subdirectories:
   \item \texttt{EMTc/} -- stochastic quark one-point loops (shared with meson);
   \item \texttt{EMTg/} -- flowed gluon one-point functions (shared with meson).
 \end{itemize}
+The canonical EMTc loop name is source independent,
+\texttt{<lat>.EMTc.<cfg>.<ama>.<sm>.h5}.  It stores all absolute insertion
+times and is reused for every proton two-point source time on that
+configuration.
 Connected proton three-point file names append the sink kinematics as
 \texttt{PX<px>PY<py>PZ<pz>dt<tsep>}.  A zero-momentum sink with one
 source--sink separation at nine carries the suffix
@@ -1339,6 +1348,7 @@ The connected contribution is computed by \texttt{ProtonQuarkEMT.connected\_3pt}
 as described in Sections~\ref{sec:C3_def}--\ref{sec:C3_total}.
 
 \subsection{Disconnected Quark Contribution}
+\label{sec:proton_disc_full_volume_source}
 
 The disconnected quark contribution is evaluated using stochastic estimators.
 For each noise vector $\xi^{(r)}$, one solves $D\eta^{(r)} = \xi^{(r)}$ and
@@ -1351,6 +1361,33 @@ computes the one-point function (spatially Fourier-transformed loop):
     \gamma_{\nu}\big[D_{+\mu}-D_{-\mu}\big]\,
     \eta^{(r)}(x).
 \end{equation}
+At finite flow time the code evolves both stochastic fields with the same
+four-dimensional fermion-flow kernel:
+\begin{equation}
+  \xi_f=K(t_f)\xi,
+  \qquad
+  \eta_f=K(t_f)D^{-1}\xi.
+\end{equation}
+Writing \(P_\tau\) for the absolute insertion-time projector, the estimator and
+its expectation are
+\begin{align}
+  \widehat L(\tau,t_f)
+  &=\xi^\dagger K^\dagger P_\tau\Gamma K D^{-1}\xi,
+  \\
+  \mathbb{E}_\xi[\widehat L(\tau,t_f)]
+  &=\Tr\!\left[P_\tau\Gamma K(t_f)D^{-1}K^\dagger(t_f)\right].
+  \label{eq:proton_full_volume_flowed_loop}
+\end{align}
+Thus the physical loop remains a spatial trace at fixed \(\tau\), but the
+initial stochastic vector must span all Euclidean times because \(K(t_f)\)
+spreads in the temporal direction.  A single initial-time projector does not
+reproduce this finite-flow trace.  Complete time dilution would be unbiased
+after summing all projectors, but the current workflow instead uses
+full-volume counter-based \(Z_4\) sources and retains every insertion time.
+Spatial HP and isotropic 4D HP both preserve this full-volume support; only
+their probing signs differ.  A detailed derivation is provided in
+\code{docs/EMT\_disconnected\_1pt/EMT\_disconnected\_1pt.tex}.
+
 The disconnected three-point function is then obtained from the correlation with
 the proton two-point function:
 \begin{equation}

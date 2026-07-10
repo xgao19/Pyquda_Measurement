@@ -3,7 +3,7 @@ import os
 from pyquda import init
 from pyquda_utils import io
 from pyquda_measurement_utils.pion_EMT_vibe_develop import QuarkEMT
-from pyquda_measurement_utils.io_corr import get_emt_quark_1pt_file_tag
+from pyquda_measurement_utils.io_corr import get_emt_quark_loop_file_tag
 
 # ============================================================
 # Argument parsing
@@ -19,8 +19,8 @@ mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 # ============================================================
 # Shared configuration
 # ============================================================
-# Production knobs: ensemble paths, output tags, source position,
-# momentum grid, gradient-flow schedule, and stochastic estimator.
+# Production knobs: ensemble paths, output tags, momentum grid,
+# gradient-flow schedule, and stochastic estimator.
 data_dir = os.environ.get("EMT_DATA_DIR", "/global/cfs/cdirs/m3760/xgao/software/EMT_meson/data")
 gauge_path = os.environ.get(
     "EMT_GAUGE_PATH",
@@ -28,9 +28,9 @@ gauge_path = os.environ.get(
 )
 lat_tag = "l64c64a076"
 sm_tag = "1HYP_GSRC_W10_k0"
-src_pos = [0, 0, 0, 0]
 qext = [[x, y, z, 0] for x in range(-2, 3) for y in range(-2, 3) for z in range(-2, 3)]
 parameters = {
+    "config_num": conf,
     "qext": qext,
     "pf": [0, 0, 0, 0],
     "p_2pt": qext,
@@ -42,7 +42,7 @@ parameters = {
     "flow_epsilon": 0.207936,
     "flow_steps": 10,
 }
-quark_1pt_tag = get_emt_quark_1pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
+quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
 
 # ============================================================
 # Initialize QUDA backend
@@ -61,9 +61,9 @@ gauge.latt_info.t_boundary = -1
 # ============================================================
 quark_emt = QuarkEMT(parameters)
 # Inverter knobs: mass, clover coefficient, tolerance, max iterations.
-invPara = [0.236, 1.0372, 1e-15, 300]
-# Stochastic-source knobs: number of vectors, Z_n, RNG seed.
-randPara = [1, 2, int(conf)]
+invPara = [0.236, 1.0372, 1e-10, 300]
+# Stochastic-source knobs: number of vectors, Z_n, counter-noise stream salt.
+randPara = [1, 4, 0]
 
 quark_emt.flowed_fermionic_1pt(
     gauge,

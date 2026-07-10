@@ -141,6 +141,8 @@ Use `N_VEC=2` for the smallest stochastic-source convergence check:
 EMT_1PT_FLOW_STEPS=1 \
 EMT_1PT_QMAX=0 \
 EMT_1PT_N_VEC=2 \
+EMT_1PT_N_ZN=4 \
+EMT_1PT_RAND_SEED=0 \
 EMT_1PT_NOISE_SCHEME=zn \
 bash run_quark_1pt.sh
 ```
@@ -148,7 +150,7 @@ bash run_quark_1pt.sh
 Expected quark output:
 
 ```text
-data/EMTc/*.h5
+data/EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5
 raw/Tmunu_pervec
 raw/CHI_pervec
 raw/source_index
@@ -157,6 +159,35 @@ raw/hp_index
 avg/Tmunu/T11 ... T44
 avg/CHI
 ```
+
+The quark loop file is source independent and is reused for every proton
+two-point source time on the same configuration.  Its full-volume counter-based
+noise is keyed by global coordinates, spin, color, configuration, base-noise
+index, and the optional stream salt.
+
+At flow time `t_f`, the measured fields are `xi_f=K(t_f)xi` and
+`eta_f=K(t_f)D^{-1}xi`.  For an absolute insertion-time projector `P_tau`,
+
+```text
+L_hat(tau,t_f) = xi^dag K^dag P_tau Gamma K D^{-1} xi
+E[L_hat]       = Tr[P_tau Gamma K D^{-1} K^dag].
+```
+
+The loop is a spatial trace at fixed `tau`, not a time-summed observable.
+However, `K(t_f)` is a four-dimensional fermion-flow kernel and spreads in the
+temporal direction.  Restricting the initial source to only one time slice is
+therefore not the same finite-flow estimator.  Complete time dilution would
+require summing all time projectors; this workflow instead keeps one
+full-volume `Z4` source and stores every absolute `tau`.
+
+For a two-point source time `t0`, downstream analysis selects
+
+```text
+tau_abs = (t0 + tau_rel) mod Nt.
+```
+
+The canonical EMTc file has no source-position tag because the same loop is
+reused for every `t0` on that configuration.
 
 The saved quark loop is an unringed flowed bilinear.  New files mark this with
 `operator_normalization=unringed_flowed_bilinear` and
@@ -323,6 +354,8 @@ Quark stochastic controls:
 ```text
 EMT_1PT_N_VEC
 EMT_1PT_N_ZN
+EMT_1PT_RAND_SEED
+EMT_1PT_TOL
 EMT_1PT_NOISE_SCHEME
 EMT_1PT_HP_NUM_VECTORS
 EMT_1PT_HP_ORDERING

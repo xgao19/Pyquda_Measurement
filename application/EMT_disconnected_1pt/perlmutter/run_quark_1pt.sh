@@ -23,9 +23,12 @@ export EMT_1PT_CONFIG_NUM="${EMT_1PT_CONFIG_NUM:-0}"
 export EMT_1PT_MPI_GEOMETRY="${EMT_1PT_MPI_GEOMETRY:-1.1.1.1}"
 export EMT_1PT_QMAX="${EMT_1PT_QMAX:-0}"
 export EMT_1PT_FLOW_STEPS="${EMT_1PT_FLOW_STEPS:-1}"
+export EMT_1PT_TOL="${EMT_1PT_TOL:-1e-10}"
+export EMT_1PT_N_ZN="${EMT_1PT_N_ZN:-4}"
+export EMT_1PT_RAND_SEED="${EMT_1PT_RAND_SEED:-0}"
 export EMT_1PT_NOISE_SCHEME="${EMT_1PT_NOISE_SCHEME:-zn}"
 export EMT_1PT_HP_NUM_VECTORS="${EMT_1PT_HP_NUM_VECTORS:-1}"
-export EMT_1PT_HP_ORDERING="${EMT_1PT_HP_ORDERING:-global_xyzt_gray_projected_to_evenodd}"
+export EMT_1PT_HP_ORDERING="${EMT_1PT_HP_ORDERING:-interleaved_xyz_binary_projected_to_evenodd}"
 
 mkdir -p "$QUDA_RESOURCE_PATH" "$CUPY_CACHE_DIR" "$EMT_1PT_DATA_DIR"
 

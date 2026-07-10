@@ -4,6 +4,24 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-10: Add full-volume Z4 EMT loop workflow
+
+- Replaced rank-local stochastic EMT sources with decomposition-independent
+  counter-based full-volume `Z4` noise keyed by global coordinates, spin,
+  color, configuration, base-noise index, and stream salt.
+- Made EMT quark-loop files source independent, changed quark 1pt defaults to
+  `Z4` and `tol=1e-10`, restricted quark/gluon HDF5 writes to rank 0, and
+  removed redundant gauge loads.
+- Preserved spatial and 4D hierarchical-probing choices while adding source
+  bookkeeping, canonical tag, HDF5 metadata, and partition-invariance tests.
+- Documented four-dimensional fermion-flow spreading, fixed-time spatial
+  traces, full-volume sources, and the distinction between one time projector
+  and a complete time-dilution basis across the disconnected, pion, and proton
+  EMT notes; rebuilt all three PDFs.
+- Verified `112 passed, 12 skipped`, Python compilation, LaTeX cross-references,
+  PDF text, and `git diff --check`.  A real multi-rank GPU smoke still requires
+  a valid Slurm allocation.
+
 ## 2026-07-02: Add HP256 ringed-norm sample resume
 
 - Tightened standalone flowed-quark ringed normalization to fixed-interval

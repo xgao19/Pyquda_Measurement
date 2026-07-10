@@ -5,9 +5,6 @@ both pion and proton EMT workflows.  These loops are the building blocks for
 disconnected diagrams in analysis:
 
     C3_disc = < C2 L > - < C2 > < L >.
-
-They also provide the flowed-fermion kinetic expectation value used for ringed
-fermion normalization through the diagonal quark ``Tmunu`` components.
 """
 
 import numpy as np
@@ -21,6 +18,7 @@ from pyquda_comm.array import arrayIdentity, arrayZeros
 from pyquda_measurement_utils.io_corr import save_emt_quark_1pt_hdf5, save_emt_gluon_1pt_hdf5
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
+    COUNTER_NOISE_ALGORITHM,
     effective_n_inversions,
     iter_noise_sources,
     normalize_noise_scheme,
@@ -85,9 +83,10 @@ class EMTDisconnectedQuark1pt:
         self.flow_type = _normalize_flow_type(parameters["flow_type"])
         self.flow_epsilon = parameters["flow_epsilon"]
         self.flow_steps = parameters["flow_steps"]
+        self.config_num = parameters.get("config_num")
         self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
         self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
-        self.hp_ordering = parameters.get("hp_ordering", "global_xyzt_gray_projected_to_evenodd")
+        self.hp_ordering = parameters.get("hp_ordering", "interleaved_xyz_binary_projected_to_evenodd")
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
 
     @staticmethod
@@ -109,7 +108,7 @@ class EMTDisconnectedQuark1pt:
         return _array_on_backend(_gamma_matrix(my_pyquda_gammas[my_gammas.index(interpolator)]), ref_arr)
 
     @staticmethod
-    def _impose_P_Breit_slice(U: LatticeGauge, complex_field, phases_3pt):
+    def _impose_P_Breit_slice(complex_field, phases_3pt):
         """Project a local scalar field to spatial momenta and keep time."""
         slice_t = core.gatherLattice(
             contract("qwtzyx, wtzyx -> qt", phases_3pt, complex_field).get(),
@@ -122,19 +121,19 @@ class EMTDisconnectedQuark1pt:
         U_f: LatticeGauge,
         xi: LatticeFermion,
         eta: LatticeFermion,
-        qlist,
         phases_3pt,
     ):
         """Build flowed quark 1pt EMT and scalar diagnostics."""
         Nt = U_f.latt_info.global_size[3]
+        Nq = len(phases_3pt)
 
-        CHI = np.zeros([2, len(qlist), Nt], dtype=np.complex128)
+        CHI = np.zeros([2, Nq, Nt], dtype=np.complex128)
         dot_xi_eta = contract("etzyxbc,etzyxbc->etzyx", xi.data.conj(), eta.data)
-        CHI[0] = self._impose_P_Breit_slice(U_f, dot_xi_eta, phases_3pt)
+        CHI[0] = self._impose_P_Breit_slice(dot_xi_eta, phases_3pt)
         dot_xi_xi = contract("etzyxbc,etzyxbc->etzyx", xi.data.conj(), xi.data)
-        CHI[1] = self._impose_P_Breit_slice(U_f, dot_xi_xi, phases_3pt)
+        CHI[1] = self._impose_P_Breit_slice(dot_xi_xi, phases_3pt)
 
-        Tmunu = np.zeros([4, 4, len(qlist), Nt], dtype=np.complex128)
+        Tmunu = np.zeros([4, 4, Nq, Nt], dtype=np.complex128)
         U_f.gauge_dirac.loadGauge(U_f)
         D_gammas_local = self._dirac_gammas_for(eta.data)
         for mu in range(4):
@@ -142,7 +141,7 @@ class EMTDisconnectedQuark1pt:
             for nu in range(4):
                 Y = contract("ab,...bc->...ac", D_gammas_local[nu], tmp.data)
                 complex_field = contract("...sc,...sc->...", xi.data.conj(), Y)
-                Tmunu[nu, mu] += -0.5 * self._impose_P_Breit_slice(U_f, complex_field, phases_3pt)
+                Tmunu[nu, mu] += -0.5 * self._impose_P_Breit_slice(complex_field, phases_3pt)
 
         for mu in range(4):
             for nu in range(mu + 1, 4):
@@ -184,9 +183,12 @@ class EMTDisconnectedQuark1pt:
         dirac.loadGauge(U)
         mpi_print(latt_info, "Multigrid inverter ready.")
 
-        rng_probe = LatticeFermion(latt_info)
-        xp = _get_xp_from_array(rng_probe.data)
-        xp.random.seed(randseed)
+        if self.config_num is None:
+            counter_config = int(randseed)
+            counter_stream = 0
+        else:
+            counter_config = int(self.config_num)
+            counter_stream = int(randseed)
 
         n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
         Tmunu = np.zeros([n_eff, 4, 4, len(self.qlist), Nsteps + 1, Nt], dtype=np.complex128)
@@ -194,11 +196,19 @@ class EMTDisconnectedQuark1pt:
         source_bookkeeping = source_bookkeeping_arrays(n_eff)
         qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
         phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, [0, 0, 0, 0])
-        for vec_picked, base_idx, hp_idx, xi in iter_noise_sources(latt_info, n_vec, n_zn, self.noise_scheme, self.hp_num_vectors, self.hp_ordering):
+        for vec_picked, base_idx, hp_idx, xi in iter_noise_sources(
+            latt_info,
+            n_vec,
+            n_zn,
+            self.noise_scheme,
+            self.hp_num_vectors,
+            self.hp_ordering,
+            counter_noise_config=counter_config,
+            counter_noise_stream=counter_stream,
+        ):
             mpi_print(U.latt_info, f"vec {vec_picked} base {base_idx} hp {hp_idx}")
             source_bookkeeping["base_noise_index"][vec_picked] = base_idx
             source_bookkeeping["hp_index"][vec_picked] = hp_idx
-            dirac.loadGauge(U)
             eta = dirac.invert(xi)
 
             U_f = U.copy()
@@ -206,8 +216,7 @@ class EMTDisconnectedQuark1pt:
 
             for step in range(Nsteps + 1):
                 mpi_print(U_f.latt_info, f"calc Tmunu, step = {step}")
-                U_f.gauge_dirac.loadGauge(U_f)
-                tmpt, tmps = self._get_Tmunu_symmetrized_P_Breit_slice(U_f, xi, eta, self.qlist, phases_3pt)
+                tmpt, tmps = self._get_Tmunu_symmetrized_P_Breit_slice(U_f, xi, eta, phases_3pt)
                 Tmunu[vec_picked, :, :, :, step, :] += tmpt
                 CHI[vec_picked, :, :, step, :] += tmps
 
@@ -234,12 +243,9 @@ class EMTDisconnectedQuark1pt:
             "p_2pt": np.asarray(self.pilist, dtype=np.int32),
             "volume_norm": Ns3,
             "upper_triangle_only": True,
-            "operator_normalization": "unringed_flowed_bilinear",
-            "ringed_normalization_applied": False,
-            "ringed_kinetic_observable": "K_code=-2*sum_mu avg/Tmunu/Tmumu[q0,flow,tau]",
-            "ringed_kinetic_source": "avg/Tmunu diagonal q=0",
-            "ringed_kinetic_volume_average": "spatial_volume_normalized_timeslice",
-            "ringed_factor_application": "analysis_stage",
+            "operator_normalization": "unrenormalized_flowed_quark_bilinear",
+            "renormalization_applied": False,
+            "renormalization_stage": "analysis_stage",
             "flavor_convention": "single_flavor_trace_for_this_dirac_operator",
             "derivative_convention": "Tmunu[nu,mu]=-0.5*xi_dag*gamma_nu*(Dplus_mu-Dminus_mu)*eta; symmetrized",
             "mass": mass,
@@ -250,22 +256,27 @@ class EMTDisconnectedQuark1pt:
             "n_base_noise": n_vec,
             "effective_n_inversions": n_eff,
             "n_zn": n_zn,
-            "rand_seed": randseed,
+            "config_num": counter_config,
+            "rand_seed": counter_stream,
+            "noise_stream": counter_stream,
+            "noise_generator": COUNTER_NOISE_ALGORITHM,
+            "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
             "noise_scheme": self.noise_scheme,
             "hp_num_vectors": self.hp_num_vectors,
             "hp_ordering": self.hp_ordering,
         }
         Tmunu_avg = np.mean(Tmunu, axis=0) / Ns3
         CHI_avg = np.mean(CHI, axis=0) / Ns3
-        save_emt_quark_1pt_hdf5(
-            tag,
-            Tmunu,
-            CHI,
-            Tmunu_avg,
-            CHI_avg,
-            attrs=attrs,
-            source_bookkeeping=source_bookkeeping,
-        )
+        if latt_info.mpi_rank == 0:
+            save_emt_quark_1pt_hdf5(
+                tag,
+                Tmunu,
+                CHI,
+                Tmunu_avg,
+                CHI_avg,
+                attrs=attrs,
+                source_bookkeeping=source_bookkeeping,
+            )
 
         return Tmunu_avg, CHI_avg
 
@@ -477,10 +488,11 @@ class EMTDisconnectedGluon1pt:
             "volume_norm": Ns3,
             "upper_triangle_only": True,
             "operator_normalization": "flowed_gluon_bilinear",
-            "ringed_normalization_applied": False,
-            "ringed_factor_source": "not_applicable_to_gluon",
+            "renormalization_applied": False,
+            "renormalization_stage": "analysis_stage",
         }
-        save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=attrs)
+        if latt_info.mpi_rank == 0:
+            save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=attrs)
 
         return Tmunu_t
 

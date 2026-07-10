@@ -233,7 +233,8 @@ validation runs and larger production-style tests.
 - EMT HDF5 helpers live in `io_corr.py`.
 - qTMD-like HDF5 file names are built with tag helpers such as
   `get_qTMD_file_tag(...)`.
-- EMT file names include the standard `lat / cfg / ama / src / sm` tags.
+- Hadron correlator EMT file names include the standard `lat / cfg / ama / src / sm` tags.
+- Hadron-independent quark-loop files omit `src` and use `lat / cfg / ama / sm`.
 - Proton connected 3pt names additionally encode the sink kinematics as
   `PX<px>PY<py>PZ<pz>dt<tsep>`, matching the nucleon TMD convention.
   Multiple separations are written as separate files.
@@ -256,16 +257,24 @@ For pion/meson EMT:
 For quark/gluon one-point data:
 
 - Quark 1pt stores stochastic `Tmunu` and `CHI` outputs.
+- Quark 1pt defaults to decomposition-independent full-volume counter-based `Z4` noise.
 - Quark 1pt can use either ordinary `zn` noise or `hierarchical_probing`.
 - For hierarchical probing, `effective_n_inversions = n_base_noise * hp_num_vectors`.
 - Raw quark 1pt files store `source_index`, `base_noise_index`, and `hp_index`
   bookkeeping datasets.
-- Current HP ordering choices are `global_xyzt_gray_projected_to_evenodd` and
+- Current HP ordering choices include `interleaved_xyz_binary_projected_to_evenodd`
+  with a time-independent spatial sign pattern, plus 4D orderings such as
+  `interleaved_xyzt_binary_projected_to_evenodd`,
+  `global_xyzt_gray_projected_to_evenodd`, and
   `spatial_xyz_then_t_gray_projected_to_evenodd`.
-- The ringed-fermion kinetic normalization can be reconstructed at q=0 from
-  `avg/Tmunu/T11`, `T22`, `T33`, and `T44`.
-- `CHI` is a scalar trace/noise diagnostic, not the standard ringed-fermion
-  normalization by itself.
+- All HP choices multiply a full-volume base source; spatial HP is not time
+  dilution.  Four-dimensional fermion flow spreads the flowed fields in time,
+  while the saved insertion-time axis remains explicit.
+- A single source-independent EMTc loop file per configuration stores all
+  absolute insertion times and is reused for every hadron source time.
+- `CHI` is a scalar trace/noise diagnostic.
+- Ringed-fermion normalization is produced by the standalone
+  `application/flowed_quark_ringed_norm` workflow.
 - Gluon 1pt stores the flowed gluonic EMT building block.
 - Renormalized gradient-flow EMT combinations, vacuum subtractions, and mixing
   coefficients are applied in downstream analysis, not inside these kernels.
