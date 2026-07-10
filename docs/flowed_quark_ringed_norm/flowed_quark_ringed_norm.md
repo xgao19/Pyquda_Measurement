@@ -81,6 +81,20 @@ avg/Z_ring_bilinear             [Nflow]
 flow_times                      [Nflow]
 ```
 
+EMT quark 1pt jobs use the same canonical file-name helper but write a
+kinetic-only companion from their already-computed zero-momentum diagonal EMT
+trace.  Those files contain `raw/kinetic_pervec`, source bookkeeping,
+`avg/kinetic_spacetime`, and `flow_times`, but intentionally omit both
+`avg/Z_ring_*` datasets.  Their attributes include
+`producer=emt_quark_1pt`, `content=kinetic_only`, and
+`ringed_factors_stored=False`.
+
+For ensemble physics, average `kinetic_spacetime` over configurations before
+evaluating the nonlinear ringed-factor formula.  Do not average factors formed
+separately from each configuration.  The standalone workflow remains the
+appropriate choice for dedicated high-statistics, point spin-color dilution,
+interval blocks, and HP256 resume runs.
+
 Important attributes:
 
 ```text

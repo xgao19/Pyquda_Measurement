@@ -189,11 +189,11 @@ tau_abs = (t0 + tau_rel) mod Nt.
 The canonical EMTc file has no source-position tag because the same loop is
 reused for every `t0` on that configuration.
 
-The saved quark loop is an unringed flowed bilinear.  New files mark this with
-`operator_normalization=unringed_flowed_bilinear` and
-`ringed_normalization_applied=False`.  The ringed factor should be computed in
-analysis from the q=0 diagonal kinetic building block, not inside this smoke
-workflow.
+The saved quark loop is an unringed flowed bilinear.  The same run writes a
+kinetic-only `FlowedQuarkRinged` companion extracted from the identical raw
+EMT vectors.  It contains no per-configuration ringed factor: compute that
+factor in analysis only after averaging its `avg/kinetic_spacetime` over the
+gauge ensemble.
 
 ### Step 2: Gluon EMT 1pt
 
@@ -270,8 +270,9 @@ Lbar_N = mean(raw/Tmunu_pervec[:N], axis=0) / volume_norm
 N = 1, ..., effective_n_inversions
 ```
 
-For ringed-fermion normalization, reconstruct the kinetic expectation from the
-averaged diagonal loop:
+For ringed-fermion normalization, read `avg/kinetic_spacetime` from the
+source-matched companion.  The exact reconstruction below remains a useful
+cross-check:
 
 ```text
 K_code(flow) = -2 * mean_tau_cfg[
@@ -280,9 +281,10 @@ K_code(flow) = -2 * mean_tau_cfg[
 ]
 ```
 
-Then apply the resulting ringed bilinear factor to quark connected and
-disconnected EMT observables at the same flow step.  Do not use the unflowed
-`flow=0` step for this factor.
+First average this kinetic value over configurations, then apply the resulting
+ringed bilinear factor to quark connected and disconnected EMT observables at
+the same flow step.  Do not average configuration-local inverse factors, and
+do not use the unflowed `flow=0` step.
 
 The single-configuration proxy is:
 

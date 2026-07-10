@@ -28,8 +28,12 @@ symmetrized upper-triangle components `mu <= nu` of `Tmunu`; the missing lower
 triangle is obtained by symmetry in analysis.
 
 The quark workflow also stores `CHI` as a scalar trace and stochastic-noise
-diagnostic.  Ringed-fermion normalization is handled by the standalone
-`application/flowed_quark_ringed_norm` workflow.
+diagnostic.  In the same run it derives the ringed-fermion kinetic trace from
+the zero-momentum diagonal EMT components and writes a kinetic-only
+`FlowedQuarkRinged` companion.  This reuses the exact EMT stochastic vectors
+and adds no inversion, fermion-flow, derivative, or MPI-gather work.  The
+standalone `application/flowed_quark_ringed_norm` workflow remains available
+for dedicated high-statistics and resumable measurements.
 
 The gluon workflow stores the flowed gluonic EMT building block
 
@@ -170,6 +174,33 @@ avg/Tmunu/T11, T12, ..., T44
 Canonical quark-loop files are source independent and use
 `EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5`.  A single full-time loop file is shared
 by all hadron two-point source times on that configuration.
+
+The same run also writes
+`FlowedQuarkRinged/<lat>.FlowedQuarkRinged.<cfg>.<ama>.<sm>.h5`.  This companion
+is the kinetic-only subset of the standalone schema:
+
+```text
+flow_times
+raw/kinetic_pervec
+raw/source_index
+raw/base_noise_index
+raw/hp_index
+raw/spin_index
+raw/color_index
+avg/kinetic_spacetime
+```
+
+It intentionally omits `avg/Z_ring_field_sqrt` and `avg/Z_ring_bilinear`.
+Form the ensemble mean of `avg/kinetic_spacetime` first and apply the ringed
+factor formula only afterward; averaging configuration-local inverse factors
+would be biased.  The identity
+
+```text
+raw/kinetic_pervec = -2/Vs * sum_mu raw/Tmunu_pervec[:,mu,mu,q0,:,:]
+```
+
+is an exact file-level cross-check.  `qext` must contain exactly one zero
+momentum when companion output is enabled.
 
 The bookkeeping datasets mean:
 

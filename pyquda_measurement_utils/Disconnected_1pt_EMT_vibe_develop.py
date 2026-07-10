@@ -15,7 +15,15 @@ from pyquda.field import LatticeGauge, LatticePropagator, LatticeFermion, MultiL
 from pyquda_utils import core, gamma, phase, convert
 from pyquda_comm.array import arrayIdentity, arrayZeros
 
-from pyquda_measurement_utils.io_corr import save_emt_quark_1pt_hdf5, save_emt_gluon_1pt_hdf5
+from pyquda_measurement_utils.io_corr import (
+    save_emt_gluon_1pt_hdf5,
+    save_emt_quark_1pt_hdf5,
+    save_flowed_quark_ringed_norm_hdf5,
+)
+from pyquda_measurement_utils.flowed_quark_ringed_norm import (
+    kinetic_spacetime_from_raw,
+    natural_estimator_block_size,
+)
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
@@ -67,6 +75,40 @@ def _flow_times(flow_epsilon, flow_steps):
     return np.arange(flow_steps + 1, dtype=np.float64) * float(flow_epsilon)
 
 
+def _unique_zero_momentum_index(momentum_list):
+    """Return the unique zero-momentum index or raise a clear error."""
+    zero_indices = [
+        idx
+        for idx, momentum in enumerate(momentum_list)
+        if np.asarray(momentum).size > 0 and np.all(np.asarray(momentum) == 0)
+    ]
+    if len(zero_indices) != 1:
+        raise ValueError(
+            "ringed kinetic output requires qext to contain exactly one zero momentum; "
+            f"found {len(zero_indices)}"
+        )
+    return zero_indices[0]
+
+
+def ringed_kinetic_pervec_from_emt(Tmunu_pervec, zero_momentum_index, spatial_volume):
+    """Extract the ringed kinetic timeslices from raw EMT diagonal components."""
+    tensor = np.asarray(Tmunu_pervec)
+    if tensor.ndim != 6 or tensor.shape[1:3] != (4, 4):
+        raise ValueError(
+            "Tmunu_pervec should have shape [N_eff,4,4,Nq,Nflow,Nt], "
+            f"got {tensor.shape}"
+        )
+    q0_index = int(zero_momentum_index)
+    if not 0 <= q0_index < tensor.shape[3]:
+        raise ValueError(f"zero_momentum_index {q0_index} outside Nq={tensor.shape[3]}")
+    spatial_volume = int(spatial_volume)
+    if spatial_volume <= 0:
+        raise ValueError(f"spatial_volume should be positive, got {spatial_volume}")
+
+    diagonal_sum = sum(tensor[:, mu, mu, q0_index, :, :] for mu in range(4))
+    return (-2.0 / spatial_volume) * diagonal_sum
+
+
 class EMTDisconnectedQuark1pt:
     """Hadron-independent stochastic flowed quark EMT loop measurement."""
 
@@ -87,6 +129,12 @@ class EMTDisconnectedQuark1pt:
         self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
         self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
         self.hp_ordering = parameters.get("hp_ordering", "interleaved_xyz_binary_projected_to_evenodd")
+        self.nc = int(parameters.get("Nc", 3))
+        self.gauge_preprocessing = parameters.get("gauge_preprocessing", "unspecified")
+        self.flavor_convention = parameters.get(
+            "flavor_convention",
+            "single_flavor_trace_for_this_dirac_operator",
+        )
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
 
     @staticmethod
@@ -156,6 +204,7 @@ class EMTDisconnectedQuark1pt:
         invPara,
         randPara,
         tag: str = "",
+        ringed_tag=None,
     ):
         """Compute quark flowed 1pt observables with stochastic sources."""
         n_vec, n_zn, randseed = randPara
@@ -168,6 +217,13 @@ class EMTDisconnectedQuark1pt:
         global_size = latt_info.global_size
         Ns3 = global_size[0] * global_size[1] * global_size[2]
         Nt = global_size[3]
+
+        if ringed_tag is not None:
+            if not str(ringed_tag).strip():
+                raise ValueError("ringed_tag should be non-empty when ringed kinetic output is enabled")
+            q0_index = _unique_zero_momentum_index(self.qlist)
+        else:
+            q0_index = None
 
         mpi_print(latt_info, f"t_boundary = {latt_info.t_boundary}")
         dirac = core.getDirac(
@@ -246,7 +302,7 @@ class EMTDisconnectedQuark1pt:
             "operator_normalization": "unrenormalized_flowed_quark_bilinear",
             "renormalization_applied": False,
             "renormalization_stage": "analysis_stage",
-            "flavor_convention": "single_flavor_trace_for_this_dirac_operator",
+            "flavor_convention": self.flavor_convention,
             "derivative_convention": "Tmunu[nu,mu]=-0.5*xi_dag*gamma_nu*(Dplus_mu-Dminus_mu)*eta; symmetrized",
             "mass": mass,
             "csw": csw,
@@ -267,6 +323,65 @@ class EMTDisconnectedQuark1pt:
         }
         Tmunu_avg = np.mean(Tmunu, axis=0) / Ns3
         CHI_avg = np.mean(CHI, axis=0) / Ns3
+        if ringed_tag is not None:
+            kinetic_pervec = ringed_kinetic_pervec_from_emt(Tmunu, q0_index, Ns3)
+            kinetic_spacetime = kinetic_spacetime_from_raw(kinetic_pervec)
+            ringed_source_bookkeeping = dict(source_bookkeeping)
+            ringed_source_bookkeeping["spin_index"] = np.full(n_eff, -1, dtype=np.int32)
+            ringed_source_bookkeeping["color_index"] = np.full(n_eff, -1, dtype=np.int32)
+            ringed_attrs = {
+                "measurement": "flowed_quark_ringed_norm",
+                "producer": "emt_quark_1pt",
+                "content": "kinetic_only",
+                "normalization_scope": "all_flowed_quark_fields",
+                "operator": "bar_chi_overleftrightarrow_Dslash_chi",
+                "Nc": self.nc,
+                "flavor_convention": self.flavor_convention,
+                "flow_type": self.flow_type,
+                "flow_epsilon": self.flow_epsilon,
+                "flow_steps": self.flow_steps,
+                "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
+                "mass": mass,
+                "csw": csw,
+                "tol": tol,
+                "maxiter": maxiter,
+                "gauge_preprocessing": self.gauge_preprocessing,
+                "t_boundary": latt_info.t_boundary,
+                "noise_scheme": self.noise_scheme,
+                "n_vec": n_vec,
+                "n_base_noise": n_vec,
+                "n_zn": n_zn,
+                "config_num": counter_config,
+                "rand_seed": counter_stream,
+                "noise_stream": counter_stream,
+                "noise_generator": COUNTER_NOISE_ALGORITHM,
+                "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
+                "hp_num_vectors": self.hp_num_vectors,
+                "hp_ordering": self.hp_ordering,
+                "spin_color_dilution": "none",
+                "spin_color_dilution_factor": 1,
+                "spin_color_trace_factor": 1,
+                "site_noise_scope": "site_spin_color",
+                "effective_n_inversions": n_eff,
+                "natural_block_size": natural_estimator_block_size(
+                    self.noise_scheme,
+                    self.hp_num_vectors,
+                    "none",
+                ),
+                "volume_norm": Ns3,
+                "volume_average": "mean_over_effective_sources_and_absolute_time_of_raw_kinetic_pervec",
+                "kinetic_source": "raw_Tmunu_pervec_zero_momentum_diagonal_trace",
+                "kinetic_relation": "K_pervec=-2*sum_mu(Tmunu_pervec[mu,mu,q0])/spatial_volume",
+                "zero_momentum_index": q0_index,
+                "ringed_factors_stored": False,
+                "ringed_factor_stage": "ensemble_analysis_from_configuration_averaged_kinetic",
+            }
+        else:
+            kinetic_pervec = None
+            kinetic_spacetime = None
+            ringed_source_bookkeeping = None
+            ringed_attrs = None
+
         if latt_info.mpi_rank == 0:
             save_emt_quark_1pt_hdf5(
                 tag,
@@ -277,6 +392,17 @@ class EMTDisconnectedQuark1pt:
                 attrs=attrs,
                 source_bookkeeping=source_bookkeeping,
             )
+            if ringed_tag is not None:
+                save_flowed_quark_ringed_norm_hdf5(
+                    ringed_tag,
+                    kinetic_pervec,
+                    kinetic_spacetime,
+                    None,
+                    None,
+                    _flow_times(self.flow_epsilon, self.flow_steps),
+                    attrs=ringed_attrs,
+                    source_bookkeeping=ringed_source_bookkeeping,
+                )
 
         return Tmunu_avg, CHI_avg
 

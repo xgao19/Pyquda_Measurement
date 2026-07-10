@@ -1,5 +1,6 @@
 import numpy as np
 import datetime
+import os
 import sys
 import time
 
@@ -9,7 +10,10 @@ from pyquda.field import LatticeInfo, LatticeGauge, LatticeMom
 from pyquda_utils import core, gamma, io
 # from pyquda_measurement_utils import EMT_quark_1pt
 from pyquda_measurement_utils.pion_EMT_vibe_develop import QuarkEMT, GluonEMT
-from pyquda_measurement_utils.io_corr import get_emt_quark_loop_file_tag
+from pyquda_measurement_utils.io_corr import (
+    get_emt_quark_loop_file_tag,
+    get_flowed_quark_ringed_norm_file_tag,
+)
 from pyquda_measurement_utils.tools import mpi_print
 
 import argparse
@@ -51,6 +55,7 @@ parameters = {
     "flow_type": "Wilson", # type of flow: Wilson, Zeuthen, Symanzik
     "flow_epsilon": 0.207936, # flow time step size
     "flow_steps": 10, # number of flow steps
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,4)",
 }
 
 # --------------------------
@@ -82,10 +87,12 @@ flowPara = [0.207936, 10, False, 1] # stepsize, Nsteps, improve, division
 
 quark_emt = QuarkEMT(parameters)
 quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
+ringed_tag = get_flowed_quark_ringed_norm_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
 
 quark_emt.flowed_fermionic_1pt(
     gauge,
     invPara,
     randPara,
     tag=quark_1pt_tag,
+    ringed_tag=os.environ.get("EMT_RINGED_OUT", ringed_tag),
 )

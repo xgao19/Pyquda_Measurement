@@ -4,6 +4,21 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-10: Integrate ringed kinetic into EMT quark loops
+
+- Derived the flowed-quark kinetic trace directly from the zero-momentum
+  diagonal raw EMT tensor without additional inversions, flow updates,
+  derivative contractions, or MPI gathers.
+- Made every in-repository quark EMT 1pt entry point write a source-matched,
+  kinetic-only `FlowedQuarkRinged` companion with counter-noise and source
+  bookkeeping metadata; retained the standalone block/resume workflow.
+- Documented that the nonlinear ringed factor must be evaluated after the
+  kinetic expectation value is averaged over gauge configurations, and rebuilt
+  the disconnected, pion, and proton EMT PDFs.
+- Verified `117 passed, 12 skipped`; an S8T8 single-rank GPU smoke gave zero
+  EMT-to-kinetic identity and averaging error.  A two-rank smoke still requires
+  a valid Slurm allocation.
+
 ## 2026-07-10: Trim session memory to durable guidance
 
 - Reduced `SESSION_MEMORY.md` to reusable environment facts, stable physics

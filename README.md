@@ -273,8 +273,13 @@ For quark/gluon one-point data:
 - A single source-independent EMTc loop file per configuration stores all
   absolute insertion times and is reused for every hadron source time.
 - `CHI` is a scalar trace/noise diagnostic.
-- Ringed-fermion normalization is produced by the standalone
-  `application/flowed_quark_ringed_norm` workflow.
+- Every in-repository quark 1pt entry point also writes a kinetic-only
+  `FlowedQuarkRinged` companion from the same EMT stochastic vectors.  It adds
+  no inversions, flow updates, or derivative contractions.
+- The standalone `application/flowed_quark_ringed_norm` workflow remains
+  available for dedicated high-statistics, dilution, block-output, and resume
+  runs.  Final ringed factors are computed from the ensemble-averaged kinetic
+  expectation value, not by averaging per-configuration inverse factors.
 - Gluon 1pt stores the flowed gluonic EMT building block.
 - Renormalized gradient-flow EMT combinations, vacuum subtractions, and mixing
   coefficients are applied in downstream analysis, not inside these kernels.

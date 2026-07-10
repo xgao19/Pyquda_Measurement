@@ -252,48 +252,45 @@ the averaged quark EMT datasets.
 \subsection{Ringed-Fermion Kinetic Normalization}
 
 The raw \code{CHI} datasets are diagnostics, not the ringed-fermion
-normalization itself.  The flowed ringed-fermion normalization uses the flowed
-fermion kinetic expectation value.  In this implementation, the relevant
-building block is reconstructed from the zero-momentum diagonal quark EMT
-components:
+normalization itself.  The kinetic observable is already contained in the
+zero-momentum diagonal quark EMT components.  For each effective stochastic
+source \(r\), the implementation forms
 \begin{equation}
-  \sum_{\mu=1}^{4} L^q_{\mu\mu,\mathrm{avg}}(q=0,t;\Tf)
-  =
-  -\frac{1}{2\Vthree}
-  \sum_{\mu,\mathbf{x}}
+  K_r(\Tf,\tau)
+  =-\frac{2}{\Vthree}\sum_{\mu=1}^{4}
+  L^q_{\mu\mu,r}(q=0,\tau;\Tf)
+  =\frac{1}{\Vthree}\sum_{\mu,\mathbf{x}}
   \xi^\dagger(x;\Tf)
   \gamma_\mu
   \left[D_{+\mu}-D_{-\mu}\right]
   \eta(x;\Tf).
   \label{eq:ringed_building_block}
 \end{equation}
-In HDF5 this is obtained from \code{avg/Tmunu/T11}, \code{T22}, \code{T33},
-and \code{T44} at the \(q=0\) momentum index.
+No new inversion, fermion-flow update, covariant derivative, or MPI gather is
+needed: Eq.~\eqref{eq:ringed_building_block} is evaluated directly from the
+already-computed \code{raw/Tmunu\_pervec}.  The momentum list must contain
+exactly one \(q=0\) entry when companion output is enabled.
 
-The HDF5 file intentionally stores this as an unringed building block, not as an
-already-normalized operator.  Future files therefore include convention
-attributes such as
+Every repository quark-1pt entry point writes a source-matched companion file
 \begin{verbatim}
-operator_normalization = unringed_flowed_bilinear
-ringed_normalization_applied = False
-ringed_kinetic_observable = K_code=-2*sum_mu avg/Tmunu/Tmumu[q0,flow,tau]
-ringed_factor_application = analysis_stage
-flavor_convention = single_flavor_trace_for_this_dirac_operator
+FlowedQuarkRinged/<lat>.FlowedQuarkRinged.<cfg>.<ama>.<sm>.h5
 \end{verbatim}
-These attributes are metadata only; they do not alter the saved datasets.
+containing \code{raw/kinetic\_pervec}, source bookkeeping,
+\code{avg/kinetic\_spacetime}, and \code{flow\_times}.  It deliberately omits
+the two \code{avg/Z\_ring} datasets: a factor computed from a single
+configuration is not the final ensemble normalization.
 
-The analysis-stage kinetic expectation value should be formed as
+For configuration \(c\), the stored spacetime average is
 \begin{equation}
-  K_{\mathrm{code}}(\Tf)
-  =
-  -2
-  \left\langle
-    \sum_{\mu=1}^{4} L^q_{\mu\mu,\mathrm{avg}}(q=0,t;\Tf)
-  \right\rangle_{t,\mathrm{cfg}},
+  K_c(\Tf)=\frac{1}{N_{\mathrm{eff}}N_t}
+  \sum_{r,\tau}K_{r,c}(\Tf,\tau).
+\end{equation}
+The analysis must first form the gauge-ensemble mean
+\begin{equation}
+  K_{\mathrm{code}}(\Tf)=\left\langle K_c(\Tf)\right\rangle_{\mathrm{cfg}},
   \label{eq:ringed_k_code}
 \end{equation}
-where \(t\) denotes the retained Euclidean time slice of the one-point loop.
-Then, for a single-flavor trace in fundamental \(SU(3)\),
+and only then, for a single-flavor trace in fundamental \(SU(3)\), evaluate
 \begin{equation}
   Z_{\mathrm{ring}}^{(f)}(\Tf)
   =
@@ -301,12 +298,19 @@ Then, for a single-flavor trace in fundamental \(SU(3)\),
        {(4\pi)^2 \Tf^2 K_{\mathrm{code}}^{(f)}(\Tf)}.
   \label{eq:ringed_z_single_flavor}
 \end{equation}
+In particular,
+\(\left\langle 1/K_c\right\rangle_{\mathrm{cfg}}\neq
+1/\left\langle K_c\right\rangle_{\mathrm{cfg}}\) in general, so
+configuration-local inverse factors must not be averaged.
 If instead the kinetic expectation value has already been summed or averaged
 over \(N_f\) degenerate flavors, the numerator and denominator must use the same
 flavor convention.  A quark EMT bilinear made from ringed fields receives one
 factor \(Z_{\mathrm{ring}}\), because the square roots from \(\chi\) and
 \(\bar\chi\) multiply to this single bilinear factor.  The \(\Tf=0\) output step
 is kept as an unflowed diagnostic and must be excluded from Eq.~\eqref{eq:ringed_z_single_flavor}.
+The standalone \code{application/flowed\_quark\_ringed\_norm} workflow remains
+available for dedicated high-statistics, spin--color dilution, interval-block,
+and resume calculations.
 
 \subsection{Gradient-Flow Schedule for Quarks}
 
@@ -328,6 +332,9 @@ for step in range(Nsteps + 1):
 \end{verbatim}
 The stochastic source \(\xi\) and solution \(\eta\) are flowed together as one
 \code{MultiField}.  This keeps both fields on the same flowed gauge background.
+After all flow steps are measured, the code extracts
+\code{raw/kinetic\_pervec} algebraically from the stored \(q=0\) diagonal
+tensor entries and writes the kinetic companion on MPI rank zero.
 
 \subsection{Four-Dimensional Fermion Flow and the Time-Slice Projector}
 \label{sec:full_volume_flow_source}
@@ -558,6 +565,29 @@ The canonical loop file is source independent:
 It stores every absolute insertion time and is reused for all hadron two-point
 source times on the same configuration.
 
+The source-matched kinetic companion is
+\begin{center}
+  \code{FlowedQuarkRinged/<lat>.FlowedQuarkRinged.<cfg>.<ama>.<sm>.h5}.
+\end{center}
+Its kinetic-only schema is
+\begin{verbatim}
+flow_times
+raw/kinetic_pervec
+raw/source_index
+raw/base_noise_index
+raw/hp_index
+raw/spin_index
+raw/color_index
+avg/kinetic_spacetime
+\end{verbatim}
+The spin and color indices are \(-1\) because EMT uses full spin--color noise
+rather than point spin--color dilution.  Attributes
+\code{producer=emt\_quark\_1pt}, \code{content=kinetic\_only}, and
+\code{ringed\_factors\_stored=False} distinguish this subset from a full
+standalone output.  The counter-noise configuration, stream, algorithm, HP
+ordering, Dirac parameters, gauge preprocessing, boundary condition, flow
+schedule, and exact EMT-to-kinetic relation are recorded alongside it.
+
 The exact quark dataset and attribute names used by downstream scripts are:
 \begin{verbatim}
 raw/Tmunu_pervec
@@ -599,10 +629,8 @@ Attribute & Meaning \\
 & Counter-noise order, configuration key, and independent stream salt. \\
 \code{noise\_generator}, \code{noise\_counter\_order}
 & Fixed hash algorithm and the fields entering its counter. \\
-\code{operator\_normalization}, \code{ringed\_normalization\_applied}
-& Whether the saved quark loop has already been ringed. \\
-\code{ringed\_kinetic\_observable}, \code{ringed\_factor\_application}
-& How to reconstruct and where to apply the ringed factor. \\
+\code{operator\_normalization}, \code{renormalization\_applied}
+& Whether the saved quark loop has already been renormalized. \\
 \bottomrule
 \end{tabular}
 \end{center}

@@ -5,7 +5,10 @@ from pyquda import init
 from pyquda_utils import io
 
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import EMTDisconnectedQuark1pt
-from pyquda_measurement_utils.io_corr import get_emt_quark_loop_file_tag
+from pyquda_measurement_utils.io_corr import (
+    get_emt_quark_loop_file_tag,
+    get_flowed_quark_ringed_norm_file_tag,
+)
 
 
 parser = argparse.ArgumentParser()
@@ -43,8 +46,13 @@ parameters = {
     "noise_scheme": os.environ.get("EMT_1PT_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("EMT_1PT_HP_NUM_VECTORS", "1")),
     "hp_ordering": os.environ.get("EMT_1PT_HP_ORDERING", "interleaved_xyz_binary_projected_to_evenodd"),
+    "gauge_preprocessing": os.environ.get(
+        "EMT_1PT_GAUGE_PREPROCESSING",
+        "HYP(1,0.75,0.6,0.3,4)",
+    ),
 }
 quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
+ringed_tag = get_flowed_quark_ringed_norm_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
 
 init(mpi_geometry, enable_mps=True)
 
@@ -72,4 +80,5 @@ quark_1pt.flowed_fermionic_1pt(
     invPara,
     randPara,
     tag=os.environ.get("EMT_1PT_QUARK_OUT", quark_1pt_tag),
+    ringed_tag=os.environ.get("EMT_1PT_RINGED_OUT", ringed_tag),
 )

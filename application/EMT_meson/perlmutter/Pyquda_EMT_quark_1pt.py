@@ -3,7 +3,10 @@ import os
 from pyquda import init
 from pyquda_utils import io
 from pyquda_measurement_utils.pion_EMT_vibe_develop import QuarkEMT
-from pyquda_measurement_utils.io_corr import get_emt_quark_loop_file_tag
+from pyquda_measurement_utils.io_corr import (
+    get_emt_quark_loop_file_tag,
+    get_flowed_quark_ringed_norm_file_tag,
+)
 
 # ============================================================
 # Argument parsing
@@ -41,8 +44,10 @@ parameters = {
     "flow_type": "wilson",
     "flow_epsilon": 0.207936,
     "flow_steps": 10,
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,4)",
 }
 quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
+ringed_tag = get_flowed_quark_ringed_norm_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
 
 # ============================================================
 # Initialize QUDA backend
@@ -70,4 +75,5 @@ quark_emt.flowed_fermionic_1pt(
     invPara,
     randPara,
     tag=os.environ.get("EMT_QUARK_1PT_OUT", quark_1pt_tag),
+    ringed_tag=os.environ.get("EMT_RINGED_OUT", ringed_tag),
 )

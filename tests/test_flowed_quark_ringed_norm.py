@@ -279,6 +279,65 @@ def test_flowed_quark_ringed_hdf5_schema(tmp_path):
         np.testing.assert_allclose(h5["avg/Z_ring_field_sqrt"][1:] ** 2, h5["avg/Z_ring_bilinear"][1:])
 
 
+def test_emt_ringed_companion_hdf5_is_kinetic_only_subset(tmp_path):
+    tag = str(tmp_path / "FlowedQuarkRinged" / "emt_companion")
+    kinetic_pervec = np.arange(2 * 3 * 4, dtype=np.float64).reshape(2, 3, 4).astype(np.complex128)
+    kinetic_spacetime = kinetic_spacetime_from_raw(kinetic_pervec)
+    times = flow_times(0.1, 2)
+    attrs = {
+        "measurement": "flowed_quark_ringed_norm",
+        "producer": "emt_quark_1pt",
+        "content": "kinetic_only",
+        "ringed_factors_stored": False,
+        "noise_generator": "splitmix64_global_coordinate_v1",
+        "config_num": 11,
+        "noise_stream": 3,
+        "n_zn": 4,
+    }
+    source_bookkeeping = {
+        "source_index": [0, 1],
+        "base_noise_index": [0, 0],
+        "hp_index": [0, 1],
+        "spin_index": [-1, -1],
+        "color_index": [-1, -1],
+    }
+
+    save_flowed_quark_ringed_norm_hdf5(
+        tag,
+        kinetic_pervec,
+        kinetic_spacetime,
+        None,
+        None,
+        times,
+        attrs=attrs,
+        source_bookkeeping=source_bookkeeping,
+    )
+
+    with h5py.File(tag + ".h5", "r") as h5:
+        assert h5.attrs["producer"] == "emt_quark_1pt"
+        assert h5.attrs["content"] == "kinetic_only"
+        assert not h5.attrs["ringed_factors_stored"]
+        assert h5.attrs["n_zn"] == 4
+        assert h5["raw/kinetic_pervec"].shape == (2, 3, 4)
+        np.testing.assert_array_equal(h5["raw/spin_index"][...], [-1, -1])
+        np.testing.assert_array_equal(h5["raw/color_index"][...], [-1, -1])
+        np.testing.assert_allclose(h5["avg/kinetic_spacetime"][...], kinetic_spacetime)
+        assert "Z_ring_field_sqrt" not in h5["avg"]
+        assert "Z_ring_bilinear" not in h5["avg"]
+
+
+def test_ringed_writer_rejects_only_one_factor(tmp_path):
+    with pytest.raises(ValueError, match="either both be present or both be omitted"):
+        save_flowed_quark_ringed_norm_hdf5(
+            str(tmp_path / "bad"),
+            np.ones((1, 2, 3)),
+            np.ones(2),
+            np.ones(2),
+            None,
+            flow_times(0.1, 1),
+        )
+
+
 def test_flowed_quark_ringed_block_hdf5_schema(tmp_path):
     base_tag = str(tmp_path / "FlowedQuarkRinged" / "schema")
     norm = FlowedQuarkRingedNorm(_ringed_params(256, 64))

@@ -113,9 +113,10 @@ python tests/run_smoke_tests.py
 - The physical disconnected correlator requires ensemble subtraction:
   `<C2 L> - <C2><L>`.  A single-configuration product is only an unsubtracted
   diagnostic proxy.
-- Ringed-fermion normalization is a separate workflow under
-  `application/flowed_quark_ringed_norm`; `CHI` in the EMT loop is only a
-  scalar/noise diagnostic.
+- Quark EMT 1pt writes a kinetic-only `FlowedQuarkRinged` companion from the
+  same raw zero-momentum diagonal tensor; this adds no solves or derivatives.
+  `CHI` remains only a scalar/noise diagnostic.  Compute the physical ringed
+  factor after ensemble-averaging the kinetic expectation value.
 
 ## qTMD Conventions And Pitfalls
 

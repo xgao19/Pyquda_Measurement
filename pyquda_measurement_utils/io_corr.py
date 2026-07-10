@@ -292,6 +292,9 @@ def save_flowed_quark_ringed_norm_hdf5(
     attrs=None,
     source_bookkeeping=None,
 ):
+    if (z_ring_field_sqrt is None) != (z_ring_bilinear is None):
+        raise ValueError("ringed field and bilinear factors should either both be present or both be omitted")
+
     save_h5 = f"{tag}.h5"
     with _prepare_h5_file(save_h5, attrs) as f:
         f.create_dataset("flow_times", data=np.asarray(flow_times, dtype=np.float64))
@@ -304,8 +307,9 @@ def save_flowed_quark_ringed_norm_hdf5(
 
         avg = f.require_group("avg")
         avg.create_dataset("kinetic_spacetime", data=kinetic_spacetime)
-        avg.create_dataset("Z_ring_field_sqrt", data=z_ring_field_sqrt)
-        avg.create_dataset("Z_ring_bilinear", data=z_ring_bilinear)
+        if z_ring_field_sqrt is not None:
+            avg.create_dataset("Z_ring_field_sqrt", data=z_ring_field_sqrt)
+            avg.create_dataset("Z_ring_bilinear", data=z_ring_bilinear)
 
 
 # -----------------------------------------------------------------------------

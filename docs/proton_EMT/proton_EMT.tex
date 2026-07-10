@@ -1477,10 +1477,21 @@ documented in the one-point file.  In the current HDF5 convention,
   \right\rangle_{\tau,\mathrm{cfg}},
 \end{equation}
 where the diagonal sum is reconstructed from \code{avg/Tmunu/T11},
-\code{T22}, \code{T33}, and \code{T44}.  The average over \(\tau\) and gauge
-configurations should be performed in analysis, not inside the contraction
-kernel.  The unflowed step \(t=0\) must not be used for ringed normalization
-because the formula contains \(t^{-2}\).
+\code{T22}, \code{T33}, and \code{T44}.  The quark 1pt run now performs this
+algebraic extraction from the same stochastic EMT tensor and writes
+\code{raw/kinetic\_pervec}, source bookkeeping,
+\code{avg/kinetic\_spacetime}, and \code{flow\_times} to
+\code{FlowedQuarkRinged/<lat>.FlowedQuarkRinged.<cfg>.<ama>.<sm>.h5}.
+This adds no inversion, flow update, derivative contraction, or gather.
+
+The companion is intentionally kinetic-only and contains no
+configuration-local ringed factors.  Average \code{avg/kinetic\_spacetime}
+over gauge configurations first, then evaluate the nonlinear factor; averaging
+the inverses formed on separate configurations is incorrect.  The unflowed
+step \(t=0\) must not be used for ringed normalization because the formula
+contains \(t^{-2}\).  The standalone ringed-normalization workflow remains
+available for dedicated high-statistics, spin--color dilution, block-output,
+and resume runs.
 
 For isospin-degenerate light \(u/d\) measurements, the same light-quark ringed
 factor should multiply the connected \(U\) and \(D\) quark EMT observables.  If a
