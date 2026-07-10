@@ -68,7 +68,7 @@ against connected PDF and local-current limits.
 
 \section{Supported Operators}
 
-The first implementation supports three operator kinds:
+The implementation supports four operator kinds:
 \begin{center}
 \begin{tabular}{lll}
 \toprule
@@ -77,6 +77,7 @@ The first implementation supports three operator kinds:
 \code{GI\_PDF} & Straight-\(z\) gauge-invariant PDF Wilson line & Implemented \\
 \code{CG\_PDF} & Straight-\(z\) coordinate-gauge displacement & Implemented \\
 \code{CG\_qTMD} & qTMD-style coordinate-gauge displacement & Implemented \\
+\code{GI\_qTMD} & Fixed-length gauge-invariant staple & Implemented \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -234,10 +235,42 @@ Ordering & Meaning \\
 
 Spin-color dilution and time dilution are not currently implemented.
 
+The default base field is decomposition-independent full-volume
+\(\mathbb Z_4\) noise.  Its fixed counter contains the global four-dimensional
+coordinate, spin, color, gauge-configuration number, base-noise index, and an
+independent stream salt.  Therefore any base or HP interval can be regenerated
+without consuming the earlier random-number sequence.
+
+\subsection{Base-Oriented Production and Finalization}
+
+Production uses base/HP-interval shards by default.  One complete base
+estimator is
+\begin{equation}
+  L_b=\frac{1}{N_{\mathrm{HP}}}
+  \sum_{h=0}^{N_{\mathrm{HP}}-1}L_{b,h}.
+\end{equation}
+Part files contain at most 64 solves by default.  A partial HP part is a
+checkpoint only; a base completion marker is atomically published after every
+part has been reopened and its metadata, shape, and source indices validated.
+Compatible parts are skipped on resume, while incompatible or corrupt parts
+cause an error.
+
+Measurement jobs do not publish the canonical loop.  A separate serial
+finalizer requires complete coverage of all configured bases and streams each
+part into a temporary canonical HDF5 file while accumulating the average
+without retaining the full source axis.  Only after successful validation and
+writeout is the canonical file atomically replaced.  Non-overlapping base
+ranges can be scheduled independently; overlapping jobs are unsupported.
+
 \section{HDF5 Layout}
 
-The output tag helper is
-\code{get\_disconnected\_qTMD\_1pt\_file\_tag}.  The writer stores:
+New output uses the source-independent helper
+\code{get\_disconnected\_qTMD\_loop\_file\_tag} and canonical name
+\begin{center}
+\code{qTMD1pt/<lat>.qTMD1pt.<cfg>.<ama>.<sm>.h5}.
+\end{center}
+The old source-position helper remains available for existing files and APIs;
+the full-volume loop itself has no hadron source position.  The writer stores:
 \begin{equation}
   \code{raw/loop\_pervec}
   \quad\mathrm{with\ shape}\quad
@@ -256,6 +289,9 @@ layout:
   \code{avg/SS/<gamma>/PX...PY...PZ.../b\_X/eta0/bT.../bz...}.
 \end{equation}
 For \(y\)-direction transverse displacements the group is \(\code{b\_Y}\).
+All serial HDF5 files are opened only by MPI rank zero.  Because no fermion
+flow changes the resident gauge in this workflow, the Dirac gauge is loaded
+once before the source loop and reused.
 
 \section{Validation Status}
 
@@ -296,8 +332,8 @@ This check is useful because it tests the HDF5 bookkeeping, Wilson-index
 ordering, gamma loop ordering, and the coordinate-gauge/GI local limits without
 requiring a hadron two-point function.
 
-The current S8T32 Perlmutter login-node check used one stochastic vector with
-matched random seed and found exact agreement:
+The current S8T32 Perlmutter login-node check used one matched counter-based
+stochastic vector and found exact agreement:
 \begin{equation}
   \max\left|
   L^{\mathrm{GI\_PDF}}

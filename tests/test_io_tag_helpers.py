@@ -3,6 +3,7 @@ import pytest
 from pyquda_measurement_utils.io_corr import (
     get_c2pt_file_tag,
     get_disconnected_qTMD_1pt_file_tag,
+    get_disconnected_qTMD_loop_file_tag,
     get_emt_gluon_1pt_file_tag,
     get_emt_quark_1pt_file_tag,
     get_emt_quark_loop_file_tag,
@@ -25,6 +26,7 @@ def test_standard_measurement_tag_helpers_are_deterministic():
     assert get_qTMD_file_tag("/data", "lat", 7, "GI", src, "sm") == "/data/qTMD/lat.qTMD.7.GI.x1y2z3t4.sm"
     assert get_qTMDWF_file_tag("/data", "lat", 7, "WF", src, "sm") == "/data/qTMDWF/lat.qTMDWF.7.WF.x1y2z3t4.sm"
     assert get_disconnected_qTMD_1pt_file_tag("/data", "lat", 7, "loop", src, "sm") == "/data/qTMD1pt/lat.qTMD1pt.7.loop.x1y2z3t4.sm"
+    assert get_disconnected_qTMD_loop_file_tag("/data", "lat", 7, "loop", "sm") == "/data/qTMD1pt/lat.qTMD1pt.7.loop.sm"
     assert get_pion_EMFF_file_tag("/data", "lat", 7, "EMFF", src, "sm") == "/data/pion_EMFF/lat.pion_EMFF.7.EMFF.x1y2z3t4.sm"
 
 

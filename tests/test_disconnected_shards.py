@@ -9,6 +9,9 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     finalize_emt_quark_1pt_shards,
     ringed_kinetic_pervec_from_emt,
 )
+from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+    finalize_disconnected_qtmd_1pt_shards,
+)
 from pyquda_measurement_utils.disconnected_shards import (
     SHARD_SCHEMA,
     base_completion_path,
@@ -139,3 +142,68 @@ def test_finalize_rejects_partial_base_and_preserves_old_canonical(tmp_path):
 
     with h5py.File(tag + ".h5", "r") as h5:
         assert h5.attrs["sentinel"] == "old"
+
+
+def _write_synthetic_qtmd_base(shard_dir, tag, base_idx):
+    path = shard_part_path(shard_dir, tag, base_idx, 0, 0, 1)
+    attrs = expected_part_attrs({
+        "measurement": "disconnected_qTMD_1pt",
+        "output_kind": "disconnected_qTMD_1pt",
+        "shard_schema": SHARD_SCHEMA,
+        "block_interval_solves": 64,
+        "operator_kind": "GI_PDF",
+        "qext": np.asarray([[0, 0, 0, 0]], dtype=np.int32),
+        "W_index_list": np.asarray([[0, 0, 0, 0], [0, 1, 0, 0]], dtype=np.int32),
+        "gamma_list": np.asarray(["5", "T"], dtype="S"),
+        "volume_norm": 8,
+        "mass": 0.1,
+        "csw": 1.0,
+        "tol": 1e-10,
+        "maxiter": 100,
+        "gauge_preprocessing": "test",
+        "t_boundary": -1,
+        "n_zn": 4,
+        "config_num": 9,
+        "rand_seed": 2,
+        "noise_stream": 2,
+        "noise_generator": "splitmix64_global_coordinate_v1",
+        "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
+        "noise_scheme": "zn",
+        "hp_num_vectors": 1,
+        "hp_ordering": "global_xyzt_gray_projected_to_evenodd",
+        "gi_qtmd_staple_mode": "link_cache",
+        "loop_convention": "eta_dagger_Gamma_O_b_xi",
+    }, base_idx, 0, 0, 1, 1)
+    metadata = {
+        "gamma_list": np.asarray(["5", "T"], dtype="S"),
+        "momentum_list": np.asarray([[0, 0, 0, 0]], dtype=np.int32),
+        "W_index_list": np.asarray([[0, 0, 0, 0], [0, 1, 0, 0]], dtype=np.int32),
+    }
+    loop = np.full((1, 2, 2, 1, 3), base_idx + 1, dtype=np.complex128)
+    write_raw_part_hdf5(
+        path, {"loop_pervec": loop}, attrs,
+        {"source_index": [base_idx], "base_noise_index": [base_idx], "hp_index": [0]},
+        metadata_datasets=metadata,
+    )
+    write_base_completion_marker(
+        base_completion_path(shard_dir, tag, base_idx),
+        completion_payload(tag, base_idx, 1, 64, [path]),
+    )
+
+
+def test_qtmd_finalize_streams_source_independent_canonical(tmp_path):
+    tag = str(tmp_path / "qTMD1pt" / "lat.qTMD1pt.9.0.sm")
+    shard_dir = tmp_path / "qTMD1pt" / "shards"
+    _write_synthetic_qtmd_base(shard_dir, tag, 0)
+    _write_synthetic_qtmd_base(shard_dir, tag, 1)
+
+    finalize_disconnected_qtmd_1pt_shards(shard_dir, tag, 2)
+
+    with h5py.File(tag + ".h5", "r") as h5:
+        np.testing.assert_array_equal(h5["raw/source_index"][()], [0, 1])
+        np.testing.assert_array_equal(h5["raw/base_noise_index"][()], [0, 1])
+        np.testing.assert_allclose(h5["raw/loop_pervec"][0], 1.0)
+        np.testing.assert_allclose(h5["raw/loop_pervec"][1], 2.0)
+        np.testing.assert_allclose(h5["avg/SS/5/PX0PY0PZ0/b_X/eta0/bT0/bz0"][()], 1.5 / 8.0)
+        assert h5.attrs["n_zn"] == 4
+        assert h5.attrs["noise_generator"] == "splitmix64_global_coordinate_v1"

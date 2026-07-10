@@ -137,6 +137,9 @@ python tests/run_smoke_tests.py
   from the final `b_X` displacement.
 - Local-limit invariant:
   `GI_PDF(bz=0) = CG_PDF(bz=0) = CG_qTMD(bT=0,bz=0)`.
+- Disconnected qTMD production uses source-independent canonical tags,
+  counter-based full-volume `Z4`, base/HP-interval shards, and explicit
+  finalize.  A base is complete only after all HP parts validate.
 
 ## Flowed-Quark Ringed Normalization
 

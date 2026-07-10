@@ -57,6 +57,11 @@ def get_disconnected_qTMD_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
     return data_dir + "/qTMD1pt/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag
 
 
+# Build the source-independent disconnected qTMD loop output tag.
+def get_disconnected_qTMD_loop_file_tag(data_dir, lat, cfg, ama, sm):
+    return str(Path(data_dir) / "qTMD1pt" / (str(lat) + ".qTMD1pt." + str(cfg) + "." + str(ama) + "." + str(sm)))
+
+
 # Build the standard qTMDWF output tag.
 def get_qTMDWF_file_tag(data_dir, lat, cfg, ama, src, sm):
 

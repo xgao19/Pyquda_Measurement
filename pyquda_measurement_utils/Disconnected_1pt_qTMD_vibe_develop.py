@@ -30,6 +30,10 @@ so the staple length is 2 * eta + b_T for every even b_z with
 eta >= abs(b_z) / 2.
 """
 
+import os
+from pathlib import Path
+
+import h5py
 import numpy as np
 
 from pyquda import getMPIComm
@@ -41,6 +45,7 @@ from pyquda_measurement_utils.io_corr import save_disconnected_qTMD_1pt_hdf5
 from pyquda_measurement_utils.pion_utils_vibe_develop import gamma_stack, my_gammas
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
+    COUNTER_NOISE_ALGORITHM,
     array_to_numpy,
     effective_n_inversions,
     iter_noise_sources,
@@ -48,6 +53,21 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     create_gi_qtmd_wilsonline_index_lists,
     source_bookkeeping_arrays,
     validate_hierarchical_probing_options,
+)
+from pyquda_measurement_utils.disconnected_shards import (
+    base_completion_path,
+    base_part_ranges,
+    canonical_temp_path,
+    completion_payload,
+    expected_part_attrs,
+    hp_vectors_per_base,
+    normalize_output_mode,
+    read_base_completion_marker,
+    selected_base_range,
+    shard_part_path,
+    validate_raw_part_hdf5,
+    write_base_completion_marker,
+    write_raw_part_hdf5,
 )
 
 _VALID_OPERATOR_KINDS = {"CG_qTMD", "CG_PDF", "GI_PDF", "GI_qTMD"}
@@ -138,6 +158,8 @@ class DisconnectedQuarkqTMD1pt:
         self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
         self.hp_ordering = parameters.get("hp_ordering", "global_xyzt_gray_projected_to_evenodd")
         self.gi_qtmd_staple_mode = parameters.get("gi_qtmd_staple_mode", "link_cache")
+        self.config_num = parameters.get("config_num")
+        self.gauge_preprocessing = parameters.get("gauge_preprocessing", "unspecified")
         if self.gi_qtmd_staple_mode not in _VALID_GI_QTMD_STAPLE_MODES:
             raise ValueError(f"gi_qtmd_staple_mode should be one of {_VALID_GI_QTMD_STAPLE_MODES}, got {self.gi_qtmd_staple_mode!r}")
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
@@ -266,6 +288,101 @@ class DisconnectedQuarkqTMD1pt:
 
         return np.asarray(loops)
 
+    def _measure_base_shards(
+        self, U, dirac, randPara, tag, operator_kind, phases_q, W_index_list,
+        staple_links, attrs, shard_dir, base_start, base_stop,
+        block_interval_solves,
+    ):
+        n_vec, n_zn, _ = randPara
+        hp_count = hp_vectors_per_base(self.noise_scheme, self.hp_num_vectors)
+        shard_dir = Path(shard_dir) if shard_dir else Path(tag).parent / "shards"
+        common_attrs = {
+            key: value for key, value in attrs.items()
+            if key not in {"n_vec", "n_base_noise", "effective_n_inversions"}
+        }
+        common_attrs["output_kind"] = "disconnected_qTMD_1pt"
+        common_attrs["block_interval_solves"] = int(block_interval_solves)
+        metadata = {
+            "gamma_list": np.asarray(my_gammas, dtype="S"),
+            "momentum_list": np.asarray(attrs["qext"], dtype=np.int32),
+            "W_index_list": np.asarray(W_index_list, dtype=np.int32),
+        }
+        loop_shape = (
+            len(W_index_list), len(my_gammas), len(attrs["qext"]),
+            U.latt_info.global_size[3],
+        )
+        comm = getMPIComm()
+        for base_idx in selected_base_range(n_vec, base_start, base_stop):
+            part_paths = []
+            for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
+                count = hp_stop - hp_start
+                path = shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop)
+                part_paths.append(path)
+                expected_attrs = expected_part_attrs(common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count)
+                raw_shapes = {
+                    "loop_pervec": (count,) + loop_shape,
+                    "source_index": (count,),
+                    "base_noise_index": (count,),
+                    "hp_index": (count,),
+                }
+                if U.latt_info.mpi_rank == 0:
+                    present = validate_raw_part_hdf5(path, expected_attrs, raw_shapes, metadata)
+                else:
+                    present = None
+                present = comm.bcast(present, root=0)
+                if present:
+                    mpi_print(U.latt_info, f"qTMD shard SKIP: {path.name}")
+                    continue
+
+                loop_part = np.zeros((count,) + loop_shape, dtype=np.complex128)
+                global_indices = np.arange(base_idx * hp_count + hp_start, base_idx * hp_count + hp_stop, dtype=np.int32)
+                bookkeeping = {
+                    "source_index": global_indices,
+                    "base_noise_index": np.full(count, base_idx, dtype=np.int32),
+                    "hp_index": np.arange(hp_start, hp_stop, dtype=np.int32),
+                }
+                skip_bases = set(range(n_vec)) - {base_idx}
+                keep_indices = set(int(idx) for idx in global_indices)
+                skip_effective = set(range(n_vec * hp_count)) - keep_indices
+                for _, _, hp_idx, xi in iter_noise_sources(
+                    U.latt_info, n_vec, n_zn, self.noise_scheme,
+                    self.hp_num_vectors, self.hp_ordering,
+                    skip_base_indices=skip_bases,
+                    skip_effective_indices=skip_effective,
+                    counter_noise_config=int(attrs["config_num"]),
+                    counter_noise_stream=int(attrs["noise_stream"]),
+                ):
+                    eta = dirac.invert(xi)
+                    loops = self._contract_one_operator_list(
+                        U.latt_info, U, eta, xi, phases_q, W_index_list,
+                        operator_kind, staple_links=staple_links,
+                    )
+                    loop_part[hp_idx - hp_start] = comm.bcast(loops, root=0)
+                if U.latt_info.mpi_rank == 0:
+                    write_attrs = dict(expected_attrs)
+                    write_attrs["configured_n_base_noise"] = int(n_vec)
+                    write_raw_part_hdf5(
+                        path, {"loop_pervec": loop_part}, write_attrs,
+                        bookkeeping, metadata_datasets=metadata,
+                    )
+                comm.Barrier()
+
+            if U.latt_info.mpi_rank == 0:
+                for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
+                    count = hp_stop - hp_start
+                    path = shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop)
+                    expected_attrs = expected_part_attrs(common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count)
+                    validate_raw_part_hdf5(path, expected_attrs, {
+                        "loop_pervec": (count,) + loop_shape,
+                        "source_index": (count,), "base_noise_index": (count,), "hp_index": (count,),
+                    }, metadata)
+                write_base_completion_marker(
+                    base_completion_path(shard_dir, tag, base_idx),
+                    completion_payload(tag, base_idx, hp_count, block_interval_solves, part_paths),
+                )
+            comm.Barrier()
+        return None
+
     def measure_1pt(
         self,
         gauge: LatticeGauge,
@@ -273,6 +390,11 @@ class DisconnectedQuarkqTMD1pt:
         randPara,
         tag: str,
         operator_kind: str = "GI_PDF",
+        output_mode="monolithic",
+        shard_dir=None,
+        base_start=0,
+        base_stop=None,
+        block_interval_solves=64,
     ):
         """Measure disconnected qTMD/PDF one-point loops."""
         if operator_kind not in _VALID_OPERATOR_KINDS:
@@ -284,9 +406,11 @@ class DisconnectedQuarkqTMD1pt:
         latt_info = U.latt_info
         global_size = latt_info.global_size
         Ns3 = global_size[0] * global_size[1] * global_size[2]
-
-        xp = _get_xp_from_array(LatticeFermion(latt_info).data)
-        xp.random.seed(randseed)
+        output_mode = normalize_output_mode(output_mode)
+        if self.config_num is None:
+            counter_config, counter_stream = int(randseed), 0
+        else:
+            counter_config, counter_stream = int(self.config_num), int(randseed)
 
         xi_0, nu = 1.0, 1.0
         multigrid = [[
@@ -318,14 +442,52 @@ class DisconnectedQuarkqTMD1pt:
             staple_links = build_gi_qtmd_staple_links(U, W_index_list)
 
         n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
+        attrs = {
+            "measurement": "disconnected_qTMD_1pt",
+            "operator_kind": operator_kind,
+            "qext": np.asarray(qlist, dtype=np.int32),
+            "W_index_list": np.asarray(W_index_list, dtype=np.int32),
+            "gamma_list": np.asarray(my_gammas, dtype="S"),
+            "volume_norm": Ns3,
+            "mass": mass,
+            "csw": csw,
+            "tol": tol,
+            "maxiter": maxiter,
+            "gauge_preprocessing": self.gauge_preprocessing,
+            "t_boundary": latt_info.t_boundary,
+            "n_vec": n_vec,
+            "n_base_noise": n_vec,
+            "effective_n_inversions": n_eff,
+            "n_zn": n_zn,
+            "config_num": counter_config,
+            "rand_seed": counter_stream,
+            "noise_stream": counter_stream,
+            "noise_generator": COUNTER_NOISE_ALGORITHM,
+            "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
+            "noise_scheme": self.noise_scheme,
+            "hp_num_vectors": self.hp_num_vectors,
+            "hp_ordering": self.hp_ordering,
+            "gi_qtmd_staple_mode": self.gi_qtmd_staple_mode,
+            "loop_convention": "eta_dagger_Gamma_O_b_xi",
+        }
+        if output_mode == "base_shards":
+            return self._measure_base_shards(
+                U, dirac, randPara, tag, operator_kind, phases_q, W_index_list,
+                staple_links, attrs, shard_dir, base_start, base_stop,
+                block_interval_solves,
+            )
+
         source_bookkeeping = source_bookkeeping_arrays(n_eff)
         loop_pervec = None
 
-        for vec_picked, base_idx, hp_idx, xi in iter_noise_sources(latt_info, n_vec, n_zn, self.noise_scheme, self.hp_num_vectors, self.hp_ordering):
+        for vec_picked, base_idx, hp_idx, xi in iter_noise_sources(
+            latt_info, n_vec, n_zn, self.noise_scheme, self.hp_num_vectors,
+            self.hp_ordering, counter_noise_config=counter_config,
+            counter_noise_stream=counter_stream,
+        ):
             mpi_print(latt_info, f"vec {vec_picked} base {base_idx} hp {hp_idx}")
             source_bookkeeping["base_noise_index"][vec_picked] = base_idx
             source_bookkeeping["hp_index"][vec_picked] = hp_idx
-            dirac.loadGauge(U)
             eta = dirac.invert(xi)
 
             loops = self._contract_one_operator_list(latt_info, U, eta, xi, phases_q, W_index_list, operator_kind, staple_links=staple_links)
@@ -341,37 +503,131 @@ class DisconnectedQuarkqTMD1pt:
         mpi_print(latt_info, "disconnected qTMD random vectors done.")
 
         loop_avg = np.mean(loop_pervec, axis=0) / Ns3
-        attrs = {
-            "measurement": "disconnected_qTMD_1pt",
-            "operator_kind": operator_kind,
-            "qext": np.asarray(qlist, dtype=np.int32),
-            "W_index_list": np.asarray(W_index_list, dtype=np.int32),
-            "gamma_list": np.asarray(my_gammas, dtype="S"),
-            "volume_norm": Ns3,
-            "mass": mass,
-            "csw": csw,
-            "tol": tol,
-            "maxiter": maxiter,
-            "n_vec": n_vec,
-            "n_base_noise": n_vec,
-            "effective_n_inversions": n_eff,
-            "n_zn": n_zn,
-            "rand_seed": randseed,
-            "noise_scheme": self.noise_scheme,
-            "hp_num_vectors": self.hp_num_vectors,
-            "hp_ordering": self.hp_ordering,
-            "gi_qtmd_staple_mode": self.gi_qtmd_staple_mode,
-            "loop_convention": "eta_dagger_Gamma_O_b_xi",
-        }
-        save_disconnected_qTMD_1pt_hdf5(
-            tag,
-            loop_pervec,
-            loop_avg,
-            my_gammas,
-            qlist,
-            W_index_list,
-            attrs=attrs,
-            source_bookkeeping=source_bookkeeping,
-        )
+        if latt_info.mpi_rank == 0:
+            save_disconnected_qTMD_1pt_hdf5(
+                tag, loop_pervec, loop_avg, my_gammas, qlist, W_index_list,
+                attrs=attrs, source_bookkeeping=source_bookkeeping,
+            )
 
         return loop_avg
+
+
+def finalize_disconnected_qtmd_1pt_shards(shard_dir, canonical_tag, n_base_noise):
+    """Validate qTMD base shards and atomically build the canonical loop file."""
+    shard_dir = Path(shard_dir)
+    n_base_noise = int(n_base_noise)
+    if n_base_noise <= 0:
+        raise ValueError(f"n_base_noise should be positive, got {n_base_noise}")
+    markers = []
+    for base_idx in range(n_base_noise):
+        marker_path = base_completion_path(shard_dir, canonical_tag, base_idx)
+        marker = read_base_completion_marker(marker_path)
+        if marker is None:
+            raise ValueError(f"missing completion marker for base {base_idx}: {marker_path}")
+        markers.append(marker)
+
+    hp_count = int(markers[0]["hp_vectors_per_base"])
+    interval = int(markers[0]["block_interval_solves"])
+    excluded = {
+        "base_noise_index", "part_index", "hp_start", "hp_stop_exclusive",
+        "part_complete", "configured_n_base_noise",
+    }
+    reference_attrs = None
+    reference_metadata = None
+    loop_shape = None
+    all_parts = []
+    for base_idx, marker in enumerate(markers):
+        if int(marker.get("base_noise_index", -1)) != base_idx:
+            raise ValueError(f"qTMD completion marker has wrong base index {base_idx}")
+        if int(marker["hp_vectors_per_base"]) != hp_count or int(marker["block_interval_solves"]) != interval:
+            raise ValueError(f"base {base_idx} completion marker has incompatible part layout")
+        expected_names = []
+        for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, interval):
+            path = shard_part_path(shard_dir, canonical_tag, base_idx, part_idx, hp_start, hp_stop)
+            expected_names.append(path.name)
+            if not path.exists():
+                raise ValueError(f"missing qTMD shard part {path}")
+            with h5py.File(path, "r") as h5:
+                if not bool(h5.attrs.get("part_complete", False)):
+                    raise ValueError(f"incomplete qTMD shard part {path}")
+                common = {key: h5.attrs[key] for key in h5.attrs if key not in excluded}
+                metadata = {
+                    name: h5[name][()]
+                    for name in ("gamma_list", "momentum_list", "W_index_list")
+                }
+                if reference_attrs is None:
+                    reference_attrs = common
+                    reference_metadata = metadata
+                    loop_shape = tuple(h5["raw/loop_pervec"].shape[1:])
+                else:
+                    for key, value in reference_attrs.items():
+                        if key not in common or not np.array_equal(np.asarray(common[key]), np.asarray(value)):
+                            raise ValueError(f"qTMD shard {path} has incompatible attribute {key}")
+                    for name, value in reference_metadata.items():
+                        if not np.array_equal(metadata[name], value):
+                            raise ValueError(f"qTMD shard {path} has incompatible {name}")
+                count = hp_stop - hp_start
+                if tuple(h5["raw/loop_pervec"].shape) != (count,) + loop_shape:
+                    raise ValueError(f"qTMD shard {path} has incompatible loop shape")
+                expected_sources = np.arange(base_idx * hp_count + hp_start, base_idx * hp_count + hp_stop)
+                if not np.array_equal(h5["raw/source_index"][()], expected_sources):
+                    raise ValueError(f"qTMD shard {path} has incompatible source indices")
+                if not np.array_equal(h5["raw/base_noise_index"][()], np.full(count, base_idx)):
+                    raise ValueError(f"qTMD shard {path} has incompatible base indices")
+                if not np.array_equal(h5["raw/hp_index"][()], np.arange(hp_start, hp_stop)):
+                    raise ValueError(f"qTMD shard {path} has incompatible HP indices")
+            all_parts.append((base_idx, hp_start, hp_stop, path))
+        if marker.get("parts") != expected_names:
+            raise ValueError(f"base {base_idx} completion marker has incompatible part list")
+
+    total_sources = n_base_noise * hp_count
+    canonical_attrs = {
+        key: value for key, value in reference_attrs.items()
+        if key not in {"shard_schema", "output_kind", "block_interval_solves", "hp_vectors_per_base"}
+    }
+    canonical_attrs.update({
+        "measurement": "disconnected_qTMD_1pt",
+        "n_vec": n_base_noise,
+        "n_base_noise": n_base_noise,
+        "effective_n_inversions": total_sources,
+    })
+    final_path, temp_path = canonical_temp_path(canonical_tag)
+    with h5py.File(temp_path, "w") as out:
+        for key, value in canonical_attrs.items():
+            out.attrs[key] = value
+        for name, values in reference_metadata.items():
+            out.create_dataset(name, data=values)
+        raw = out.require_group("raw")
+        raw_loop = raw.create_dataset("loop_pervec", shape=(total_sources,) + loop_shape, dtype=np.complex128)
+        source_datasets = {
+            name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
+            for name in ("source_index", "base_noise_index", "hp_index")
+        }
+        loop_sum = np.zeros(loop_shape, dtype=np.complex128)
+        for base_idx, hp_start, hp_stop, path in all_parts:
+            start = base_idx * hp_count + hp_start
+            stop = base_idx * hp_count + hp_stop
+            with h5py.File(path, "r") as part:
+                values = part["raw/loop_pervec"][()]
+                raw_loop[start:stop] = values
+                loop_sum += np.sum(values, axis=0)
+                for name, dataset in source_datasets.items():
+                    dataset[start:stop] = part[f"raw/{name}"][()]
+
+        loop_avg = loop_sum / total_sources / int(canonical_attrs["volume_norm"])
+        gamma_names = [value.decode() if isinstance(value, bytes) else str(value) for value in reference_metadata["gamma_list"]]
+        momenta = reference_metadata["momentum_list"]
+        w_indices = reference_metadata["W_index_list"]
+        sm = out.require_group("avg").require_group("SS")
+        for ig, gamma_name in enumerate(gamma_names):
+            g_gamma = sm.require_group(gamma_name)
+            for ip, momentum in enumerate(momenta):
+                p_tag = "PX" + str(momentum[0]) + "PY" + str(momentum[1]) + "PZ" + str(momentum[2])
+                g_p = g_gamma.require_group(p_tag)
+                for iw, index in enumerate(w_indices):
+                    path = "b_X" if int(index[3]) == 0 else "b_Y"
+                    g_data = g_p.require_group(path + "/eta" + str(index[2]) + "/bT" + str(index[0]))
+                    g_data.create_dataset("bz" + str(index[1]), data=loop_avg[iw, ig, ip])
+        out.flush()
+    os.replace(temp_path, final_path)
+    return str(final_path)

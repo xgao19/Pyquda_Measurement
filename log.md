@@ -4,6 +4,19 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-10: Add base-resumable disconnected qTMD loops
+
+- Reused the disconnected base/HP shard infrastructure for qTMD/PDF loops,
+  with explicit streaming finalize and source-independent canonical tags.
+- Changed production defaults to decomposition-independent counter-based `Z4`
+  and `tol=1e-10`, restricted serial HDF5 to rank 0, and removed sequential RNG
+  and redundant per-vector gauge loads.
+- Preserved all operator, Wilson-line, link-cache, raw, and averaged schemas;
+  retained the legacy source-tag helper and monolithic library mode.
+- Verified `121 passed, 12 skipped`, rebuilt the qTMD PDF, and obtained exact
+  S8T8 raw/average agreement between two independent base jobs plus finalize
+  and the matched monolithic run.
+
 ## 2026-07-10: Add base-resumable EMT quark loop shards
 
 - Added base/HP-interval atomic shards, resume validation, complete-base

@@ -5,11 +5,7 @@ from pyquda import init
 from pyquda_utils import io
 
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import DisconnectedQuarkqTMD1pt
-from pyquda_measurement_utils.io_corr import get_disconnected_qTMD_1pt_file_tag
-
-
-def parse_site(text):
-    return [int(v) for v in text.split(".")]
+from pyquda_measurement_utils.io_corr import get_disconnected_qTMD_loop_file_tag
 
 
 def parse_int_list(text):
@@ -30,7 +26,6 @@ gauge_path = os.environ.get(
     "/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0",
 )
 lat_tag = os.environ.get("QTMD_1PT_LAT_TAG", "S8T32")
-src_pos = parse_site(os.environ.get("QTMD_1PT_SRC_POS", "0.0.0.0"))
 qmax = int(os.environ.get("QTMD_1PT_QMAX", "0"))
 q_range = range(-qmax, qmax + 1)
 qext = [[x, y, 0, 0] for x in q_range for y in q_range]
@@ -39,6 +34,7 @@ operator_kind = os.environ.get("QTMD_1PT_OPERATOR_KIND", "GI_PDF")
 sm_tag = os.environ.get("QTMD_1PT_SM_TAG", f"1HYP_{operator_kind}_BZ{os.environ.get('QTMD_1PT_BZ', '0')}_BT{os.environ.get('QTMD_1PT_BT', '0')}")
 
 parameters = {
+    "config_num": conf,
     "eta": parse_int_list(os.environ.get("QTMD_1PT_ETA", "0")),
     "b_z": int(os.environ.get("QTMD_1PT_BZ", "0")),
     "b_T": int(os.environ.get("QTMD_1PT_BT", "0")),
@@ -48,8 +44,11 @@ parameters = {
     "hp_num_vectors": int(os.environ.get("QTMD_1PT_HP_NUM_VECTORS", "1")),
     "hp_ordering": os.environ.get("QTMD_1PT_HP_ORDERING", "global_xyzt_gray_projected_to_evenodd"),
     "gi_qtmd_staple_mode": os.environ.get("QTMD_1PT_GI_STAPLE_MODE", "link_cache"),
+    "gauge_preprocessing": os.environ.get(
+        "QTMD_1PT_GAUGE_PREPROCESSING", "HYP(1,0.75,0.6,0.3,4)"
+    ),
 }
-tag = get_disconnected_qTMD_1pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
+tag = get_disconnected_qTMD_loop_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
 
 init(mpi_geometry, enable_mps=True)
 
@@ -60,13 +59,13 @@ gauge.latt_info.t_boundary = -1
 invPara = [
     float(os.environ.get("QTMD_1PT_MASS", "0.236")),
     float(os.environ.get("QTMD_1PT_CSW", "1.0372")),
-    float(os.environ.get("QTMD_1PT_TOL", "1e-15")),
+    float(os.environ.get("QTMD_1PT_TOL", "1e-10")),
     int(os.environ.get("QTMD_1PT_MAXITER", "300")),
 ]
 randPara = [
     int(os.environ.get("QTMD_1PT_N_VEC", "1")),
-    int(os.environ.get("QTMD_1PT_N_ZN", "2")),
-    int(os.environ.get("QTMD_1PT_RAND_SEED", str(conf))),
+    int(os.environ.get("QTMD_1PT_N_ZN", "4")),
+    int(os.environ.get("QTMD_1PT_RAND_SEED", "0")),
 ]
 
 measurement = DisconnectedQuarkqTMD1pt(parameters)
@@ -76,4 +75,9 @@ measurement.measure_1pt(
     randPara,
     tag=os.environ.get("QTMD_1PT_OUT", tag),
     operator_kind=operator_kind,
+    output_mode=os.environ.get("QTMD_1PT_OUTPUT_MODE", "base_shards"),
+    shard_dir=os.environ.get("QTMD_1PT_SHARD_DIR", os.path.join(data_dir, "qTMD1pt", "shards")),
+    base_start=int(os.environ.get("QTMD_1PT_BASE_START", "0")),
+    base_stop=int(os.environ.get("QTMD_1PT_BASE_STOP", str(randPara[0]))),
+    block_interval_solves=int(os.environ.get("QTMD_1PT_BLOCK_INTERVAL_SOLVES", "64")),
 )

@@ -35,6 +35,13 @@ cd /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/application/qTMD_dis
 bash run_qTMD_1pt.sh
 ```
 
+Production runs write base/HP-interval shards by default.  After all configured
+bases are complete, publish the canonical loop with:
+
+```bash
+bash perlmutter/run_finalize_qTMD_1pt.sh
+```
+
 Useful environment variables:
 
 ```text
@@ -44,10 +51,17 @@ QTMD_1PT_ETA=0
 QTMD_1PT_BZ=0
 QTMD_1PT_BT=0
 QTMD_1PT_N_VEC=1
+QTMD_1PT_N_ZN=4
+QTMD_1PT_RAND_SEED=0
+QTMD_1PT_TOL=1e-10
 QTMD_1PT_NOISE_SCHEME=zn
 QTMD_1PT_HP_NUM_VECTORS=1
 QTMD_1PT_HP_ORDERING=global_xyzt_gray_projected_to_evenodd
 QTMD_1PT_GI_STAPLE_MODE=link_cache
+QTMD_1PT_OUTPUT_MODE=base_shards
+QTMD_1PT_BASE_START=0
+QTMD_1PT_BASE_STOP=QTMD_1PT_N_VEC
+QTMD_1PT_BLOCK_INTERVAL_SOLVES=64
 ```
 
 For hierarchical probing:
@@ -92,6 +106,22 @@ avg/SS/<gamma>/PX...PY...PZ.../b_X_or_b_Y/eta0/bT.../bz...
 ```
 
 The averaged datasets are divided by the spatial volume.
+
+New production files are source independent and use
+`qTMD1pt/<lat>.qTMD1pt.<cfg>.<ama>.<sm>.h5`.  The old source-tag helper remains
+available only for existing data and APIs.  Base sources use decomposition-
+independent counter-based `Z4` noise keyed by global coordinates, spin, color,
+configuration, base index, and stream salt.
+
+Shard parts encode the base, part, and HP interval.  Compatible parts are
+skipped on resume; a base completion marker is written only after all its HP
+parts validate.  Partial HP parts are checkpoints rather than complete
+estimators.  The explicit finalizer streams raw data and averages into the
+canonical schema without holding the complete source axis in memory.
+
+Set `QTMD_1PT_OUTPUT_MODE=monolithic` only for legacy comparisons.  All serial
+HDF5 output is restricted to MPI rank zero, and the unchanged gauge is loaded
+once before the stochastic-source loop.
 
 ## Sanity Checks
 
