@@ -4,6 +4,15 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-10: Trim session memory to durable guidance
+
+- Reduced `SESSION_MEMORY.md` to reusable environment facts, stable physics
+  and implementation conventions, and recurring pitfalls.
+- Moved completed-work history and one-off validation details out of session
+  memory; those remain available in this log and Git history.
+- Kept the current full-volume `Z4`, four-dimensional fermion-flow, canonical
+  EMT-loop, HP, qTMD, and ringed-normalization conventions.
+
 ## 2026-07-10: Add full-volume Z4 EMT loop workflow
 
 - Replaced rank-local stochastic EMT sources with decomposition-independent
