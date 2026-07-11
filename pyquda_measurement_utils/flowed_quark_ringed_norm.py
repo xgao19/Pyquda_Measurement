@@ -13,6 +13,7 @@ import numpy as np
 from opt_einsum import contract
 
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
+    COUNTER_NOISE_ALGORITHM,
     array_to_numpy,
     effective_n_inversions,
     iter_noise_sources,
@@ -87,21 +88,12 @@ def flowed_quark_ringed_norm_block_tag(tag, block_index, block_start, block_stop
     )
 
 
-def flowed_quark_ringed_norm_sample_seed(randseed, base_idx):
-    """Return a deterministic mixed seed for one base noise."""
-    mask = (1 << 64) - 1
-    value = ((int(randseed) & mask) << 32) ^ (int(base_idx) & mask) ^ 0x9E3779B97F4A7C15
-    value = (value + 0x9E3779B97F4A7C15) & mask
-    value = ((value ^ (value >> 30)) * 0xBF58476D1CE4E5B9) & mask
-    value = ((value ^ (value >> 27)) * 0x94D049BB133111EB) & mask
-    value = value ^ (value >> 31)
-    seed = int(value % (2**31 - 1))
-    return seed or 1
-
-
-def flowed_quark_ringed_norm_hp256_sample_log_tag(base_idx, sample_seed):
-    """Return the connected-style completion tag for one HP256 base noise."""
-    return f"ringed_hp256_base{int(base_idx):03d}_seed{int(sample_seed)}"
+def flowed_quark_ringed_norm_hp256_sample_log_tag(config_num, noise_stream, base_idx):
+    """Return the completion tag for one counter-based HP256 base noise."""
+    return (
+        f"ringed_hp256_{COUNTER_NOISE_ALGORITHM}"
+        f"_cfg{int(config_num)}_stream{int(noise_stream)}_base{int(base_idx):03d}"
+    )
 
 
 def hp256_sample_source_range(base_idx, hp_num_vectors=256):
@@ -288,6 +280,11 @@ class FlowedQuarkRingedNorm:
         self.flow_type = normalize_flow_type(parameters["flow_type"])
         self.flow_epsilon = float(parameters["flow_epsilon"])
         self.flow_steps = int(parameters["flow_steps"])
+        if parameters.get("config_num") is None:
+            raise ValueError("config_num is required for counter-based stochastic sources")
+        self.config_num = int(parameters["config_num"])
+        if self.config_num < 0:
+            raise ValueError(f"config_num should be non-negative, got {self.config_num}")
         self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
         self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
         self.hp_ordering = parameters.get("hp_ordering", "global_xyzt_gray_projected_to_evenodd")
@@ -323,11 +320,8 @@ class FlowedQuarkRingedNorm:
         if self.natural_block_size % self.block_size != 0:
             raise ValueError("HP256 sample log requires block_interval_solves to divide 256")
 
-    def _sample_seed(self, randseed, base_idx):
-        return flowed_quark_ringed_norm_sample_seed(randseed, base_idx)
-
-    def _sample_log_tag(self, base_idx, randseed):
-        return flowed_quark_ringed_norm_hp256_sample_log_tag(base_idx, self._sample_seed(randseed, base_idx))
+    def _sample_log_tag(self, base_idx, counter_config, counter_stream):
+        return flowed_quark_ringed_norm_hp256_sample_log_tag(counter_config, counter_stream, base_idx)
 
     def _selected_base_indices(self, n_vec):
         n_vec = int(n_vec)
@@ -344,7 +338,7 @@ class FlowedQuarkRingedNorm:
                 return False
         return True
 
-    def _completed_sample_log_tags(self, latt_info, tag, randseed, n_vec):
+    def _completed_sample_log_tags(self, latt_info, tag, counter_config, counter_stream, n_vec):
         if self.sample_log_file is None:
             return set()
 
@@ -356,9 +350,10 @@ class FlowedQuarkRingedNorm:
             sample_log_path.touch(exist_ok=True)
             logged_tags = _read_sample_log_tags(sample_log_path)
             completed_tags = {
-                self._sample_log_tag(base_idx, randseed)
+                self._sample_log_tag(base_idx, counter_config, counter_stream)
                 for base_idx in range(int(n_vec))
-                if self._sample_log_tag(base_idx, randseed) in logged_tags and self._sample_block_files_exist(tag, base_idx)
+                if self._sample_log_tag(base_idx, counter_config, counter_stream) in logged_tags
+                and self._sample_block_files_exist(tag, base_idx)
             }
         else:
             completed_tags = None
@@ -372,8 +367,17 @@ class FlowedQuarkRingedNorm:
             print(f"RingedNorm LOGGED: {sample_log_tag}", flush=True)
         mpi_print(latt_info, f"RingedNorm DONE: {sample_log_tag}")
 
-    def _metadata_attrs(self, latt_info, invPara, randPara, n_eff, spatial_volume):
-        n_vec, n_zn, randseed = randPara
+    def _metadata_attrs(
+        self,
+        latt_info,
+        invPara,
+        randPara,
+        counter_config,
+        counter_stream,
+        n_eff,
+        spatial_volume,
+    ):
+        n_vec, n_zn, noise_stream = randPara
         mass, csw, tol, maxiter = invPara
         flow_time_values = flow_times(self.flow_epsilon, self.flow_steps)
         return {
@@ -395,7 +399,14 @@ class FlowedQuarkRingedNorm:
             "noise_scheme": self.noise_scheme,
             "n_vec": n_vec,
             "n_zn": n_zn,
-            "rand_seed": randseed,
+            "config_num": int(counter_config),
+            "noise_stream": int(counter_stream),
+            "noise_generator": COUNTER_NOISE_ALGORITHM,
+            "noise_counter_order": (
+                "global_xyzt_spin_color_config_base_stream"
+                if self.spin_color_dilution == "none"
+                else "global_xyzt_config_base_stream"
+            ),
             "hp_num_vectors": self.hp_num_vectors,
             "hp_ordering": self.hp_ordering,
             "spin_color_dilution": self.spin_color_dilution,
@@ -504,7 +515,9 @@ class FlowedQuarkRingedNorm:
         if not tag:
             raise ValueError("flowed_kinetic_norm requires a non-empty output tag")
 
-        n_vec, n_zn, randseed = randPara
+        n_vec, n_zn, noise_stream = randPara
+        if int(noise_stream) < 0:
+            raise ValueError(f"noise stream should be non-negative, got {noise_stream}")
         n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors, self.spin_color_dilution)
         if n_eff % self.block_size != 0:
             raise ValueError(
@@ -538,7 +551,16 @@ class FlowedQuarkRingedNorm:
 
         kinetic_pervec = np.zeros((n_eff, n_flow, nt), dtype=np.complex128)
         source_bookkeeping = source_bookkeeping_arrays(n_eff, include_spin_color=True)
-        attrs = self._metadata_attrs(latt_info, invPara, randPara, n_eff, spatial_volume)
+        counter_config, counter_stream = self.config_num, int(noise_stream)
+        attrs = self._metadata_attrs(
+            latt_info,
+            invPara,
+            randPara,
+            counter_config,
+            counter_stream,
+            n_eff,
+            spatial_volume,
+        )
         mpi_print(
             latt_info,
             (
@@ -547,27 +569,26 @@ class FlowedQuarkRingedNorm:
             ),
         )
 
-        rng_probe = None
-        try:
-            from pyquda.field import LatticeFermion
-
-            rng_probe = LatticeFermion(latt_info)
-            xp = _get_xp_from_array(rng_probe.data)
-            xp.random.seed(randseed)
-        finally:
-            del rng_probe
-
         selected_base_indices = self._selected_base_indices(n_vec)
-        completed_sample_tags = self._completed_sample_log_tags(latt_info, tag, randseed, n_vec)
+        completed_sample_tags = self._completed_sample_log_tags(
+            latt_info,
+            tag,
+            counter_config,
+            counter_stream,
+            n_vec,
+        )
         completed_base_indices = {
             base_idx
             for base_idx in range(int(n_vec))
-            if self._sample_log_tag(base_idx, randseed) in completed_sample_tags
+            if self._sample_log_tag(base_idx, counter_config, counter_stream) in completed_sample_tags
         } if self.sample_log_file is not None else set()
         out_of_range_base_indices = set(range(int(n_vec))) - selected_base_indices
         skipped_base_indices = completed_base_indices | out_of_range_base_indices
         for base_idx in sorted(completed_base_indices & selected_base_indices):
-            mpi_print(latt_info, f"RingedNorm SKIP: {self._sample_log_tag(base_idx, randseed)}")
+            mpi_print(
+                latt_info,
+                f"RingedNorm SKIP: {self._sample_log_tag(base_idx, counter_config, counter_stream)}",
+            )
         if self.base_start is not None or self.base_stop is not None:
             mpi_print(latt_info, f"RingedNorm selected base range: {min(selected_base_indices)}:{max(selected_base_indices) + 1}")
 
@@ -584,10 +605,14 @@ class FlowedQuarkRingedNorm:
             spin_color_dilution=self.spin_color_dilution,
             include_spin_color=True,
             skip_base_indices=skipped_base_indices,
-            base_seed_fn=(lambda base_idx: self._sample_seed(randseed, base_idx)) if self.sample_log_file is not None else None,
+            counter_noise_config=counter_config,
+            counter_noise_stream=counter_stream,
         ):
             if self.sample_log_file is not None and hp_idx == 0:
-                mpi_print(latt_info, f"RingedNorm START: {self._sample_log_tag(base_idx, randseed)}")
+                mpi_print(
+                    latt_info,
+                    f"RingedNorm START: {self._sample_log_tag(base_idx, counter_config, counter_stream)}",
+                )
             if vec_picked % self.block_size == 0:
                 block_timers = _reset_block_timers(n_flow, self.flow_steps)
                 block_timers["block_start"] = _timer_start(xi)
@@ -648,7 +673,10 @@ class FlowedQuarkRingedNorm:
                 total_seconds = _timer_stop(block_timers["block_start"])
                 _print_block_timers(latt_info, block_index, block_start, block_stop, block_timers, total_seconds)
                 if self.sample_log_file is not None and block_stop % self.natural_block_size == 0:
-                    self._log_sample_done(latt_info, self._sample_log_tag(base_idx, randseed))
+                    self._log_sample_done(
+                        latt_info,
+                        self._sample_log_tag(base_idx, counter_config, counter_stream),
+                    )
 
         if np.any(computed_source_mask):
             kinetic_spacetime = kinetic_spacetime_from_raw(kinetic_pervec[computed_source_mask], self.spin_color_dilution_factor)
@@ -664,7 +692,6 @@ __all__ = [
     "compute_ringed_factors",
     "flowed_quark_ringed_norm_block_tag",
     "flowed_quark_ringed_norm_hp256_sample_log_tag",
-    "flowed_quark_ringed_norm_sample_seed",
     "flow_times",
     "hp256_sample_block_ranges",
     "hp256_sample_source_range",

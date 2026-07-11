@@ -633,7 +633,13 @@ A $\znum$ noise fermion $\xi(x)$ is generated with random complex phases:
   \xi(x) \in \big\{ e^{2\pi i r / n} \mid r \in \{0, 1, \dots, n-1\} \big\},
 \end{equation}
 
-with \code{n = n\_zn} (typically $n = 2$, i.e., $\mathbb{Z}_2$ noise). Each spin-color component at each lattice site receives an independent random phase. The noise satisfies $\langle \xi(x) \rangle = 0$ and $\langle \xi(x) \xi^\dagger(y) \rangle = \delta_{xy}$.
+with \code{n = n\_zn}; the production default is $n=4$.  Each phase is
+constructed by the fixed counter described in
+\code{docs/EMT\_disconnected\_1pt/EMT\_disconnected\_1pt.tex}, using the
+global coordinate, spin, color, configuration, base-noise index, and stream
+salt.  Thus the global source is unchanged by the MPI decomposition and obeys
+$\langle \xi(x) \rangle = 0$ and
+$\langle \xi(x) \xi^\dagger(y) \rangle = \delta_{xy}$ in the noise ensemble.
 
 The solution vector is obtained by inverting the Dirac operator:
 
@@ -1383,12 +1389,16 @@ The Dirac operator uses the QUDA multigrid solver with parameters:
 \begin{center}
 \code{invPara = [mass, csw, tol, maxiter]}
 \end{center}
-Typical values: \code{mass = 0.236}, \code{csw = 1.0372}, \code{tol = 1e-15}, \code{maxiter = 300}. The multigrid setup uses a $[[8, 8, 4, 4]]$ block size configuration.
+Typical values: \code{mass = 0.236}, \code{csw = 1.0372}, \code{tol = 1e-10}, \code{maxiter = 300}. The multigrid setup uses a $[[8, 8, 4, 4]]$ block size configuration.
 
 \subsection{Random Number Parameters (Quark 1pt)}
 \label{sec:rand_par}
 
-\code{randPara = [n\_vec, n\_zn, randseed]} where \code{n\_vec} is the number of noise vectors, \code{n\_zn} is the $\znum$ order (typically 2), and \code{randseed} is used to seed the random number generator (usually set to the configuration number for reproducibility).
+\code{randPara = [n\_vec, n\_zn, randseed]} where \code{n\_vec} is the
+number of base noise vectors, \code{n\_zn} is the $\znum$ order (default 4),
+and \code{randseed} is the counter stream salt (default 0).  The gauge
+configuration number is a separate counter key.  No rank-local backend RNG is
+used.
 
 \subsection{Typical Usage Pattern}
 \label{sec:usage}

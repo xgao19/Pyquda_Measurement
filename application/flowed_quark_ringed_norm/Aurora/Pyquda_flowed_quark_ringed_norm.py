@@ -48,6 +48,7 @@ gauge_preprocessing = os.environ.get(
 )
 
 parameters = {
+    "config_num": conf,
     "flow_type": os.environ.get("FLOWED_RINGED_FLOW_TYPE", "wilson"),
     "flow_epsilon": float(os.environ.get("FLOWED_RINGED_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("FLOWED_RINGED_FLOW_STEPS", "1")),
@@ -93,8 +94,8 @@ invPara = [
 ]
 randPara = [
     int(os.environ.get("FLOWED_RINGED_N_VEC", "1")),
-    int(os.environ.get("FLOWED_RINGED_N_ZN", "2")),
-    int(os.environ.get("FLOWED_RINGED_RAND_SEED", str(conf))),
+    int(os.environ.get("FLOWED_RINGED_N_ZN", "4")),
+    int(os.environ.get("FLOWED_RINGED_RAND_SEED", "0")),
 ]
 
 mpi_print(latt_info, f"--lat_tag {lat_tag}")

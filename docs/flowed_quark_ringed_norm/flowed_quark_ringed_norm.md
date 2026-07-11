@@ -25,6 +25,14 @@ avg/kinetic_spacetime[flow]
     sum_{r,t} raw/kinetic_pervec[r, flow, t]
 ```
 
+All base fields use decomposition-independent counter-based `Z4` noise by
+default.  The counter contains global `x,y,z,t`, configuration, base index,
+and stream salt; full spin-color noise additionally includes spin and color.
+Point spin-color dilution uses a site-only counter before the exact projector.
+This replaces backend RNG seeding, which can repeat identical local arrays on
+equal-shaped MPI ranks.  Existing backend-RNG output is obsolete and must not
+be combined with counter-noise data.
+
 Two spin-color source modes are supported:
 
 ```text
@@ -108,6 +116,7 @@ mass, csw, tol, maxiter
 gauge_preprocessing
 t_boundary
 noise_scheme, n_vec, n_zn, hp_num_vectors, hp_ordering
+noise_generator, noise_counter_order, config_num, noise_stream
 spin_color_dilution, spin_color_dilution_factor, spin_color_trace_factor, site_noise_scope
 volume_average = spin_color_trace_factor_times_spacetime_average_from_raw_kinetic_pervec
 flow0_factor = NaN

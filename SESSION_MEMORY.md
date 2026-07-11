@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 This file contains only reusable environment facts, stable conventions, and
 pitfalls that are easy to repeat.  Commit history and completed-work summaries
@@ -94,6 +94,9 @@ python tests/run_smoke_tests.py
 
 ## EMT Disconnected One-Point Loops
 
+- Never construct a distributed stochastic source by resetting the same
+  backend RNG seed on every MPI rank.  Equal local shapes repeat the local
+  field; use global-coordinate counter noise for decomposition independence.
 - Quark loops use decomposition-independent full-volume counter-based `Z4`
   noise.  The counter includes global `x,y,z,t`, spin, color, configuration,
   base-noise index, and an optional stream salt.
@@ -148,8 +151,8 @@ python tests/run_smoke_tests.py
 - HP256 sample-log resume is intentionally narrow: hierarchical probing,
   `hp_num_vectors=256`, and no spin-color dilution.  A completed sample-log
   entry represents a full base-noise sample, not one interval block.
-- Per-base seeds must use `flowed_quark_ringed_norm_sample_seed(...)` so skipped
-  or resumed bases do not change later stochastic sources.
+- HP256 sample identity is the counter algorithm plus configuration, stream,
+  and base index, so skipped or resumed bases reconstruct the same source.
 - Point spin-color dilution has 12 channels.  The final kinetic observable must
   sum the spin-color trace via `spin_color_trace_factor=12`; averaging those
   channels would give the wrong normalization.

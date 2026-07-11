@@ -121,22 +121,6 @@ def create_gi_qtmd_wilsonline_index_lists(eta_list, max_b_z: int, max_b_T: int):
     return index_list_trans0, index_list_trans1
 
 
-def make_zn_noise_fermion(latt_info, n: int = 2):
-    """Create one stochastic fermion source with Z_n phases."""
-    from pyquda.field import LatticeFermion
-
-    xi = LatticeFermion(latt_info)
-    xp = _get_xp_from_array(xi.data)
-    r = xp.random.randint(0, n, size=xi.data.shape)
-    phases = xp.exp(2j * xp.pi * r / n).astype(xi.data.dtype)
-    if xp.__name__ == "dpnp" and hasattr(xi.data, "sycl_queue"):
-        import dpnp
-
-        phases = dpnp.asarray(dpnp.asnumpy(phases), sycl_queue=xi.data.sycl_queue)
-    xi.data[:] = phases
-    return xi
-
-
 def _splitmix64(values):
     """Apply the fixed SplitMix64 finalizer with unsigned wraparound."""
     z = np.asarray(values, dtype=np.uint64)
@@ -217,18 +201,34 @@ def make_counter_zn_noise_fermion(
     return xi
 
 
-def make_site_zn_noise_fermion(latt_info, n: int = 2):
-    """Create one stochastic fermion source with site-only Z_n phases."""
+def make_counter_site_zn_noise_fermion(
+    latt_info,
+    config_num: int,
+    base_noise_index: int,
+    stream_seed: int = 0,
+    n: int = 4,
+):
+    """Create decomposition-independent site-only counter-based Z_n noise."""
     from pyquda.field import LatticeFermion
 
     xi = LatticeFermion(latt_info)
     xp = _get_xp_from_array(xi.data)
-    r = xp.random.randint(0, n, size=xi.data.shape[:-2])
-    phases = xp.exp(2j * xp.pi * r / n).astype(xi.data.dtype)
-    if xp.__name__ == "dpnp" and hasattr(xi.data, "sycl_queue"):
-        import dpnp
-
-        phases = dpnp.asarray(dpnp.asnumpy(phases), sycl_queue=xi.data.sycl_queue)
+    phase_indices = counter_zn_phase_indices(
+        latt_info,
+        config_num,
+        base_noise_index,
+        stream_seed=stream_seed,
+        n=n,
+        spin_count=1,
+        color_count=1,
+    )[..., 0, 0]
+    if int(n) == 4:
+        phase_table = np.asarray([1.0, 1.0j, -1.0, -1.0j], dtype=np.dtype(xi.data.dtype))
+    elif int(n) == 2:
+        phase_table = np.asarray([1.0, -1.0], dtype=np.dtype(xi.data.dtype))
+    else:
+        phase_table = np.exp(2j * np.pi * np.arange(int(n)) / int(n)).astype(np.dtype(xi.data.dtype))
+    phases = _asarray_on_queue(phase_table[phase_indices], xp, xi.data)
     xi.data[:] = phases[..., None, None]
     return xi
 
@@ -314,16 +314,6 @@ def apply_hierarchical_probe(xi, hp_idx: int, hp_ordering: str):
     return probed
 
 
-def _seed_backend_random(latt_info, seed: int):
-    """Seed the active array backend random generator for this lattice."""
-    from pyquda.field import LatticeFermion
-
-    probe = LatticeFermion(latt_info)
-    xp = _get_xp_from_array(probe.data)
-    xp.random.seed(int(seed))
-    del probe
-
-
 def iter_noise_sources(
     latt_info,
     n_vec: int,
@@ -334,37 +324,35 @@ def iter_noise_sources(
     spin_color_dilution: str = "none",
     include_spin_color: bool = False,
     skip_base_indices=None,
-    base_seed_start=None,
-    base_seed_fn=None,
     counter_noise_config=None,
     counter_noise_stream: int = 0,
     skip_effective_indices=None,
 ):
     """Yield effective stochastic sources with optional hierarchical probing."""
     spin_color_dilution = normalize_spin_color_dilution(spin_color_dilution)
+    if counter_noise_config is None:
+        raise ValueError("counter_noise_config is required for decomposition-independent stochastic sources")
     skip_base_indices = set() if skip_base_indices is None else {int(idx) for idx in skip_base_indices}
     skip_effective_indices = set() if skip_effective_indices is None else {int(idx) for idx in skip_effective_indices}
 
     def prepare_base_noise(base_idx):
         if int(base_idx) in skip_base_indices:
             return None
-        if counter_noise_config is not None:
-            if spin_color_dilution == "point":
-                raise ValueError("counter-based noise is not implemented for site-only spin-color dilution")
-            return make_counter_zn_noise_fermion(
+        if spin_color_dilution == "point":
+            return make_counter_site_zn_noise_fermion(
                 latt_info,
                 int(counter_noise_config),
                 int(base_idx),
                 stream_seed=int(counter_noise_stream),
                 n=n_zn,
             )
-        if base_seed_fn is not None:
-            _seed_backend_random(latt_info, int(base_seed_fn(base_idx)))
-        elif base_seed_start is not None:
-            _seed_backend_random(latt_info, int(base_seed_start) + int(base_idx))
-        if spin_color_dilution == "point":
-            return make_site_zn_noise_fermion(latt_info, n=n_zn)
-        return make_zn_noise_fermion(latt_info, n=n_zn)
+        return make_counter_zn_noise_fermion(
+            latt_info,
+            int(counter_noise_config),
+            int(base_idx),
+            stream_seed=int(counter_noise_stream),
+            n=n_zn,
+        )
 
     def make_output(effective_idx, base_idx, hp_idx, spin_idx, color_idx, source):
         if include_spin_color:

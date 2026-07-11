@@ -4,6 +4,18 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-11: Remove rank-local RNG from disconnected sources
+
+- Removed backend RNG generation from the shared disconnected source utility
+  and made global-coordinate SplitMix64 counter noise mandatory.
+- Added decomposition-independent site-only counter noise for exact point
+  spin-color dilution and migrated standalone ringed normalization, including
+  HP256 sample identity, to configuration/stream/base counter keys.
+- Changed standalone defaults to `Z4` with stream salt zero and documented the
+  repeated-local-noise failure caused by identical per-rank RNG seeds.
+- Removed the invalid legacy Aurora l64 convergence plot, rebuilt the EMT,
+  pion, proton, and qTMD PDFs, and verified `125 passed, 12 skipped`.
+
 ## 2026-07-10: Add base-resumable disconnected qTMD loops
 
 - Reused the disconnected base/HP shard infrastructure for qTMD/PDF loops,

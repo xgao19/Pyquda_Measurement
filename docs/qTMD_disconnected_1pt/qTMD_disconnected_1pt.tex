@@ -240,6 +240,11 @@ The default base field is decomposition-independent full-volume
 coordinate, spin, color, gauge-configuration number, base-noise index, and an
 independent stream salt.  Therefore any base or HP interval can be regenerated
 without consuming the earlier random-number sequence.
+Using the same backend RNG seed independently on equal-shaped MPI sublattices
+would instead repeat the same rank-local field, violate the required
+off-diagonal noise covariance, and make the estimator decomposition dependent.
+Adding the rank to the seed is not sufficient for cross-decomposition
+reproducibility; the global-coordinate counter is the production solution.
 
 \subsection{Base-Oriented Production and Finalization}
 

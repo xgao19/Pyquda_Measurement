@@ -112,6 +112,9 @@ New production files are source independent and use
 available only for existing data and APIs.  Base sources use decomposition-
 independent counter-based `Z4` noise keyed by global coordinates, spin, color,
 configuration, base index, and stream salt.
+This specifically avoids the repeated-local-noise failure caused by seeding an
+ordinary backend RNG identically on equal-shaped MPI ranks.  Rank-offset seeds
+are not a decomposition-independent replacement.
 
 Shard parts encode the base, part, and HP interval.  Compatible parts are
 skipped on resume; a base completion marker is written only after all its HP

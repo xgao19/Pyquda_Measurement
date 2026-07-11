@@ -1384,6 +1384,9 @@ spreads in the temporal direction.  A single initial-time projector does not
 reproduce this finite-flow trace.  Complete time dilution would be unbiased
 after summing all projectors, but the current workflow instead uses
 full-volume counter-based \(Z_4\) sources and retains every insertion time.
+This also avoids the repeated-local-source failure that occurs when equal-shaped
+MPI ranks reset an ordinary backend RNG to the same seed; rank-dependent seeds
+would still make the source depend on the decomposition.
 Spatial HP and isotropic 4D HP both preserve this full-volume support; only
 their probing signs differ.  A detailed derivation is provided in
 \code{docs/EMT\_disconnected\_1pt/EMT\_disconnected\_1pt.tex}.

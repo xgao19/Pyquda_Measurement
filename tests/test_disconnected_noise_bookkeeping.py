@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     VALID_HP_ORDERINGS,
@@ -9,6 +10,7 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     effective_n_inversions,
     hierarchical_probe_pattern,
     is_power_of_two,
+    iter_noise_sources,
     normalize_noise_scheme,
     normalize_spin_color_dilution,
     source_bookkeeping_arrays,
@@ -102,6 +104,28 @@ def test_counter_z4_is_independent_of_lattice_partitioning():
 
     np.testing.assert_array_equal(np.concatenate([left, right], axis=0), full)
     assert not np.array_equal(left, right)
+
+
+def test_site_only_counter_z4_is_independent_of_lattice_partitioning():
+    full = counter_zn_phase_indices(
+        TinyLatticeInfo(), 23, 2, stream_seed=7, n=4, spin_count=1, color_count=1
+    )[..., 0, 0]
+    left = counter_zn_phase_indices(
+        PartitionedTinyLatticeInfo(0, 1), 23, 2, stream_seed=7, n=4,
+        spin_count=1, color_count=1,
+    )[..., 0, 0]
+    right = counter_zn_phase_indices(
+        PartitionedTinyLatticeInfo(1, 2), 23, 2, stream_seed=7, n=4,
+        spin_count=1, color_count=1,
+    )[..., 0, 0]
+
+    np.testing.assert_array_equal(np.concatenate([left, right], axis=0), full)
+    assert set(np.unique(full)) <= {0, 1, 2, 3}
+
+
+def test_noise_iterator_requires_counter_configuration():
+    with pytest.raises(ValueError, match="counter_noise_config is required"):
+        next(iter_noise_sources(TinyLatticeInfo(), 1, 4, "zn", 1, next(iter(VALID_HP_ORDERINGS))))
 
 
 def test_hierarchical_probes_reuse_one_counter_base_source():

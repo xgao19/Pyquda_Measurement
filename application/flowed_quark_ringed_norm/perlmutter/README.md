@@ -64,8 +64,11 @@ For the purposes of this benchmark, read this as:
 K = one complex scalar we want to estimate accurately
 ```
 
-The stochastic source is also 4D: random phases live on all `x,y,z,t` sites,
-spin, and color.  In the HDF5 output, this scalar is stored as:
+The stochastic source is also 4D: counter-based `Z4` phases live on all
+`x,y,z,t` sites, spin, and color.  The counter uses global coordinates,
+configuration, base index, and `FLOWED_RINGED_RAND_SEED` as a stream salt, so
+the global field is unchanged by the MPI decomposition.  In the HDF5 output,
+this scalar is stored as:
 
 ```text
 avg/kinetic_spacetime[flow]
@@ -168,12 +171,17 @@ FLOWED_RINGED_NOISE_SCHEME=zn
 FLOWED_RINGED_NOISE_SCHEME=hierarchical_probing
 ```
 
-For pure stochastic, each solve uses an independent random volume source.
+For pure stochastic, each solve uses an independent counter-based volume source.
 
 For stochastic hierarchical probing, each base random source is multiplied by a
 deterministic set of HP sign vectors.  These sign patterns cancel selected
 nearby off-diagonal contributions in the trace estimator.  The estimator is
 still stochastic because the base source is random.
+
+An ordinary backend RNG must not be reset to the same seed on every MPI rank:
+equal local shapes would then receive repeated local arrays.  Adding the rank
+to the seed is also decomposition dependent.  Old backend-RNG blocks and sample
+logs are obsolete and are not compatible with this workflow.
 
 The effective number of solves is
 

@@ -153,6 +153,29 @@ global four-dimensional coordinate, spin, color, configuration number,
 base-noise index, and optional stream salt.  Consequently the global source is
 reproducible and independent of the chosen MPI decomposition.
 
+This counter construction fixes a serious failure mode of rank-local backend
+random-number generators.  If every MPI rank resets an ordinary generator to
+the same state \(s\), ranks with the same local lattice shape draw the same
+array.  For a rank-local index \(\ell\),
+\begin{equation}
+  \xi_r(\ell)=F(s,\ell)=\xi_{r'}(\ell),\qquad r\ne r'.
+\end{equation}
+The corresponding distinct global sites \(x_r+\ell\) and \(x_{r'}+\ell\)
+then have unit rather than vanishing noise covariance,
+\begin{equation}
+  \mathbb E_\xi\!\left[\xi^\ast(x_r+\ell)
+  \xi(x_{r'}+\ell)\right]=1,\qquad r\ne r',
+\end{equation}
+so the required identity in Eq.~\eqref{eq:noise_identity} is not sampled.
+This creates rank-periodic off-diagonal terms, can bias the stochastic trace,
+and changes the global source when the MPI decomposition changes.  Mixing the
+rank into the seed removes exact repetition only for one fixed process layout;
+it still makes the source depend on the rank assignment.  The production
+counter instead uses physical global coordinates and semantic keys, so the
+same configuration, base index, and stream reconstruct exactly the same global
+field for every MPI geometry.  Legacy backend-RNG loop data are therefore not
+combined with counter-noise production data.
+
 \subsection{Quark EMT Operator Implemented in Code}
 
 The quark EMT kernel in the one-point code is the local bilinear with a

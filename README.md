@@ -258,6 +258,11 @@ For quark/gluon one-point data:
 
 - Quark 1pt stores stochastic `Tmunu` and `CHI` outputs.
 - Quark 1pt defaults to decomposition-independent full-volume counter-based `Z4` noise.
+- Never seed an ordinary array-backend RNG identically on every MPI rank to
+  build a distributed stochastic source.  Equal local shapes then receive
+  repeated local noise, violating the intended global covariance.  EMT, qTMD,
+  and standalone ringed production all use global-coordinate counter noise;
+  old backend-RNG data should not be mixed with these outputs.
 - Quark 1pt can use either ordinary `zn` noise or `hierarchical_probing`.
 - For hierarchical probing, `effective_n_inversions = n_base_noise * hp_num_vectors`.
 - Raw quark 1pt files store `source_index`, `base_noise_index`, and `hp_index`

@@ -97,6 +97,12 @@ base-noise index, and `EMT_1PT_RAND_SEED` stream salt, so the global source is
 unchanged when the MPI decomposition changes.  `EMT_1PT_N_ZN` defaults to `4`
 and the stream salt defaults to `0`.
 
+Do not replace this generator with identical calls to `xp.random.seed` on all
+MPI ranks.  Equal-shaped local lattices would receive the same local noise,
+creating artificial cross-rank correlations.  Adding the rank to the seed is
+still decomposition dependent; global-coordinate counters are required for
+production reproducibility.
+
 For hierarchical probing,
 
 ```text

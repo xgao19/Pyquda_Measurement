@@ -25,7 +25,6 @@ from pyquda_measurement_utils.flowed_quark_ringed_norm import (
     compute_ringed_factors,
     flowed_quark_ringed_norm_block_tag,
     flowed_quark_ringed_norm_hp256_sample_log_tag,
-    flowed_quark_ringed_norm_sample_seed,
     flow_times,
     hp256_sample_block_ranges,
     hp256_sample_source_range,
@@ -102,6 +101,7 @@ def test_flowed_quark_ringed_tag_helper_uses_generic_directory():
 
 def _ringed_params(hp_num_vectors, block_interval_solves, spin_color_dilution="none"):
     return {
+        "config_num": 1050,
         "flow_type": "symanzik",
         "flow_epsilon": 0.1,
         "flow_steps": 1,
@@ -152,13 +152,10 @@ def test_flowed_quark_ringed_block_tag_suffix_format():
 
 
 def test_flowed_quark_ringed_hp256_sample_log_helpers(tmp_path):
-    seed0 = flowed_quark_ringed_norm_sample_seed(105000, 0)
-    seed7 = flowed_quark_ringed_norm_sample_seed(105000, 7)
-    assert seed0 != 105000
-    assert seed7 != 105007
-    assert seed0 != seed7
-    assert flowed_quark_ringed_norm_hp256_sample_log_tag(0, seed0) == f"ringed_hp256_base000_seed{seed0}"
-    assert flowed_quark_ringed_norm_hp256_sample_log_tag(7, seed7) == f"ringed_hp256_base007_seed{seed7}"
+    tag0 = flowed_quark_ringed_norm_hp256_sample_log_tag(1050, 4, 0)
+    tag7 = flowed_quark_ringed_norm_hp256_sample_log_tag(1050, 4, 7)
+    assert tag0 == "ringed_hp256_splitmix64_global_coordinate_v1_cfg1050_stream4_base000"
+    assert tag7 == "ringed_hp256_splitmix64_global_coordinate_v1_cfg1050_stream4_base007"
     assert hp256_sample_source_range(2) == (512, 768)
     assert hp256_sample_block_ranges(1, 64) == [
         (4, 256, 320),
@@ -168,7 +165,6 @@ def test_flowed_quark_ringed_hp256_sample_log_helpers(tmp_path):
     ]
 
     sample_log_file = tmp_path / "sample_log" / "FlowedQuarkRinged_1HYP_RINGED_HP256_N8_1050"
-    tag0 = flowed_quark_ringed_norm_hp256_sample_log_tag(0, seed0)
     assert _append_sample_log_tag_once(sample_log_file, tag0)
     assert not _append_sample_log_tag_once(sample_log_file, tag0)
     assert sample_log_file.read_text().splitlines() == [tag0]
@@ -181,8 +177,9 @@ def test_flowed_quark_ringed_hp256_sample_requires_complete_block_files(tmp_path
     })
     base_tag = str(tmp_path / "FlowedQuarkRinged" / "schema")
 
-    seed0 = flowed_quark_ringed_norm_sample_seed(105000, 0)
-    assert norm._sample_log_tag(0, 105000) == f"ringed_hp256_base000_seed{seed0}"
+    assert norm._sample_log_tag(0, 1050, 4) == (
+        "ringed_hp256_splitmix64_global_coordinate_v1_cfg1050_stream4_base000"
+    )
     assert not norm._sample_block_files_exist(base_tag, 0)
 
     for block_index, block_start, block_stop in hp256_sample_block_ranges(0, 64):
@@ -199,6 +196,30 @@ def test_flowed_quark_ringed_sample_log_rejects_non_hp256_mode(tmp_path):
             **_ringed_params(16, 64),
             "sample_log_file": str(tmp_path / "sample_log" / "bad"),
         })
+
+
+def test_flowed_quark_ringed_requires_counter_configuration():
+    params = _ringed_params(16, 64)
+    params.pop("config_num")
+
+    with pytest.raises(ValueError, match="config_num is required"):
+        FlowedQuarkRingedNorm(params)
+
+
+def test_flowed_quark_ringed_counter_metadata_distinguishes_noise_scope():
+    latt_info = _FakeLatticeInfo([2, 2, 2, 4])
+    full = FlowedQuarkRingedNorm(_ringed_params(16, 64, "none"))
+    point = FlowedQuarkRingedNorm(_ringed_params(16, 64, "point"))
+
+    full_attrs = full._metadata_attrs(latt_info, [0.1, 1.0, 1e-10, 300], [2, 4, 7], 1050, 7, 32, 8)
+    point_attrs = point._metadata_attrs(latt_info, [0.1, 1.0, 1e-10, 300], [2, 4, 7], 1050, 7, 384, 8)
+
+    assert full_attrs["noise_generator"] == "splitmix64_global_coordinate_v1"
+    assert full_attrs["noise_counter_order"] == "global_xyzt_spin_color_config_base_stream"
+    assert point_attrs["noise_counter_order"] == "global_xyzt_config_base_stream"
+    assert full_attrs["config_num"] == 1050
+    assert full_attrs["noise_stream"] == 7
+    assert full_attrs["n_zn"] == 4
 
 
 def test_flowed_quark_ringed_base_range_selection(tmp_path):
