@@ -160,13 +160,13 @@ python tests/run_smoke_tests.py
   `GI_PDF(bz=0) = CG_PDF(bz=0) = CG_qTMD(bT=0,bz=0)`.
 - Disconnected qTMD production uses source-independent canonical tags,
   counter-based full-volume `Z4`, base/HP-interval shards, and explicit
-  finalize.  A base is complete only after all HP parts validate.
+  destination-side finalize.
 
 ## Flowed-Quark Ringed Normalization
 
-- Standalone ringed, EMT, and qTMD share base/HP-part shards, strict resume
-  validation, and per-base completion markers.  There is no text sample log or
-  monolithic production mode.
+- Standalone ringed, EMT, and qTMD resume only from a fingerprinted base-level
+  text sample log; production must not require local shards to remain after a
+  base is logged. Finalizers validate parts once while merging at the destination.
 - Point spin-color dilution has 12 channels and a shard part must never split
   one HP pattern across those channels.  The finalized kinetic observable uses
   `spin_color_trace_factor=12`; a plain channel average is wrong.

@@ -13,12 +13,9 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
 )
 from pyquda_measurement_utils.disconnected_shards import (
     SHARD_SCHEMA,
-    base_completion_path,
     base_part_ranges,
-    completion_payload,
-    expected_part_attrs,
+    shard_part_attrs,
     shard_part_path,
-    write_base_completion_marker,
     write_raw_part_hdf5,
 )
 from pyquda_measurement_utils.flowed_quark_ringed_norm import (
@@ -100,18 +97,13 @@ def _ringed_attrs(config_num):
 
 def _write_ringed_base(shard_dir, tag, config_num, base_idx):
     path = shard_part_path(shard_dir, tag, base_idx, 0, 0, 2)
-    attrs = expected_part_attrs(_ringed_attrs(config_num), base_idx, 0, 0, 2, 2)
-    attrs["configured_n_base_noise"] = 1
+    attrs = shard_part_attrs(_ringed_attrs(config_num), base_idx, 0, 0, 2, 2)
     bookkeeping = part_source_bookkeeping(
         base_idx, 0, 2, 2, include_spin_color=True
     )
     kinetic = np.full((2, 3, 4), -(config_num + 1), dtype=np.complex128)
     write_raw_part_hdf5(
         path, {"kinetic_pervec": kinetic}, attrs, bookkeeping
-    )
-    write_base_completion_marker(
-        base_completion_path(shard_dir, tag, base_idx),
-        completion_payload(tag, base_idx, 2, 64, [path]),
     )
 
 

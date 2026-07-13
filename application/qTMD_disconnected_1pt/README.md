@@ -62,13 +62,15 @@ QTMD_1PT_SHARD_DIR=<data>/qTMD1pt/shards
 
 Parts are named
 `<stem>.baseXXXXXX.partXXXX.hpSTART-END.h5`. Rank 0 writes each part through an
-atomic rename. Resume validates metadata, shapes, momentum/Wilson/gamma lists,
-and exact source/base/HP indices. A completion marker is published only after
-all parts of a base pass validation. Different jobs may own non-overlapping
+atomic rename. After all parts of a base close, rank 0 appends one exact base
+line to `<data>/sample_log_disconnected/<canonical-stem>.log`. Resume trusts
+only that fingerprinted log and performs no HDF5 existence or metadata probes;
+an unlogged base is recomputed in full. Different jobs may own non-overlapping
 base ranges; overlapping ranges are unsupported.
 
-The finalizer uses the shared disconnected shard validator and publishes only
-after bases `0 ... N_VEC-1` are complete. The canonical file is
+The destination-side finalizer does not use the log. It checks every expected
+part once while streaming and publishes only after bases `0 ... N_VEC-1` are
+available and mutually compatible. The canonical file is
 
 ```text
 qTMD1pt/<lat>.qTMD1pt.<cfg>.<ama>.<sm>.h5

@@ -27,18 +27,16 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     validate_hierarchical_probing_options,
 )
 from pyquda_measurement_utils.disconnected_shards import (
-    base_completion_path,
+    append_completed_base,
     base_part_ranges,
     canonical_temp_path,
-    completion_payload,
-    expected_part_attrs,
+    discover_shard_layout,
     hp_vectors_per_base,
-    read_base_completion_marker,
+    iter_validated_shard_parts,
+    prepare_sample_log,
     selected_base_range,
+    shard_part_attrs,
     shard_part_path,
-    validate_complete_shard_set,
-    validate_raw_part_hdf5,
-    write_base_completion_marker,
     write_raw_part_hdf5,
 )
 from pyquda_measurement_utils.tools import (
@@ -258,6 +256,7 @@ class FlowedQuarkRingedNorm:
         self.gauge_preprocessing = parameters.get("gauge_preprocessing", "unspecified")
         self.flavor_convention = parameters.get("flavor_convention", "single_flavor_trace_for_this_dirac_operator")
         self.shard_dir = parameters.get("shard_dir")
+        self.sample_log_file = parameters.get("sample_log_file")
         self.base_start = parameters.get("base_start")
         self.base_stop = parameters.get("base_stop")
         self.block_size = int(parameters.get("block_interval_solves", 64))
@@ -395,19 +394,6 @@ class FlowedQuarkRingedNorm:
         nt = global_size[3]
         n_flow = self.flow_steps + 1
 
-        dirac = core.getDirac(
-            latt_info,
-            mass,
-            tol,
-            maxiter,
-            1.0,
-            csw,
-            csw,
-            self.multigrid,
-        )
-        dirac.loadGauge(U)
-        mpi_print(latt_info, "Flowed-quark ringed normalization inverter ready.")
-
         counter_config, counter_stream = self.config_num, int(noise_stream)
         attrs = self._metadata_attrs(
             latt_info,
@@ -426,11 +412,40 @@ class FlowedQuarkRingedNorm:
             if key not in {"n_vec", "effective_n_inversions"}
         }
         common_attrs["output_kind"] = "flowed_quark_ringed_norm"
-        q0_phase = phase.MomentumPhase(latt_info).getPhases([[0, 0, 0]], [0, 0, 0, 0])
         from pyquda import getMPIComm
         comm = getMPIComm()
-        for base_idx in selected_base_range(n_vec, self.base_start or 0, self.base_stop):
-            part_paths = []
+        if self.sample_log_file is None:
+            raise ValueError("sample_log_file is required for base-level resume")
+        if latt_info.mpi_rank == 0:
+            completed_bases = prepare_sample_log(
+                self.sample_log_file, tag, common_attrs
+            )
+        else:
+            completed_bases = None
+        completed_bases = set(comm.bcast(completed_bases, root=0))
+        selected_bases = list(selected_base_range(n_vec, self.base_start or 0, self.base_stop))
+        if all(base_idx in completed_bases for base_idx in selected_bases):
+            mpi_print(latt_info, "All selected ringed bases are complete in the sample log.")
+            return None
+
+        dirac = core.getDirac(
+            latt_info,
+            mass,
+            tol,
+            maxiter,
+            1.0,
+            csw,
+            csw,
+            self.multigrid,
+        )
+        dirac.loadGauge(U)
+        mpi_print(latt_info, "Flowed-quark ringed normalization inverter ready.")
+        q0_phase = phase.MomentumPhase(latt_info).getPhases([[0, 0, 0]], [0, 0, 0, 0])
+
+        for base_idx in selected_bases:
+            if base_idx in completed_bases:
+                mpi_print(latt_info, f"Ringed base SKIP from sample log: base{base_idx:06d}")
+                continue
             for part_idx, hp_start, hp_stop in base_part_ranges(
                 hp_count, self.block_size, solves_per_hp
             ):
@@ -442,25 +457,11 @@ class FlowedQuarkRingedNorm:
                 path = shard_part_path(
                     shard_dir, tag, base_idx, part_idx, hp_start, hp_stop
                 )
-                part_paths.append(path)
-                expected_attrs = expected_part_attrs(
-                    common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
+                write_attrs = shard_part_attrs(
+                    common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count,
+                    solves_per_hp=solves_per_hp,
+                    spin_color_dilution=self.spin_color_dilution,
                 )
-                raw_shapes = {
-                    "kinetic_pervec": (count, n_flow, nt),
-                    **{name: (count,) for name in bookkeeping},
-                }
-                present = (
-                    validate_raw_part_hdf5(
-                        path, expected_attrs, raw_shapes,
-                        source_bookkeeping=bookkeeping,
-                    )
-                    if latt_info.mpi_rank == 0 else None
-                )
-                present = comm.bcast(present, root=0)
-                if present:
-                    mpi_print(latt_info, f"Ringed shard SKIP: {path.name}")
-                    continue
 
                 kinetic_part = np.zeros((count, n_flow, nt), dtype=np.complex128)
                 timers = _reset_block_timers(n_flow, self.flow_steps)
@@ -498,8 +499,6 @@ class FlowedQuarkRingedNorm:
 
                 t0 = _timer_start()
                 if latt_info.mpi_rank == 0:
-                    write_attrs = dict(expected_attrs)
-                    write_attrs["configured_n_base_noise"] = int(n_vec)
                     write_raw_part_hdf5(
                         path, {"kinetic_pervec": kinetic_part}, write_attrs,
                         bookkeeping,
@@ -513,30 +512,8 @@ class FlowedQuarkRingedNorm:
                 comm.Barrier()
 
             if latt_info.mpi_rank == 0:
-                for part_idx, hp_start, hp_stop in base_part_ranges(
-                    hp_count, self.block_size, solves_per_hp
-                ):
-                    bookkeeping = part_source_bookkeeping(
-                        base_idx, hp_start, hp_stop, hp_count,
-                        self.spin_color_dilution, include_spin_color=True,
-                    )
-                    count = len(bookkeeping["source_index"])
-                    validate_raw_part_hdf5(
-                        shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop),
-                        expected_part_attrs(
-                            common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
-                        ),
-                        {"kinetic_pervec": (count, n_flow, nt), **{
-                            name: (count,) for name in bookkeeping
-                        }}, source_bookkeeping=bookkeeping,
-                    )
-                write_base_completion_marker(
-                    base_completion_path(shard_dir, tag, base_idx),
-                    completion_payload(
-                        tag, base_idx, hp_count, self.block_size, part_paths,
-                        solves_per_hp=solves_per_hp,
-                        spin_color_dilution=self.spin_color_dilution,
-                    ),
+                append_completed_base(
+                    self.sample_log_file, tag, common_attrs, base_idx
                 )
             comm.Barrier()
         return None
@@ -544,17 +521,9 @@ class FlowedQuarkRingedNorm:
 
 def finalize_flowed_quark_ringed_norm_shards(shard_dir, canonical_tag, n_base_noise):
     """Stream complete standalone ringed shards into one kinetic-only file."""
-    marker_path = base_completion_path(shard_dir, canonical_tag, 0)
-    marker = read_base_completion_marker(marker_path)
-    if marker is None:
-        raise ValueError(f"missing completion marker for base 0: {marker_path}")
-    spin_color_dilution = marker.get("spin_color_dilution")
-    solves_per_hp = int(marker.get("solves_per_hp", -1))
-    manifest = validate_complete_shard_set(
+    manifest = discover_shard_layout(
         shard_dir, canonical_tag, n_base_noise,
         raw_dataset_names=("kinetic_pervec",),
-        spin_color_dilution=spin_color_dilution,
-        solves_per_hp=solves_per_hp,
         include_spin_color=True,
     )
     attrs = {
@@ -595,14 +564,13 @@ def finalize_flowed_quark_ringed_norm_shards(shard_dir, canonical_tag, n_base_no
             )
         }
         kinetic_sum = np.zeros(kinetic_tail[:-1], dtype=np.complex128)
-        for info in manifest["parts"]:
-            start, stop, path = info["output_start"], info["output_stop"], info["path"]
-            with h5py.File(path, "r") as part:
-                values = part["raw/kinetic_pervec"][()]
-                kinetic[start:stop] = values
-                kinetic_sum += np.sum(values, axis=(0, -1))
-                for name, dataset in book.items():
-                    dataset[start:stop] = part[f"raw/{name}"][()]
+        for info, part in iter_validated_shard_parts(manifest):
+            start, stop = info["output_start"], info["output_stop"]
+            values = part["raw/kinetic_pervec"][()]
+            kinetic[start:stop] = values
+            kinetic_sum += np.sum(values, axis=(0, -1))
+            for name, dataset in book.items():
+                dataset[start:stop] = part[f"raw/{name}"][()]
         out.require_group("avg").create_dataset(
             "kinetic_spacetime",
             data=trace_factor * kinetic_sum / total_sources / nt,

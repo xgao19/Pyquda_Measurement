@@ -12,6 +12,6 @@ files are kinetic-only. See
 `docs/flowed_quark_ringed_norm/flowed_quark_ringed_norm.md` for schema and
 normalization rules.
 
-The former platform-specific HP convergence scripts, `.block*.h5` checkpoint
-format, and text sample log were removed. Resume is now the same strict
-base/HP-part validation used by EMT and qTMD.
+The former `.block*.h5` format is not supported. Resume uses the same
+fingerprinted base-level text log as EMT and qTMD and deliberately does not
+probe HDF5 files, allowing completed shards to be transferred immediately.

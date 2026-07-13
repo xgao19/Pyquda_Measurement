@@ -36,6 +36,15 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Unified shared quark/gluon flow epsilon defaults at `0.207936`, changed gluon
   loops to one source-independent canonical file per configuration, and removed
   duplicate hadron-specific gluon wrappers.
+
+## 2026-07-13: Restore lightweight disconnected sample-log resume
+
+- Replaced EMT, qTMD, and standalone ringed JSON completion markers and HDF5
+  resume probes with one fingerprinted text log and one exact line per complete base.
+- Production now trusts the log even after shards have been transferred; an
+  unlogged base is recomputed in full and atomically replaces its part files.
+- Finalizers no longer prevalidate every shard. They infer layout from base 0
+  and validate each expected part once while streaming canonical output.
 - Required explicit CLI configuration identity throughout disconnected EMT,
   disconnected qTMD, and standalone ringed production and analysis entry points.
 - Updated the durable Perlmutter memory to use the `software_gradientflow`

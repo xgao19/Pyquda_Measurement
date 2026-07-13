@@ -15,9 +15,10 @@ required; the stream salt is stored as `noise_stream`.
 Standalone ringed now uses exactly the same base/HP-part infrastructure as EMT
 and disconnected qTMD. A part contains a contiguous HP interval from one base,
 raw `kinetic_pervec`, and global source/base/HP/spin/color bookkeeping. Rank 0
-writes atomically, resume uses the shared strict validator, and a per-base JSON
-completion marker is the scheduler signal. There is no `.block*.h5` format or
-text sample log.
+writes atomically. Only after all parts close does it append one exact base line
+to a fingerprinted text log under `sample_log_disconnected/`. Resume reads only
+this log and does not require transferred HDF5 files to remain locally. There
+is no JSON completion marker or `.block*.h5` compatibility path.
 
 Point spin-color dilution costs 12 solves per HP pattern. A part boundary never
 splits those 12 projectors. The finalized trace multiplies the raw channel
@@ -25,8 +26,8 @@ average by `spin_color_trace_factor=12`.
 
 ## Finalization and ensemble analysis
 
-Measurement jobs write shards only. Publish one configuration after all bases
-are complete:
+Measurement jobs write shards only. Transfer the parts, then publish one
+configuration at the destination after all bases are available:
 
 ```bash
 python application/flowed_quark_ringed_norm/finalize_ringed_shards.py \

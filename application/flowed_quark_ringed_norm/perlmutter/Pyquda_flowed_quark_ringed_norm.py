@@ -3,6 +3,7 @@ import os
 
 from pyquda import init
 from pyquda_utils import io
+from pyquda_measurement_utils.disconnected_shards import disconnected_sample_log_path
 
 
 def parse_triplet(text):
@@ -80,6 +81,8 @@ from pyquda_measurement_utils.tools import mpi_print  # noqa: E402
 
 
 tag = get_flowed_quark_ringed_norm_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
+output_tag = os.environ.get("FLOWED_RINGED_OUT", tag)
+parameters["sample_log_file"] = disconnected_sample_log_path(data_dir, output_tag)
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 gauge.hypSmear(1, 0.75, 0.6, 0.3, hyp_project)
@@ -119,5 +122,5 @@ ringed_norm.flowed_kinetic_norm(
     gauge,
     invPara,
     randPara,
-    tag=os.environ.get("FLOWED_RINGED_OUT", tag),
+    tag=output_tag,
 )

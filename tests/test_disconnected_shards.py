@@ -1,5 +1,5 @@
-import json
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import h5py
 import numpy as np
@@ -17,14 +17,14 @@ from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
 )
 from pyquda_measurement_utils.disconnected_shards import (
     SHARD_SCHEMA,
-    base_completion_path,
+    append_completed_base,
     base_part_ranges,
-    completion_payload,
-    expected_part_attrs,
     hp_vectors_per_base,
+    prepare_sample_log,
+    sample_log_fingerprint,
     selected_base_range,
+    shard_part_attrs,
     shard_part_path,
-    write_base_completion_marker,
     write_raw_part_hdf5,
 )
 
@@ -75,18 +75,16 @@ def _common_attrs(configured_n_vec):
         "noise_scheme": "hierarchical_probing",
         "hp_num_vectors": 2,
         "hp_ordering": "interleaved_xyzt_binary_projected_to_evenodd",
-        "configured_n_base_noise": configured_n_vec,
+        "n_vec": configured_n_vec,
     }
 
 
 def _write_synthetic_base(shard_dir, tag, base_idx, configured_n_vec):
-    part_paths = []
     for part_idx, hp_start, hp_stop in base_part_ranges(2, 1):
         path = shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop)
         common = _common_attrs(configured_n_vec)
-        configured = common.pop("configured_n_base_noise")
-        attrs = expected_part_attrs(common, base_idx, part_idx, hp_start, hp_stop, 2)
-        attrs["configured_n_base_noise"] = configured
+        common.pop("n_vec")
+        attrs = shard_part_attrs(common, base_idx, part_idx, hp_start, hp_stop, 2)
         source_idx = base_idx * 2 + hp_start
         tmunu = np.zeros((1, 4, 4, 2, 2, 3), dtype=np.complex128)
         for mu in range(4):
@@ -102,11 +100,6 @@ def _write_synthetic_base(shard_dir, tag, base_idx, configured_n_vec):
                 "hp_index": [hp_start],
             },
         )
-        part_paths.append(path)
-    write_base_completion_marker(
-        base_completion_path(shard_dir, tag, base_idx),
-        completion_payload(tag, base_idx, 2, 1, part_paths),
-    )
 
 
 def test_emt_finalize_streams_shards_and_builds_kinetic_companion(tmp_path):
@@ -138,9 +131,11 @@ def test_finalize_rejects_partial_base_and_preserves_old_canonical(tmp_path):
     Path(tag).parent.mkdir(parents=True)
     with h5py.File(tag + ".h5", "w") as h5:
         h5.attrs["sentinel"] = "old"
+    shard_dir = tmp_path / "EMTc" / "shards"
+    _write_synthetic_base(shard_dir, tag, 0, configured_n_vec=2)
 
-    with pytest.raises(ValueError, match="missing completion marker"):
-        finalize_emt_quark_1pt_shards(tmp_path / "EMTc" / "shards", tag, ringed_tag, 1)
+    with pytest.raises(ValueError, match="filename coverage mismatch"):
+        finalize_emt_quark_1pt_shards(shard_dir, tag, ringed_tag, 2)
 
     with h5py.File(tag + ".h5", "r") as h5:
         assert h5.attrs["sentinel"] == "old"
@@ -148,7 +143,7 @@ def test_finalize_rejects_partial_base_and_preserves_old_canonical(tmp_path):
 
 def _write_synthetic_qtmd_base(shard_dir, tag, base_idx, legacy=False):
     path = shard_part_path(shard_dir, tag, base_idx, 0, 0, 1)
-    attrs = expected_part_attrs({
+    attrs = shard_part_attrs({
         "measurement": "disconnected_qTMD_1pt",
         "output_kind": "disconnected_qTMD_1pt",
         "shard_schema": SHARD_SCHEMA,
@@ -188,10 +183,49 @@ def _write_synthetic_qtmd_base(shard_dir, tag, base_idx, legacy=False):
         {"source_index": [base_idx], "base_noise_index": [base_idx], "hp_index": [0]},
         metadata_datasets=metadata,
     )
-    write_base_completion_marker(
-        base_completion_path(shard_dir, tag, base_idx),
-        completion_payload(tag, base_idx, 1, 64, [path]),
-    )
+
+
+def test_sample_log_is_exact_hdf5_independent_and_nvec_extensible(tmp_path):
+    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
+    log = tmp_path / "sample.log"
+    attrs_one = _common_attrs(1)
+    attrs_many = _common_attrs(128)
+    assert sample_log_fingerprint(attrs_one) == sample_log_fingerprint(attrs_many)
+
+    assert prepare_sample_log(log, tag, attrs_one) == set()
+    assert append_completed_base(log, tag, attrs_one, 1)
+    assert append_completed_base(log, tag, attrs_one, 10)
+    assert not append_completed_base(log, tag, attrs_one, 1)
+    assert prepare_sample_log(log, tag, attrs_many) == {1, 10}
+
+    lines = log.read_text().splitlines()
+    assert lines[1:] == ["base000001", "base000010"]
+    assert not list(tmp_path.rglob("*.h5"))
+
+
+def test_sample_log_header_mismatch_fails_without_hdf5_probe(tmp_path):
+    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
+    log = tmp_path / "sample.log"
+    attrs = _common_attrs(1)
+    prepare_sample_log(log, tag, attrs)
+    changed = dict(attrs)
+    changed["noise_stream"] = 99
+    with pytest.raises(ValueError, match="header mismatch"):
+        prepare_sample_log(log, tag, changed)
+
+
+def test_sample_log_parallel_nonoverlapping_base_appends(tmp_path):
+    tag = str(tmp_path / "qTMD1pt" / "lat.qTMD1pt.9.0.sm")
+    log = tmp_path / "sample.log"
+    attrs = _common_attrs(8)
+    prepare_sample_log(log, tag, attrs)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(
+            lambda base: append_completed_base(log, tag, attrs, base),
+            range(8),
+        ))
+    assert all(results)
+    assert prepare_sample_log(log, tag, attrs) == set(range(8))
 
 
 def test_qtmd_finalize_streams_source_independent_canonical(tmp_path):
@@ -226,6 +260,38 @@ def test_qtmd_finalize_rejects_legacy_trace_and_preserves_canonical(tmp_path):
 
     with pytest.raises(ValueError, match="old disconnected qTMD data"):
         finalize_disconnected_qtmd_1pt_shards(shard_dir, tag, 1)
+
+    with h5py.File(tag + ".h5", "r") as h5:
+        assert h5.attrs["sentinel"] == "old"
+
+
+def test_qtmd_finalize_rejects_duplicate_part_interval(tmp_path):
+    tag = str(tmp_path / "qTMD1pt" / "lat.qTMD1pt.9.0.sm")
+    shard_dir = tmp_path / "qTMD1pt" / "shards"
+    _write_synthetic_qtmd_base(shard_dir, tag, 0)
+    duplicate = shard_dir / (
+        Path(tag).name + ".base000000.part0000.hp0000-0001.h5"
+    )
+    with h5py.File(duplicate, "w"):
+        pass
+    with pytest.raises(ValueError, match="exactly one base-0 part-0"):
+        finalize_disconnected_qtmd_1pt_shards(shard_dir, tag, 1)
+
+
+def test_qtmd_finalize_rejects_mixed_metadata_during_streaming(tmp_path):
+    tag = str(tmp_path / "qTMD1pt" / "lat.qTMD1pt.9.0.sm")
+    shard_dir = tmp_path / "qTMD1pt" / "shards"
+    _write_synthetic_qtmd_base(shard_dir, tag, 0)
+    _write_synthetic_qtmd_base(shard_dir, tag, 1)
+    second = shard_part_path(shard_dir, tag, 1, 0, 0, 1)
+    with h5py.File(second, "r+") as h5:
+        h5["W_index_list"][0, 1] = 99
+    Path(tag).parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(tag + ".h5", "w") as h5:
+        h5.attrs["sentinel"] = "old"
+
+    with pytest.raises(ValueError, match="incompatible metadata"):
+        finalize_disconnected_qtmd_1pt_shards(shard_dir, tag, 2)
 
     with h5py.File(tag + ".h5", "r") as h5:
         assert h5.attrs["sentinel"] == "old"

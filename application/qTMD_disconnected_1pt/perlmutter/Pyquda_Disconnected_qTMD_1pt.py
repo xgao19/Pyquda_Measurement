@@ -5,6 +5,7 @@ from pyquda import init
 from pyquda_utils import io
 
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import DisconnectedQuarkqTMD1pt
+from pyquda_measurement_utils.disconnected_shards import disconnected_sample_log_path
 from pyquda_measurement_utils.io_corr import get_disconnected_qTMD_loop_file_tag
 
 
@@ -68,14 +69,16 @@ randPara = [
 ]
 
 measurement = DisconnectedQuarkqTMD1pt(parameters)
+output_tag = os.environ.get("QTMD_1PT_OUT", tag)
 measurement.measure_1pt(
     gauge,
     invPara,
     randPara,
-    tag=os.environ.get("QTMD_1PT_OUT", tag),
+    tag=output_tag,
     operator_kind=operator_kind,
     shard_dir=os.environ.get("QTMD_1PT_SHARD_DIR", os.path.join(data_dir, "qTMD1pt", "shards")),
     base_start=int(os.environ.get("QTMD_1PT_BASE_START", "0")),
     base_stop=int(os.environ.get("QTMD_1PT_BASE_STOP", str(randPara[0]))),
     block_interval_solves=int(os.environ.get("QTMD_1PT_BLOCK_INTERVAL_SOLVES", "64")),
+    sample_log_file=disconnected_sample_log_path(data_dir, output_tag),
 )

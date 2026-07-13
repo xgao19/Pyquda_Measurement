@@ -333,8 +333,11 @@ factor \(Z_{\mathrm{ring}}\), because the square roots from \(\chi\) and
 is kept as an unflowed diagnostic and must be excluded from Eq.~\eqref{eq:ringed_z_single_flavor}.
 The standalone \code{application/flowed\_quark\_ringed\_norm} workflow remains
 available for dedicated high-statistics and spin--color-diluted calculations.
-It uses the same base/HP-part validator and completion markers as EMT; no
-separate text sample log is used.
+It uses the same base/HP-part files and fingerprinted base-level text sample
+log as EMT.  Production resume trusts this log without probing HDF5, so a
+logged base may be transferred immediately.  Finalization is performed where
+all parts are collected and checks each part once while streaming the canonical
+file.
 
 \subsection{Gradient-Flow Schedule for Quarks}
 
@@ -623,22 +626,24 @@ estimator unit,
 \end{equation}
 Inside one base the code writes fixed solve intervals, defaulting to 64
 inversions.  Thus HP256 normally produces four part files, while HP16 and plain
-\(\mathbb Z_4\) produce one.  A partial HP part is a recovery checkpoint and is
-not marked as a complete estimator.
+\(\mathbb Z_4\) produce one.  A partial HP part limits memory and transfer size,
+but is neither a complete estimator nor an independent resume unit.
 
 Part names encode the base, part, and HP interval, for example
 \begin{verbatim}
 <canonical-stem>.base000003.part0001.hp0064-0127.h5
 \end{verbatim}
 Only MPI rank zero writes HDF5.  Each part is first written to a unique temporary
-path and then atomically renamed.  Resume reopens existing parts and validates
-their physics metadata, shapes, and source indices; compatible parts are
-skipped, while conflicting or corrupt files cause an error.  A base completion
-marker is published only after every expected part has been revalidated.
+path and then atomically renamed.  After every part of a base closes, rank zero
+appends one exact \code{baseXXXXXX} line to a fingerprinted text sample log.
+Resume reads only this log and performs no HDF5 probe, so a logged base may
+already have been transferred.  If a base is not logged, all of its parts are
+recomputed and atomically replaced.
 
 Measurement jobs do not update the canonical file.  A separate serial
-finalizer requires complete coverage of bases \(0,\ldots,N_{\mathrm{base}}-1\),
-streams the raw datasets into a temporary canonical EMTc file, accumulates the
+finalizer runs where all parts have been collected and requires complete
+coverage of bases \(0,\ldots,N_{\mathrm{base}}-1\).  It checks each expected
+part once while streaming raw datasets into a temporary canonical EMTc file, accumulates the
 averages without holding the complete source axis in memory, and derives the
 kinetic companion from the \(q=0\) diagonal tensor.  The completed companion is
 published before the canonical EMTc file, so downstream analysis never sees a

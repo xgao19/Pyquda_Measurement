@@ -284,18 +284,20 @@ estimator is
   L_b=\frac{1}{N_{\mathrm{HP}}}
   \sum_{h=0}^{N_{\mathrm{HP}}-1}L_{b,h}.
 \end{equation}
-Part files contain at most 64 solves by default.  A partial HP part is a
-checkpoint only; a base completion marker is atomically published after every
-part has been reopened and its metadata, shape, and source indices validated.
-Compatible parts are skipped on resume, while incompatible or corrupt parts
-cause an error.
+Part files contain at most 64 solves by default.  A partial HP part is only a
+memory and transfer unit, not an independent resume unit.  After all parts of one base have been atomically written,
+rank 0 appends one exact \code{baseXXXXXX} line to a fingerprinted text sample
+log.  Production resume reads only this log and never probes shard HDF5 files;
+therefore logged parts may already have been transferred.  An unlogged base is
+recomputed in full.
 
 Measurement jobs do not publish the canonical loop.  A separate serial
-finalizer requires complete coverage of all configured bases and streams each
-part into a temporary canonical HDF5 file while accumulating the average
-without retaining the full source axis.  Only after successful validation and
-writeout is the canonical file atomically replaced.  Non-overlapping base
-ranges can be scheduled independently; overlapping jobs are unsupported.
+finalizer runs where all parts have been collected.  It infers the layout from
+base 0, checks each expected part once while streaming it into a temporary
+canonical HDF5 file, and accumulates the average without retaining the full
+source axis.  Only after successful writeout is the canonical file atomically
+replaced.  Non-overlapping base ranges can be scheduled independently;
+overlapping jobs are unsupported.
 
 \section{HDF5 Layout}
 

@@ -284,14 +284,15 @@ For quark/gluon one-point data:
   no inversions, flow updates, or derivative contractions.
 - The standalone `application/flowed_quark_ringed_norm` workflow remains
   available for dedicated high-statistics and dilution runs.  It uses the same
-  base/HP-part shards, validator, completion markers, and explicit finalization
-  as EMT/qTMD; no separate text sample log is used.  Final ringed factors are
+  base/HP-part shards, base-level sample log, and explicit finalization as
+  EMT/qTMD.  Production resume trusts the log and does not probe shard files,
+  so completed parts may be moved before the remaining bases run. Final ringed factors are
   computed from the ensemble-averaged kinetic
   expectation value, not by averaging per-configuration inverse factors.
 - Production quark 1pt wrappers default to base/HP interval shards.  Completed
-  bases can be resumed independently, and an explicit streaming finalizer
-  publishes the canonical EMTc and FlowedQuarkRinged files only after complete
-  base coverage is validated.
+  bases are recorded as exact lines in a lightweight text log. An explicit
+  destination-side streaming finalizer checks parts while merging and publishes
+  canonical EMTc and FlowedQuarkRinged files only after complete base coverage.
 - Gluon 1pt stores the flowed gluonic EMT building block.
 - Renormalized gradient-flow EMT combinations, vacuum subtractions, and mixing
   coefficients are applied in downstream analysis, not inside these kernels.

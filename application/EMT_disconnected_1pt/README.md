@@ -284,15 +284,18 @@ EMT_1PT_SHARD_DIR=<data>/EMTc/shards
 ```
 
 Each part is named with its base, part, and half-open HP interval, for example
-`base000003.part0001.hp0064-0127.h5`.  Existing compatible parts are skipped;
-missing parts are computed.  A base completion marker is written only after
-all its parts are reopened and validated.  Partial HP parts are checkpoints,
-not complete estimators.  Jobs may process non-overlapping base ranges in
-parallel, but overlapping ranges are unsupported.
+`base000003.part0001.hp0064-0127.h5`. After every part of a base is atomically
+written, rank 0 appends `base000003` to
+`<data>/sample_log_disconnected/<canonical-stem>.log`. Resume reads only this
+log and never probes HDF5, so logged shards may already have been transferred.
+An unlogged base is recomputed from its first HP vector. Partial HP parts are
+not independently resumable estimators. Jobs may process non-overlapping base
+ranges in parallel, but overlapping ranges are unsupported.
 
 There is no monolithic production mode.  Configuration identity is accepted
 only through the required `--config_num` CLI option; it is never inferred from
 an environment variable or silently defaulted to zero.  Small numerical references belong in
-tests; the production shard path never overwrites a conflicting or corrupt
-part automatically.  `config_num` is mandatory and HDF5 provenance stores only
+tests. The destination-side finalizer checks schema, metadata, HP coverage and
+bookkeeping once while merging; it does not use the production sample log.
+`config_num` is mandatory and HDF5 provenance stores only
 `noise_stream`, not a duplicate `rand_seed` alias.

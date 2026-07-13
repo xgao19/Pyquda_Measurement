@@ -11,5 +11,6 @@ canonical configuration files with `../analyze_ringed_ensemble.py`. The
 per-configuration file stores kinetic data only. Full conventions are in
 `docs/flowed_quark_ringed_norm/flowed_quark_ringed_norm.md`.
 
-The old platform-specific HP convergence scripts and text sample-log model were
-removed in favor of the shared disconnected shard validator.
+The old platform-specific HP convergence scripts were removed. Resume now
+uses the shared fingerprinted base-level sample log and does not probe HDF5,
+so logged shards may be transferred before later bases run.

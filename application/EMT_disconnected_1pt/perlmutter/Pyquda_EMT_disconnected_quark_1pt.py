@@ -5,6 +5,7 @@ from pyquda import init
 from pyquda_utils import io
 
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import EMTDisconnectedQuark1pt
+from pyquda_measurement_utils.disconnected_shards import disconnected_sample_log_path
 from pyquda_measurement_utils.io_corr import (
     get_emt_quark_loop_file_tag,
     get_flowed_quark_ringed_norm_file_tag,
@@ -79,13 +80,15 @@ block_interval_solves = int(os.environ.get("EMT_1PT_BLOCK_INTERVAL_SOLVES", "64"
 shard_dir = os.environ.get("EMT_1PT_SHARD_DIR", os.path.join(data_dir, "EMTc", "shards"))
 
 quark_1pt = EMTDisconnectedQuark1pt(parameters)
+output_tag = os.environ.get("EMT_1PT_QUARK_OUT", quark_1pt_tag)
 quark_1pt.flowed_fermionic_1pt(
     gauge,
     invPara,
     randPara,
-    tag=os.environ.get("EMT_1PT_QUARK_OUT", quark_1pt_tag),
+    tag=output_tag,
     ringed_tag=os.environ.get("EMT_1PT_RINGED_OUT", ringed_tag),
     shard_dir=shard_dir,
+    sample_log_file=disconnected_sample_log_path(data_dir, output_tag),
     base_start=base_start,
     base_stop=base_stop,
     block_interval_solves=block_interval_solves,

@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 
+import pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop as emt_module
+
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedQuark1pt,
     _flow_times,
@@ -10,6 +12,10 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     validate_quark_gluon_loop_axes,
 )
 from pyquda_measurement_utils.flowed_quark_ringed_norm import kinetic_spacetime_from_raw
+from pyquda_measurement_utils.disconnected_shards import (
+    append_completed_base,
+    prepare_sample_log,
+)
 
 
 def test_flow_times_include_zero_flow_and_regular_steps():
@@ -117,6 +123,59 @@ def test_counter_configuration_validation_precedes_inverter_setup():
             FakeGauge(), [0.1, 1.0, 1e-10, 10], [1, 4, 0],
             tag="emt", ringed_tag="ringed",
         )
+
+
+def test_logged_base_skips_before_inverter_and_without_hdf5(tmp_path, monkeypatch):
+    class FakeLatticeInfo:
+        global_size = [2, 2, 2, 2]
+        t_boundary = -1
+        mpi_rank = 0
+
+    class FakeGauge:
+        latt_info = FakeLatticeInfo()
+
+    class FakeComm:
+        @staticmethod
+        def bcast(value, root=0):
+            return value
+
+    measurement = EMTDisconnectedQuark1pt({
+        "config_num": 17,
+        "qext": [[0, 0, 0, 0]],
+        "pf": [0, 0, 0, 0],
+        "p_2pt": [[0, 0, 0, 0]],
+        "pos_boost": [0, 0, 0],
+        "neg_boost": [0, 0, 0],
+        "width": 1.0,
+        "flow_type": "wilson",
+        "flow_epsilon": 0.1,
+        "flow_steps": 1,
+    })
+    inv = [0.1, 1.0, 1e-10, 10]
+    rand = [1, 4, 0]
+    tag = str(tmp_path / "lat.EMTc.17.0.sm")
+    log = tmp_path / "sample.log"
+    attrs = measurement._measurement_attrs(
+        FakeLatticeInfo(), inv, rand, 17, 0, 1, 8
+    )
+    common = {
+        key: value for key, value in attrs.items()
+        if key not in {"n_vec", "n_base_noise", "effective_n_inversions"}
+    }
+    common["output_kind"] = "emt_quark_1pt"
+    common["block_interval_solves"] = 64
+    prepare_sample_log(log, tag, common)
+    append_completed_base(log, tag, common, 0)
+
+    monkeypatch.setattr(emt_module, "getMPIComm", lambda: FakeComm())
+    monkeypatch.setattr(
+        emt_module.core, "getDirac",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("inverter should not initialize")),
+    )
+    assert measurement.flowed_fermionic_1pt(
+        FakeGauge(), inv, rand, tag=tag, sample_log_file=log
+    ) == (None, None)
+    assert not list(tmp_path.rglob("*.h5"))
 
 
 def test_quark_gluon_axes_must_match_before_analysis():

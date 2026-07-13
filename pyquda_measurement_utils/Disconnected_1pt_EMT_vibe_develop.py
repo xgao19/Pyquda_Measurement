@@ -23,17 +23,16 @@ from pyquda_measurement_utils.io_corr import (
     save_emt_gluon_1pt_hdf5,
 )
 from pyquda_measurement_utils.disconnected_shards import (
-    base_completion_path,
+    append_completed_base,
     base_part_ranges,
     canonical_temp_path,
-    completion_payload,
-    expected_part_attrs,
+    discover_shard_layout,
     hp_vectors_per_base,
+    iter_validated_shard_parts,
+    prepare_sample_log,
     selected_base_range,
+    shard_part_attrs,
     shard_part_path,
-    validate_raw_part_hdf5,
-    validate_complete_shard_set,
-    write_base_completion_marker,
     write_raw_part_hdf5,
 )
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
@@ -283,7 +282,8 @@ class EMTDisconnectedQuark1pt:
 
     def _measure_base_shards(
         self, U, dirac, invPara, randPara, tag, phases_3pt, attrs,
-        shard_dir, base_start, base_stop, block_interval_solves,
+        shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
+        completed_bases,
     ):
         n_vec, n_zn, _ = randPara
         hp_count = hp_vectors_per_base(self.noise_scheme, self.hp_num_vectors)
@@ -299,12 +299,15 @@ class EMTDisconnectedQuark1pt:
         comm = getMPIComm()
 
         for base_idx in selected_base_range(n_vec, base_start, base_stop):
-            part_paths = []
+            if base_idx in completed_bases:
+                mpi_print(U.latt_info, f"EMT base SKIP from sample log: base{base_idx:06d}")
+                continue
             for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
                 count = hp_stop - hp_start
                 path = shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop)
-                part_paths.append(path)
-                expected_attrs = expected_part_attrs(common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count)
+                write_attrs = shard_part_attrs(
+                    common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
+                )
                 raw_shapes = {
                     "Tmunu_pervec": (count, 4, 4, len(self.qlist), n_flow, nt),
                     "CHI_pervec": (count, 2, len(self.qlist), n_flow, nt),
@@ -315,18 +318,6 @@ class EMTDisconnectedQuark1pt:
                 bookkeeping = part_source_bookkeeping(
                     base_idx, hp_start, hp_stop, hp_count
                 )
-                if U.latt_info.mpi_rank == 0:
-                    present = validate_raw_part_hdf5(
-                        path, expected_attrs, raw_shapes,
-                        source_bookkeeping=bookkeeping,
-                    )
-                else:
-                    present = None
-                present = comm.bcast(present, root=0)
-                if present:
-                    mpi_print(U.latt_info, f"EMT shard SKIP: {path.name}")
-                    continue
-
                 tmunu_part = np.zeros(raw_shapes["Tmunu_pervec"], dtype=np.complex128)
                 chi_part = np.zeros(raw_shapes["CHI_pervec"], dtype=np.complex128)
                 for _, _, hp_idx, xi in iter_noise_base_hp_interval(
@@ -343,8 +334,6 @@ class EMTDisconnectedQuark1pt:
                         U, xi, eta, phases_3pt
                     )
                 if U.latt_info.mpi_rank == 0:
-                    write_attrs = dict(expected_attrs)
-                    write_attrs["configured_n_base_noise"] = int(n_vec)
                     write_raw_part_hdf5(
                         path,
                         {"Tmunu_pervec": tmunu_part, "CHI_pervec": chi_part},
@@ -354,20 +343,8 @@ class EMTDisconnectedQuark1pt:
                 comm.Barrier()
 
             if U.latt_info.mpi_rank == 0:
-                for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
-                    count = hp_stop - hp_start
-                    path = shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop)
-                    expected_attrs = expected_part_attrs(common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count)
-                    validate_raw_part_hdf5(path, expected_attrs, {
-                        "Tmunu_pervec": (count, 4, 4, len(self.qlist), n_flow, nt),
-                        "CHI_pervec": (count, 2, len(self.qlist), n_flow, nt),
-                        "source_index": (count,), "base_noise_index": (count,), "hp_index": (count,),
-                    }, source_bookkeeping=part_source_bookkeeping(
-                        base_idx, hp_start, hp_stop, hp_count
-                    ))
-                write_base_completion_marker(
-                    base_completion_path(shard_dir, tag, base_idx),
-                    completion_payload(tag, base_idx, hp_count, block_interval_solves, part_paths),
+                append_completed_base(
+                    sample_log_file, tag, common_attrs, base_idx
                 )
             comm.Barrier()
         return None, None
@@ -380,6 +357,7 @@ class EMTDisconnectedQuark1pt:
         tag: str = "",
         ringed_tag=None,
         shard_dir=None,
+        sample_log_file=None,
         base_start=0,
         base_stop=None,
         block_interval_solves=64,
@@ -405,6 +383,27 @@ class EMTDisconnectedQuark1pt:
         counter_config = int(self.config_num)
         counter_stream = int(randseed)
 
+        n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
+        attrs = self._measurement_attrs(latt_info, invPara, randPara, counter_config, counter_stream, n_eff, Ns3)
+        if sample_log_file is None:
+            raise ValueError("sample_log_file is required for base-level resume")
+        common_attrs = {
+            key: value for key, value in attrs.items()
+            if key not in {"n_vec", "n_base_noise", "effective_n_inversions"}
+        }
+        common_attrs["output_kind"] = "emt_quark_1pt"
+        common_attrs["block_interval_solves"] = int(block_interval_solves)
+        comm = getMPIComm()
+        if latt_info.mpi_rank == 0:
+            completed_bases = prepare_sample_log(sample_log_file, tag, common_attrs)
+        else:
+            completed_bases = None
+        completed_bases = set(comm.bcast(completed_bases, root=0))
+        selected_bases = list(selected_base_range(n_vec, base_start, base_stop))
+        if all(base_idx in completed_bases for base_idx in selected_bases):
+            mpi_print(latt_info, "All selected EMT bases are complete in the sample log.")
+            return None, None
+
         mpi_print(latt_info, f"t_boundary = {latt_info.t_boundary}")
         dirac = core.getDirac(
             latt_info,
@@ -419,13 +418,12 @@ class EMTDisconnectedQuark1pt:
         dirac.loadGauge(U)
         mpi_print(latt_info, "Multigrid inverter ready.")
 
-        n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
         qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
         phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, [0, 0, 0, 0])
-        attrs = self._measurement_attrs(latt_info, invPara, randPara, counter_config, counter_stream, n_eff, Ns3)
         return self._measure_base_shards(
             U, dirac, invPara, randPara, tag, phases_3pt, attrs,
-            shard_dir, base_start, base_stop, block_interval_solves,
+            shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
+            completed_bases,
         )
 
     @staticmethod
@@ -523,7 +521,7 @@ def _copy_h5_attrs(obj, attrs):
 def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, ringed_tag, n_base_noise):
     """Validate complete EMT base shards and atomically build canonical outputs."""
     n_base_noise = int(n_base_noise)
-    manifest = validate_complete_shard_set(
+    manifest = discover_shard_layout(
         shard_dir, canonical_tag, n_base_noise,
         raw_dataset_names=("Tmunu_pervec", "CHI_pervec"),
     )
@@ -589,26 +587,24 @@ def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, ringed_tag, n_base_n
         }
         kinetic_sum = np.zeros(n_flow, dtype=np.complex128)
 
-        for part_info in all_parts:
-            path = part_info["path"]
+        for part_info, part in iter_validated_shard_parts(manifest):
             start = part_info["output_start"]
             stop = part_info["output_stop"]
-            with h5py.File(path, "r") as part:
-                t_data = part["raw/Tmunu_pervec"][()]
-                chi_data = part["raw/CHI_pervec"][()]
-                raw_t[start:stop] = t_data
-                raw_chi[start:stop] = chi_data
-                t_sum += np.sum(t_data, axis=0)
-                chi_sum += np.sum(chi_data, axis=0)
-                for name, dataset in source_datasets.items():
-                    dataset[start:stop] = part[f"raw/{name}"][()]
-                kinetic = ringed_kinetic_pervec_from_emt(t_data, q0_index, spatial_volume)
-                ring_k[start:stop] = kinetic
-                kinetic_sum += np.sum(kinetic, axis=(0, -1))
-                for name in ("source_index", "base_noise_index", "hp_index"):
-                    ring_sources[name][start:stop] = part[f"raw/{name}"][()]
-                ring_sources["spin_index"][start:stop] = -1
-                ring_sources["color_index"][start:stop] = -1
+            t_data = part["raw/Tmunu_pervec"][()]
+            chi_data = part["raw/CHI_pervec"][()]
+            raw_t[start:stop] = t_data
+            raw_chi[start:stop] = chi_data
+            t_sum += np.sum(t_data, axis=0)
+            chi_sum += np.sum(chi_data, axis=0)
+            for name, dataset in source_datasets.items():
+                dataset[start:stop] = part[f"raw/{name}"][()]
+            kinetic = ringed_kinetic_pervec_from_emt(t_data, q0_index, spatial_volume)
+            ring_k[start:stop] = kinetic
+            kinetic_sum += np.sum(kinetic, axis=(0, -1))
+            for name in ("source_index", "base_noise_index", "hp_index"):
+                ring_sources[name][start:stop] = part[f"raw/{name}"][()]
+            ring_sources["spin_index"][start:stop] = -1
+            ring_sources["color_index"][start:stop] = -1
 
         avg = out.require_group("avg")
         avg.create_dataset("CHI", data=chi_sum / total_sources / spatial_volume)
