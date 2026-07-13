@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
+  echo "Usage: $0 --config_num CFG" >&2
+  exit 2
+fi
+config_num="$2"
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$script_dir"
 
@@ -24,7 +30,7 @@ echo "  python=$(which python)"
 echo "  QUDA_PATH=$QUDA_PATH"
 
 /opt/cray/pals/1.8/bin/mpiexec -n "$FLOWED_RINGED_NRANKS" -envall \
-  bash "$script_dir/run_flowed_quark_ringed_norm.sh" \
+  bash "$script_dir/run_flowed_quark_ringed_norm.sh" --config_num "$config_num" \
   > "log/smoke_n${FLOWED_RINGED_NRANKS}.o" \
   2> "log/smoke_n${FLOWED_RINGED_NRANKS}.e"
 

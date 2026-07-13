@@ -332,8 +332,9 @@ factor \(Z_{\mathrm{ring}}\), because the square roots from \(\chi\) and
 \(\bar\chi\) multiply to this single bilinear factor.  The \(\Tf=0\) output step
 is kept as an unflowed diagnostic and must be excluded from Eq.~\eqref{eq:ringed_z_single_flavor}.
 The standalone \code{application/flowed\_quark\_ringed\_norm} workflow remains
-available for dedicated high-statistics, spin--color dilution, interval-block,
-and resume calculations.
+available for dedicated high-statistics and spin--color-diluted calculations.
+It uses the same base/HP-part validator and completion markers as EMT; no
+separate text sample log is used.
 
 \subsection{Gradient-Flow Schedule for Quarks}
 
@@ -557,8 +558,8 @@ For example, with \(\code{n\_vec}=1\) and
 
 \section{Quark HDF5 Layout}
 
-The quark writer is \code{save\_emt\_quark\_1pt\_hdf5}.  The main raw datasets
-are
+The production measurement writes validated base/HP shards and the explicit
+finalizer streams them into the canonical file.  The main raw datasets are
 \begin{align}
   \code{raw/Tmunu\_pervec}
   &:
@@ -613,7 +614,8 @@ schedule, and exact EMT-to-kinetic relation are recorded alongside it.
 
 \subsection{Base-Oriented Production, Checkpoints, and Finalization}
 
-The production wrapper defaults to \code{output\_mode=base\_shards}.  A base
+The production wrapper has a single shard output path; there is no monolithic
+production mode.  A base
 noise and all of its hierarchical-probing vectors form the natural complete
 estimator unit,
 \begin{equation}
@@ -800,6 +802,14 @@ volume-normalized upper-triangle tensor components:
   :
   [N_q,N_{\mathrm{steps}}+1,N_t].
 \end{equation}
+The canonical gluon loop is source independent,
+\begin{center}
+  \code{EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5},
+\end{center}
+and is reused for all hadron source positions on the configuration.  The shared
+quark and gluon wrappers use the same \code{EMT\_1PT\_FLOW\_EPSILON}; its
+production default is (0.207936), so equal flow indices refer to equal flow
+times.
 Important attributes include
 \begin{center}
 \begin{tabular}{ll}
@@ -807,6 +817,7 @@ Important attributes include
 Attribute & Meaning \\
 \midrule
 \code{measurement} & \code{gluon\_1pt}. \\
+\code{config\_num} & Gauge configuration encoded by the canonical file. \\
 \code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{flow\_times}
 & Gradient-flow schedule. \\
 \code{qext}, \code{pf}, \code{p\_2pt}

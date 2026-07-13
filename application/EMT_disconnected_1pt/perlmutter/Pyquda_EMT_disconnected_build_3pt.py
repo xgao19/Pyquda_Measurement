@@ -6,8 +6,11 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
+    validate_quark_gluon_loop_axes,
+)
 from pyquda_measurement_utils.io_corr import (
-    get_emt_gluon_1pt_file_tag,
+    get_emt_gluon_loop_file_tag,
     get_emt_proton_2pt_file_tag,
     get_emt_quark_loop_file_tag,
 )
@@ -52,7 +55,7 @@ def infer_paths(kind, configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_sm_ta
         elif kind == "quark":
             tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, cfg, 0, loop_sm_tag)
         elif kind == "gluon":
-            tag = get_emt_gluon_1pt_file_tag(data_dir, lat_tag, cfg, 0, src_pos, loop_sm_tag)
+            tag = get_emt_gluon_loop_file_tag(data_dir, lat_tag, cfg, 0, loop_sm_tag)
         else:
             raise ValueError(f"Unknown path kind {kind}")
         paths.append(tag + ".h5")
@@ -163,11 +166,13 @@ def write_string_dataset(group, name, values):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--config_num", type=int, default=int(os.environ.get("EMT_1PT_CONFIG_NUM", "0")))
+parser.add_argument("--configs", type=str, required=True)
 parser.add_argument("--interpolator", type=str, default=os.environ.get("EMT_DISC_INTERPOLATOR", "5"))
-args, unknown = parser.parse_known_args()
+args = parser.parse_args()
 
-configs = parse_int_list(os.environ.get("EMT_DISC_CONFIGS", str(args.config_num)))
+configs = parse_int_list(args.configs)
+if not configs:
+    parser.error("--configs must contain at least one integer configuration")
 data_dir = os.environ.get("EMT_1PT_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 lat_tag = os.environ.get("EMT_1PT_LAT_TAG", "S8T32")
 src_pos = parse_triplet(os.environ.get("EMT_1PT_SRC_POS", "0.0.0")) + [
@@ -244,7 +249,11 @@ for values, label in [
         raise ValueError(f"All input files must use matching {label}")
 qext = qext_list[0]
 quark_flow_times = quark_flow_time_list[0]
+gluon_qext = gluon_qext_list[0]
 gluon_flow_times = gluon_flow_time_list[0]
+validate_quark_gluon_loop_axes(
+    qext, gluon_qext, quark_flow_times, gluon_flow_times
+)
 
 quark_c3_unsub, quark_c3_disc, quark_ratio = build_quark_products(c2_selected, quark_loops)
 gluon_c3_unsub, gluon_c3_disc, gluon_ratio = build_gluon_products(c2_selected, gluon_loops)

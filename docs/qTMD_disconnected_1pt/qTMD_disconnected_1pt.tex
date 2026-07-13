@@ -248,7 +248,7 @@ reproducibility; the global-coordinate counter is the production solution.
 
 \subsection{Base-Oriented Production and Finalization}
 
-Production uses base/HP-interval shards by default.  One complete base
+Production uses only base/HP-interval shards.  One complete base
 estimator is
 \begin{equation}
   L_b=\frac{1}{N_{\mathrm{HP}}}
@@ -274,8 +274,8 @@ New output uses the source-independent helper
 \begin{center}
 \code{qTMD1pt/<lat>.qTMD1pt.<cfg>.<ama>.<sm>.h5}.
 \end{center}
-The old source-position helper remains available for existing files and APIs;
-the full-volume loop itself has no hadron source position.  The writer stores:
+The obsolete source-position helper has been removed because the full-volume
+loop has no hadron source position.  The finalizer stores:
 \begin{equation}
   \code{raw/loop\_pervec}
   \quad\mathrm{with\ shape}\quad
@@ -521,21 +521,20 @@ The helper is covered by
 \code{tests/test\_disconnected\_gi\_qtmd\_staple\_design.py}; it fixes the
 local, straight-PDF, fixed-length generic path, and invalid-index conventions.
 
-The reference code-side helper is
-\(\code{create\_fermion\_TMD\_GI(gauge, fermion, W\_index)}\).  It applies
+The test-only reference helper is
+\(\code{tests/qtmd\_gi\_reference.py:create\_fermion\_TMD\_GI}\).  It applies
 the full staple path from the original local fermion field for each
 \(W\)-index, using repeated \(\code{gauge.pure\_gauge.covDev}\) calls.
 
-For production, the default \(\code{QTMD\_1PT\_GI\_STAPLE\_MODE=link\_cache}\)
-first builds gauge-only staple transporters with
+Production has only the link-cache path.  It first builds gauge-only staple
+transporters with
 \(\code{build\_gi\_qtmd\_staple\_links}\).  The construction converts an
 identity color matrix field into color-column fermions, applies the same
 \(\code{covDev}\) path, and converts the result back to a link field.  This
 keeps the transporter convention identical to the reference direct-covariant
 derivative path while allowing all stochastic sources on the same gauge
-configuration to reuse the same staple links.  The debug mode
-\(\code{QTMD\_1PT\_GI\_STAPLE\_MODE=direct\_covdev}\) keeps the older
-source-by-source reference implementation.
+configuration to reuse the same staple links.  Direct source-by-source
+transport remains test/reference code and is not a runtime mode.
 
 The link-cache implementation is tested by:
 \begin{enumerate}

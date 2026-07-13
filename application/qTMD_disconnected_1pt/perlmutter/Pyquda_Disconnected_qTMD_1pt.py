@@ -13,9 +13,9 @@ def parse_int_list(text):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--config_num", type=int, default=int(os.environ.get("QTMD_1PT_CONFIG_NUM", "0")))
+parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("QTMD_1PT_MPI_GEOMETRY", "1.1.1.1"))
-args, unknown = parser.parse_known_args()
+args = parser.parse_args()
 
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -43,7 +43,6 @@ parameters = {
     "noise_scheme": os.environ.get("QTMD_1PT_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("QTMD_1PT_HP_NUM_VECTORS", "1")),
     "hp_ordering": os.environ.get("QTMD_1PT_HP_ORDERING", "global_xyzt_gray_projected_to_evenodd"),
-    "gi_qtmd_staple_mode": os.environ.get("QTMD_1PT_GI_STAPLE_MODE", "link_cache"),
     "gauge_preprocessing": os.environ.get(
         "QTMD_1PT_GAUGE_PREPROCESSING", "HYP(1,0.75,0.6,0.3,4)"
     ),
@@ -75,7 +74,6 @@ measurement.measure_1pt(
     randPara,
     tag=os.environ.get("QTMD_1PT_OUT", tag),
     operator_kind=operator_kind,
-    output_mode=os.environ.get("QTMD_1PT_OUTPUT_MODE", "base_shards"),
     shard_dir=os.environ.get("QTMD_1PT_SHARD_DIR", os.path.join(data_dir, "qTMD1pt", "shards")),
     base_start=int(os.environ.get("QTMD_1PT_BASE_START", "0")),
     base_stop=int(os.environ.get("QTMD_1PT_BASE_STOP", str(randPara[0]))),

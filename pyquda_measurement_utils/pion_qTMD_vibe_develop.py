@@ -136,7 +136,6 @@ from pyquda_utils import core
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
     build_gi_qtmd_staple_links,
-    create_fermion_TMD_GI,
     create_fermion_TMD_GI_from_link,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import create_gi_qtmd_wilsonline_index_lists
@@ -209,7 +208,7 @@ class pion_TMD:
 
         return np.array(pion_TMDs)
 
-    def contract_qTMD_GI(self, latt_info, gauge, prop_f, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="fixed_g5", staple_mode="link_cache"):
+    def contract_qTMD_GI(self, latt_info, gauge, prop_f, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="fixed_g5"):
         xp = _get_xp_from_array(prop_f.data)
         phases = _asarray_on_queue(phases, xp, prop_f.data)
         sink_gamma_ls = gamma_stack(prop_f.data)
@@ -217,12 +216,8 @@ class pion_TMD:
         seq_bw_line = meson_backward_line(seq_bw_prop)
 
         W_index_list = W_index_list_dir0 + W_index_list_dir1
-        staple_links = None
-        if staple_mode == "link_cache":
-            mpi_print(latt_info, f"Build {len(W_index_list)} connected pion GI_qTMD staple transporters.")
-            staple_links = build_gi_qtmd_staple_links(gauge, W_index_list)
-        elif staple_mode != "direct_covdev":
-            raise ValueError(f"Unsupported GI_qTMD staple_mode {staple_mode!r}")
+        mpi_print(latt_info, f"Build {len(W_index_list)} connected pion GI_qTMD staple transporters.")
+        staple_links = build_gi_qtmd_staple_links(gauge, W_index_list)
 
         pion_TMDs = []
         for iW, W_index in enumerate(W_index_list):
@@ -332,17 +327,14 @@ class pion_TMD:
 
         return prop_f.shift(round(current_b_T - previous_b_T), transverse_direction).shift(round(current_bz - previous_bz), z_direction)
 
-    def create_fw_prop_TMD_GI(self, gauge, prop_f, W_index, staple_links=None):
+    def create_fw_prop_TMD_GI(self, gauge, prop_f, W_index, staple_links):
         prop_shift = prop_f.copy()
-        staple_link = None if staple_links is None else staple_links[tuple(W_index)]
+        staple_link = staple_links[tuple(W_index)]
 
         for spin in range(4):
             for color in range(3):
                 fermion = prop_f.getFermion(spin, color)
-                if staple_link is None:
-                    fermion_shift = create_fermion_TMD_GI(gauge, fermion, W_index)
-                else:
-                    fermion_shift = create_fermion_TMD_GI_from_link(staple_link, fermion, W_index)
+                fermion_shift = create_fermion_TMD_GI_from_link(staple_link, fermion, W_index)
                 prop_shift.setFermion(fermion_shift, spin, color)
 
         return prop_shift

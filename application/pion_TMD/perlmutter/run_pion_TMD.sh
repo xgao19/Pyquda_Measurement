@@ -32,7 +32,6 @@ export PION_TMD_WIDTH="${PION_TMD_WIDTH:-1.0}"
 export PION_TMD_RUN_CG_QTMD="${PION_TMD_RUN_CG_QTMD:-1}"
 export PION_TMD_RUN_GI_QTMD="${PION_TMD_RUN_GI_QTMD:-1}"
 export PION_TMD_RUN_PDF="${PION_TMD_RUN_PDF:-1}"
-export PION_TMD_GI_STAPLE_MODE="${PION_TMD_GI_STAPLE_MODE:-link_cache}"
 
 mkdir -p "$QUDA_RESOURCE_PATH" "$CUPY_CACHE_DIR" "$PION_TMD_DATA_DIR"
 
@@ -50,7 +49,6 @@ echo "  PION_TMD_T_INSERT=$PION_TMD_T_INSERT"
 echo "  PION_TMD_RUN_CG_QTMD=$PION_TMD_RUN_CG_QTMD"
 echo "  PION_TMD_RUN_GI_QTMD=$PION_TMD_RUN_GI_QTMD"
 echo "  PION_TMD_RUN_PDF=$PION_TMD_RUN_PDF"
-echo "  PION_TMD_GI_STAPLE_MODE=$PION_TMD_GI_STAPLE_MODE"
 
 python3 -u "$script_dir/Pyquda_pion_TMD.py" \
   --config_num "$PION_TMD_CONFIG_NUM" \
@@ -66,5 +64,4 @@ python3 -u "$script_dir/Pyquda_pion_TMD.py" \
   --width "$PION_TMD_WIDTH" \
   --run_cg_qtmd "$PION_TMD_RUN_CG_QTMD" \
   --run_gi_qtmd "$PION_TMD_RUN_GI_QTMD" \
-  --run_pdf "$PION_TMD_RUN_PDF" \
-  --gi_staple_mode "$PION_TMD_GI_STAPLE_MODE"
+  --run_pdf "$PION_TMD_RUN_PDF"

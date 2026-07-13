@@ -25,8 +25,9 @@ Useful runtime switches:
 - `PION_TMD_RUN_CG_QTMD=0/1`
 - `PION_TMD_RUN_GI_QTMD=0/1`
 - `PION_TMD_RUN_PDF=0/1`
-- `PION_TMD_GI_STAPLE_MODE=link_cache` for the cached transporter path
-- `PION_TMD_GI_STAPLE_MODE=direct_covdev` for the direct covariant-shift path
+
+GI qTMD production always uses the cached transporter path.  The direct
+covariant-shift implementation is test/reference code only.
 
 The default smoke gauge is:
 
@@ -58,7 +59,8 @@ constraints are `b_z` even and `eta >= abs(b_z) / 2`.
 
 The connected pion GI qTMD workflow has passed S8T32 smoke tests on Perlmutter
 `login32`.  A nonzero-staple consistency test with `b_z=2`, `b_T=1`, `eta=1`,
-and `qmax=0` verifies that `link_cache` and `direct_covdev` agree to roundoff.
+and `qmax=0` verified that the link cache agrees with the direct test reference
+to roundoff.
 
 The optional test script is:
 

@@ -68,12 +68,13 @@ def test_connected_pdf_gi_helpers_reject_non_incremental_jumps():
         raise AssertionError("PDF GI helper should reject jumps larger than one lattice spacing")
 
 
-def test_connected_gi_qtmd_link_cache_and_direct_paths_match_for_pion_and_proton():
+def test_connected_gi_qtmd_production_requires_link_cache():
     gauge = FakeGauge()
     pion = object.__new__(pion_TMD)
     proton = object.__new__(proton_TMD)
     w_index = [2, 4, 3, 0]
 
     for measurement in (pion, proton):
-        direct = measurement.create_fw_prop_TMD_GI(gauge, FakePropagator(), w_index)
-        assert _all_paths(direct) == {(2, 2, 2, 2, 2, 0, 0, 6)}
+        with pytest.raises(TypeError):
+            measurement.create_fw_prop_TMD_GI(gauge, FakePropagator(), w_index)
+import pytest

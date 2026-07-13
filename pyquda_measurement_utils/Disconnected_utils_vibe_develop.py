@@ -314,88 +314,116 @@ def apply_hierarchical_probe(xi, hp_idx: int, hp_ordering: str):
     return probed
 
 
-def iter_noise_sources(
+def part_source_bookkeeping(
+    base_idx: int,
+    hp_start: int,
+    hp_stop: int,
+    hp_count: int,
+    spin_color_dilution: str = "none",
+    include_spin_color: bool = False,
+):
+    """Return deterministic global indices for one base/HP shard part."""
+    spin_color_dilution = normalize_spin_color_dilution(spin_color_dilution)
+    base_idx = int(base_idx)
+    hp_start = int(hp_start)
+    hp_stop = int(hp_stop)
+    hp_count = int(hp_count)
+    if base_idx < 0 or hp_count <= 0 or not 0 <= hp_start < hp_stop <= hp_count:
+        raise ValueError(
+            f"invalid base/HP interval: base={base_idx}, hp=[{hp_start}, {hp_stop}), "
+            f"hp_count={hp_count}"
+        )
+
+    source_indices = []
+    base_indices = []
+    hp_indices = []
+    spin_indices = []
+    color_indices = []
+    for hp_idx in range(hp_start, hp_stop):
+        effective_base_idx = base_idx * hp_count + hp_idx
+        if spin_color_dilution == "none":
+            source_indices.append(effective_base_idx)
+            base_indices.append(base_idx)
+            hp_indices.append(hp_idx)
+            continue
+        for spin_idx in range(4):
+            for color_idx in range(3):
+                source_indices.append(
+                    effective_base_idx * SPIN_COLOR_POINT_FACTOR + spin_idx * 3 + color_idx
+                )
+                base_indices.append(base_idx)
+                hp_indices.append(hp_idx)
+                spin_indices.append(spin_idx)
+                color_indices.append(color_idx)
+
+    bookkeeping = {
+        "source_index": np.asarray(source_indices, dtype=np.int32),
+        "base_noise_index": np.asarray(base_indices, dtype=np.int32),
+        "hp_index": np.asarray(hp_indices, dtype=np.int32),
+    }
+    if spin_color_dilution == "point":
+        bookkeeping["spin_index"] = np.asarray(spin_indices, dtype=np.int32)
+        bookkeeping["color_index"] = np.asarray(color_indices, dtype=np.int32)
+    elif include_spin_color:
+        count = len(source_indices)
+        bookkeeping["spin_index"] = np.full(count, -1, dtype=np.int32)
+        bookkeeping["color_index"] = np.full(count, -1, dtype=np.int32)
+    return bookkeeping
+
+
+def iter_noise_base_hp_interval(
     latt_info,
-    n_vec: int,
+    base_idx: int,
+    hp_start: int,
+    hp_stop: int,
     n_zn: int,
     noise_scheme: str,
     hp_num_vectors: int,
     hp_ordering: str,
+    config_num: int,
+    noise_stream: int = 0,
     spin_color_dilution: str = "none",
     include_spin_color: bool = False,
-    skip_base_indices=None,
-    counter_noise_config=None,
-    counter_noise_stream: int = 0,
-    skip_effective_indices=None,
 ):
-    """Yield effective stochastic sources with optional hierarchical probing."""
+    """Yield only the requested HP interval of one deterministic base noise."""
+    if config_num is None:
+        raise ValueError("config_num is required for decomposition-independent stochastic sources")
+    noise_scheme = normalize_noise_scheme(noise_scheme)
     spin_color_dilution = normalize_spin_color_dilution(spin_color_dilution)
-    if counter_noise_config is None:
-        raise ValueError("counter_noise_config is required for decomposition-independent stochastic sources")
-    skip_base_indices = set() if skip_base_indices is None else {int(idx) for idx in skip_base_indices}
-    skip_effective_indices = set() if skip_effective_indices is None else {int(idx) for idx in skip_effective_indices}
-
-    def prepare_base_noise(base_idx):
-        if int(base_idx) in skip_base_indices:
-            return None
-        if spin_color_dilution == "point":
-            return make_counter_site_zn_noise_fermion(
-                latt_info,
-                int(counter_noise_config),
-                int(base_idx),
-                stream_seed=int(counter_noise_stream),
-                n=n_zn,
-            )
-        return make_counter_zn_noise_fermion(
-            latt_info,
-            int(counter_noise_config),
-            int(base_idx),
-            stream_seed=int(counter_noise_stream),
-            n=n_zn,
+    hp_count = int(hp_num_vectors) if noise_scheme == "hierarchical_probing" else 1
+    bookkeeping = part_source_bookkeeping(
+        base_idx, hp_start, hp_stop, hp_count, spin_color_dilution
+    )
+    if spin_color_dilution == "point":
+        base_noise = make_counter_site_zn_noise_fermion(
+            latt_info, int(config_num), int(base_idx), stream_seed=int(noise_stream), n=n_zn
+        )
+    else:
+        base_noise = make_counter_zn_noise_fermion(
+            latt_info, int(config_num), int(base_idx), stream_seed=int(noise_stream), n=n_zn
         )
 
-    def make_output(effective_idx, base_idx, hp_idx, spin_idx, color_idx, source):
-        if include_spin_color:
-            return effective_idx, base_idx, hp_idx, spin_idx, color_idx, source
-        return effective_idx, base_idx, hp_idx, source
-
-    def iter_spin_color_sources(effective_base_idx, base_idx, hp_idx, source):
-        if spin_color_dilution == "none" and effective_base_idx in skip_effective_indices:
-            return
+    output_idx = 0
+    for hp_idx in range(int(hp_start), int(hp_stop)):
+        source = (
+            apply_hierarchical_probe(base_noise, hp_idx, hp_ordering)
+            if noise_scheme == "hierarchical_probing"
+            else base_noise.copy()
+        )
         if spin_color_dilution == "none":
-            yield make_output(effective_base_idx, base_idx, hp_idx, -1, -1, source)
-            return
+            fields = (
+                int(bookkeeping["source_index"][output_idx]), int(base_idx), int(hp_idx),
+                -1, -1, source,
+            )
+            output_idx += 1
+            yield fields if include_spin_color else fields[:3] + fields[-1:]
+            continue
         for spin_idx in range(source.data.shape[-2]):
             for color_idx in range(source.data.shape[-1]):
-                effective_idx = effective_base_idx * SPIN_COLOR_POINT_FACTOR + spin_idx * source.data.shape[-1] + color_idx
-                if effective_idx in skip_effective_indices:
-                    continue
-                yield make_output(
-                    effective_idx,
-                    base_idx,
-                    hp_idx,
-                    spin_idx,
-                    color_idx,
+                fields = (
+                    int(bookkeeping["source_index"][output_idx]), int(base_idx), int(hp_idx),
+                    int(spin_idx), int(color_idx),
                     apply_spin_color_point_dilution(source, spin_idx, color_idx),
                 )
-
-    if noise_scheme == "zn":
-        for base_idx in range(n_vec):
-            source = prepare_base_noise(base_idx)
-            if source is None:
-                continue
-            yield from iter_spin_color_sources(base_idx, base_idx, 0, source)
-        return
-
-    for base_idx in range(n_vec):
-        base_noise = prepare_base_noise(base_idx)
-        if base_noise is None:
-            continue
-        for hp_idx in range(hp_num_vectors):
-            effective_base_idx = base_idx * hp_num_vectors + hp_idx
-            yield from iter_spin_color_sources(
-                effective_base_idx,
-                base_idx,
-                hp_idx,
-                apply_hierarchical_probe(base_noise, hp_idx, hp_ordering),
-            )
+                output_idx += 1
+                yield fields if include_spin_color else fields[:3] + fields[-1:]

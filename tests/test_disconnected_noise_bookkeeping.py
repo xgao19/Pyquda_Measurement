@@ -10,9 +10,10 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     effective_n_inversions,
     hierarchical_probe_pattern,
     is_power_of_two,
-    iter_noise_sources,
+    iter_noise_base_hp_interval,
     normalize_noise_scheme,
     normalize_spin_color_dilution,
+    part_source_bookkeeping,
     source_bookkeeping_arrays,
     spin_color_dilution_factor,
     validate_hierarchical_probing_options,
@@ -124,8 +125,23 @@ def test_site_only_counter_z4_is_independent_of_lattice_partitioning():
 
 
 def test_noise_iterator_requires_counter_configuration():
-    with pytest.raises(ValueError, match="counter_noise_config is required"):
-        next(iter_noise_sources(TinyLatticeInfo(), 1, 4, "zn", 1, next(iter(VALID_HP_ORDERINGS))))
+    with pytest.raises(ValueError, match="config_num is required"):
+        next(iter_noise_base_hp_interval(
+            TinyLatticeInfo(), 0, 0, 1, 4, "zn", 1,
+            next(iter(VALID_HP_ORDERINGS)), config_num=None,
+        ))
+
+
+def test_direct_part_bookkeeping_plain_hp_and_point_dilution():
+    plain = part_source_bookkeeping(3, 2, 5, 8)
+    np.testing.assert_array_equal(plain["source_index"], [26, 27, 28])
+    np.testing.assert_array_equal(plain["base_noise_index"], [3, 3, 3])
+    np.testing.assert_array_equal(plain["hp_index"], [2, 3, 4])
+
+    point = part_source_bookkeeping(1, 1, 2, 4, "point")
+    np.testing.assert_array_equal(point["source_index"], np.arange(60, 72))
+    np.testing.assert_array_equal(point["spin_index"], np.repeat(np.arange(4), 3))
+    np.testing.assert_array_equal(point["color_index"], np.tile(np.arange(3), 4))
 
 
 def test_hierarchical_probes_reuse_one_counter_base_source():

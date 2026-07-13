@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedQuark1pt,
@@ -6,6 +7,7 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     _normalize_flow_type,
     _unique_zero_momentum_index,
     ringed_kinetic_pervec_from_emt,
+    validate_quark_gluon_loop_axes,
 )
 from pyquda_measurement_utils.flowed_quark_ringed_norm import kinetic_spacetime_from_raw
 
@@ -88,3 +90,41 @@ def test_ringed_zero_momentum_validation_precedes_inverter_setup():
         assert "exactly one zero momentum" in str(err)
     else:
         raise AssertionError("missing zero momentum should fail before inverter setup")
+
+
+def test_counter_configuration_validation_precedes_inverter_setup():
+    class FakeLatticeInfo:
+        global_size = [2, 2, 2, 2]
+        t_boundary = -1
+
+    class FakeGauge:
+        latt_info = FakeLatticeInfo()
+
+    measurement = EMTDisconnectedQuark1pt({
+        "qext": [[0, 0, 0, 0]],
+        "pf": [0, 0, 0, 0],
+        "p_2pt": [[0, 0, 0, 0]],
+        "pos_boost": [0, 0, 0],
+        "neg_boost": [0, 0, 0],
+        "width": 1.0,
+        "flow_type": "wilson",
+        "flow_epsilon": 0.1,
+        "flow_steps": 1,
+    })
+
+    with pytest.raises(ValueError, match="config_num is required"):
+        measurement.flowed_fermionic_1pt(
+            FakeGauge(), [0.1, 1.0, 1e-10, 10], [1, 4, 0],
+            tag="emt", ringed_tag="ringed",
+        )
+
+
+def test_quark_gluon_axes_must_match_before_analysis():
+    qext = np.asarray([[0, 0, 0, 0], [1, 0, 0, 0]], dtype=np.int32)
+    flow_times = np.asarray([0.0, 0.207936])
+    validate_quark_gluon_loop_axes(qext, qext.copy(), flow_times, flow_times.copy())
+
+    with pytest.raises(ValueError, match="matching qext"):
+        validate_quark_gluon_loop_axes(qext, qext[:1], flow_times, flow_times)
+    with pytest.raises(ValueError, match="matching flow_times"):
+        validate_quark_gluon_loop_axes(qext, qext, flow_times, [0.0, 0.1])

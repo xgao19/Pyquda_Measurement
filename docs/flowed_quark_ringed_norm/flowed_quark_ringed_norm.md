@@ -1,150 +1,56 @@
-# Flowed-Quark Ringed Normalization
+# Standalone flowed-quark ringed normalization
 
-This workflow produces the ringed-field normalization for flowed quark fields.
-It is not EMT-specific: EMT connected/disconnected quark bilinears and future
-flowed scalar, vector, axial, tensor, derivative, or multi-quark operators should
-use the same factor when their quark mass, Dirac operator, gauge preprocessing,
-flow schedule, and flavor convention match.
-
-## Observable
-
-The measured kinetic expectation value is
+The standalone workflow measures
 
 ```text
-K(tf) = (1 / V4) sum_x < bar chi_f(tf,x)
-                          overleftrightarrow{Dslash}
-                          chi_f(tf,x) >
+K(t_f) = <bar chi(t_f) overleftrightarrow{Dslash} chi(t_f)>
 ```
 
-The implementation uses 4D stochastic sources.  The official normalization
-input is the spacetime-averaged kinetic trace:
+with full-volume counter-based `Z4` sources. It is useful for dedicated
+high-statistics studies and optional point spin-color dilution. `config_num` is
+required; the stream salt is stored as `noise_stream`.
 
-```text
-avg/kinetic_spacetime[flow]
-  = (spin_color_trace_factor / (N_eff Nt))
-    sum_{r,t} raw/kinetic_pervec[r, flow, t]
-```
+## Checkpoint model
 
-All base fields use decomposition-independent counter-based `Z4` noise by
-default.  The counter contains global `x,y,z,t`, configuration, base index,
-and stream salt; full spin-color noise additionally includes spin and color.
-Point spin-color dilution uses a site-only counter before the exact projector.
-This replaces backend RNG seeding, which can repeat identical local arrays on
-equal-shaped MPI ranks.  Existing backend-RNG output is obsolete and must not
-be combined with counter-noise data.
+Standalone ringed now uses exactly the same base/HP-part infrastructure as EMT
+and disconnected qTMD. A part contains a contiguous HP interval from one base,
+raw `kinetic_pervec`, and global source/base/HP/spin/color bookkeeping. Rank 0
+writes atomically, resume uses the shared strict validator, and a per-base JSON
+completion marker is the scheduler signal. There is no `.block*.h5` format or
+text sample log.
 
-Two spin-color source modes are supported:
+Point spin-color dilution costs 12 solves per HP pattern. A part boundary never
+splits those 12 projectors. The finalized trace multiplies the raw channel
+average by `spin_color_trace_factor=12`.
 
-```text
-spin_color_dilution = none
-  Z_n noise is assigned on site * spin * color.  This is the default and
-  preserves the original behavior.
+## Finalization and ensemble analysis
 
-spin_color_dilution = point
-  Z_n noise is assigned on 4D sites only, then multiplied by exact spin-color
-  basis vectors.  This costs 4*3 = 12 solves for each base site-noise/HP vector.
-```
-
-HP vectors are site-only in both modes and are broadcast to spin/color.  For
-`spin_color_dilution = point`, each raw entry is one spin-color basis source,
-so the final trace average uses `spin_color_trace_factor = 12`.
-
-## Ringed Factors
-
-For the default single-flavor fundamental SU(3) convention,
-
-```text
-Z_ring_bilinear(tf) = -2*Nc / ((4*pi)^2 * tf^2 * K(tf))
-Z_ring_field_sqrt(tf) = sqrt(Z_ring_bilinear(tf))
-```
-
-The unflowed step has `tf=0`, so `flow=0` factors are stored as `NaN`.
-
-Consumers should apply:
-
-```text
-flowed quark bilinear        -> multiply by Z_ring_bilinear[flow]
-two flowed quark bilinears   -> multiply by Z_ring_bilinear[flow]**2
-single flowed quark field    -> multiply by Z_ring_field_sqrt[flow]
-gluon-only operator          -> no ringed factor
-unflowed quark operator      -> no ringed factor
-```
-
-Mixed flowed/unflowed operators count only the flowed quark fields.
-
-## HDF5 Layout
-
-The output lives under `data/FlowedQuarkRinged/` and contains:
-
-```text
-raw/kinetic_pervec              [N_eff, Nflow, Nt]
-raw/source_index                [N_eff]
-raw/base_noise_index            [N_eff]
-raw/hp_index                    [N_eff]
-raw/spin_index                  [N_eff]
-raw/color_index                 [N_eff]
-avg/kinetic_spacetime           [Nflow]
-avg/Z_ring_field_sqrt           [Nflow]
-avg/Z_ring_bilinear             [Nflow]
-flow_times                      [Nflow]
-```
-
-EMT quark 1pt jobs use the same canonical file-name helper but write a
-kinetic-only companion from their already-computed zero-momentum diagonal EMT
-trace.  Those files contain `raw/kinetic_pervec`, source bookkeeping,
-`avg/kinetic_spacetime`, and `flow_times`, but intentionally omit both
-`avg/Z_ring_*` datasets.  Their attributes include
-`producer=emt_quark_1pt`, `content=kinetic_only`, and
-`ringed_factors_stored=False`.
-
-For ensemble physics, average `kinetic_spacetime` over configurations before
-evaluating the nonlinear ringed-factor formula.  Do not average factors formed
-separately from each configuration.  The standalone workflow remains the
-appropriate choice for dedicated high-statistics, point spin-color dilution,
-interval blocks, and HP256 resume runs.
-
-Important attributes:
-
-```text
-measurement = flowed_quark_ringed_norm
-normalization_scope = all_flowed_quark_fields
-operator = bar_chi_overleftrightarrow_Dslash_chi
-Nc = 3
-flavor_convention = single_flavor_trace_for_this_dirac_operator
-flow_type, flow_epsilon, flow_steps, flow_times
-mass, csw, tol, maxiter
-gauge_preprocessing
-t_boundary
-noise_scheme, n_vec, n_zn, hp_num_vectors, hp_ordering
-noise_generator, noise_counter_order, config_num, noise_stream
-spin_color_dilution, spin_color_dilution_factor, spin_color_trace_factor, site_noise_scope
-volume_average = spin_color_trace_factor_times_spacetime_average_from_raw_kinetic_pervec
-flow0_factor = NaN
-```
-
-## Aurora Smoke
-
-Use the Aurora PyQUDA develop environment and run multi-rank tests through PALS
-inside a compute allocation:
+Measurement jobs write shards only. Publish one configuration after all bases
+are complete:
 
 ```bash
-cd application/flowed_quark_ringed_norm/Aurora
-FLOWED_RINGED_FLOW_STEPS=1 \
-FLOWED_RINGED_N_VEC=1 \
-FLOWED_RINGED_NOISE_SCHEME=zn \
-bash submit_or_run_interactive.sh
+python application/flowed_quark_ringed_norm/finalize_ringed_shards.py \
+  --shard-dir <dir> --canonical-tag <tag-without-.h5> --n-base-noise <N>
 ```
 
-For a hierarchical-probing smoke:
+The canonical file contains `flow_times`, `raw/kinetic_pervec`, source
+bookkeeping, and `avg/kinetic_spacetime`. It deliberately contains no ringed
+factors and records `ringed_factors_stored=False`.
+
+The nonlinear factor must be formed after an equal-weight configuration
+average:
+
+```text
+Z_bilinear(t_f) = -2 Nc / ((4 pi)^2 t_f^2 <K(t_f)>_cfg)
+Z_field_sqrt(t_f) = sqrt(Z_bilinear(t_f))
+```
+
+Use explicit inputs and output:
 
 ```bash
-FLOWED_RINGED_FLOW_STEPS=1 \
-FLOWED_RINGED_N_VEC=1 \
-FLOWED_RINGED_NOISE_SCHEME=hierarchical_probing \
-FLOWED_RINGED_HP_NUM_VECTORS=2 \
-bash submit_or_run_interactive.sh
+python application/flowed_quark_ringed_norm/analyze_ringed_ensemble.py \
+  --input cfg1.h5 --input cfg2.h5 --output ringed_ensemble.h5
 ```
 
-For l64 config 1050 smoke, set the production gauge path, mass, flow type,
-epsilon, and steps to match the connected production run, but keep the stochastic
-source count tiny during validation.
+Never average configuration-local `1/K`. The `t_f=0` factor is undefined and
+is stored as NaN in the ensemble result.

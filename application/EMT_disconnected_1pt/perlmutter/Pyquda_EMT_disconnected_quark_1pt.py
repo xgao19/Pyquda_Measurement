@@ -12,9 +12,9 @@ from pyquda_measurement_utils.io_corr import (
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--config_num", type=int, default=int(os.environ.get("EMT_1PT_CONFIG_NUM", "0")))
+parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("EMT_1PT_MPI_GEOMETRY", "1.1.1.1"))
-args, unknown = parser.parse_known_args()
+args = parser.parse_args()
 
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -73,7 +73,6 @@ randPara = [
     int(os.environ.get("EMT_1PT_N_ZN", "4")),
     int(os.environ.get("EMT_1PT_RAND_SEED", "0")),
 ]
-output_mode = os.environ.get("EMT_1PT_OUTPUT_MODE", "base_shards")
 base_start = int(os.environ.get("EMT_1PT_BASE_START", "0"))
 base_stop = int(os.environ.get("EMT_1PT_BASE_STOP", str(randPara[0])))
 block_interval_solves = int(os.environ.get("EMT_1PT_BLOCK_INTERVAL_SOLVES", "64"))
@@ -86,7 +85,6 @@ quark_1pt.flowed_fermionic_1pt(
     randPara,
     tag=os.environ.get("EMT_1PT_QUARK_OUT", quark_1pt_tag),
     ringed_tag=os.environ.get("EMT_1PT_RINGED_OUT", ringed_tag),
-    output_mode=output_mode,
     shard_dir=shard_dir,
     base_start=base_start,
     base_stop=base_stop,

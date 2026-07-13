@@ -80,7 +80,6 @@ quark_emt.flowed_fermionic_1pt(
     randPara,
     tag=os.environ.get("EMT_PROTON_QUARK_1PT_OUT", quark_1pt_tag),
     ringed_tag=os.environ.get("EMT_PROTON_RINGED_OUT", ringed_tag),
-    output_mode=os.environ.get("EMT_PROTON_OUTPUT_MODE", "base_shards"),
     shard_dir=os.environ.get("EMT_PROTON_SHARD_DIR", os.path.join(data_dir, "EMTc", "shards")),
     base_start=int(os.environ.get("EMT_PROTON_BASE_START", "0")),
     base_stop=int(os.environ.get("EMT_PROTON_BASE_STOP", str(randPara[0]))),

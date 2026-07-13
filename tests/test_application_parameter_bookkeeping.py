@@ -1,4 +1,5 @@
 import ast
+import subprocess
 from pathlib import Path
 
 
@@ -68,6 +69,13 @@ def _assert_parser_envs(relpath, expected):
         assert env_name in _env_names(arguments[arg_name]), f"{relpath} {arg_name} does not read {env_name}"
 
 
+def _keyword_constant(call, name):
+    for keyword in call.keywords:
+        if keyword.arg == name and isinstance(keyword.value, ast.Constant):
+            return keyword.value.value
+    return None
+
+
 def _literal_dict_assignment(relpath, name):
     for node in _tree(relpath).body:
         if isinstance(node, ast.Assign):
@@ -100,7 +108,6 @@ def test_connected_tmd_application_env_argument_mapping():
             "--run_cg_qtmd": "PION_TMD_RUN_CG_QTMD",
             "--run_gi_qtmd": "PION_TMD_RUN_GI_QTMD",
             "--run_pdf": "PION_TMD_RUN_PDF",
-            "--gi_staple_mode": "PION_TMD_GI_STAPLE_MODE",
         },
     )
     _assert_parser_envs(
@@ -116,9 +123,96 @@ def test_connected_tmd_application_env_argument_mapping():
             "--run_cg_qtmd": "NUCLEON_TMD_RUN_CG_QTMD",
             "--run_gi_qtmd": "NUCLEON_TMD_RUN_GI_QTMD",
             "--run_pdf": "NUCLEON_TMD_RUN_PDF",
-            "--gi_staple_mode": "NUCLEON_TMD_GI_STAPLE_MODE",
         },
     )
+
+
+def test_shared_emt_quark_and_gluon_flow_defaults_match():
+    quark = _source(
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_quark_1pt.py"
+    )
+    gluon = _source(
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_gluon_1pt.py"
+    )
+    expected = 'os.environ.get("EMT_1PT_FLOW_EPSILON", "0.207936")'
+    assert expected in quark
+    assert expected in gluon
+    assert "EMT_1PT_SRC_POS" not in gluon
+    assert "EMT_1PT_SRC_T" not in gluon
+
+
+def test_disconnected_configuration_is_required_cli_only():
+    single_config_scripts = {
+        "application/EMT_disconnected_1pt/perlmutter/Pyquda_EMT_disconnected_quark_1pt.py": "EMT_1PT_CONFIG_NUM",
+        "application/EMT_disconnected_1pt/perlmutter/Pyquda_EMT_disconnected_gluon_1pt.py": "EMT_1PT_CONFIG_NUM",
+        "application/EMT_disconnected_1pt/perlmutter/Pyquda_EMT_disconnected_proton_2pt.py": "EMT_1PT_CONFIG_NUM",
+        "application/EMT_disconnected_1pt/perlmutter/Pyquda_EMT_disconnected_finalize_quark_1pt.py": "EMT_1PT_CONFIG_NUM",
+        "application/qTMD_disconnected_1pt/perlmutter/Pyquda_Disconnected_qTMD_1pt.py": "QTMD_1PT_CONFIG_NUM",
+        "application/qTMD_disconnected_1pt/perlmutter/Pyquda_Disconnected_qTMD_finalize_1pt.py": "QTMD_1PT_CONFIG_NUM",
+        "application/flowed_quark_ringed_norm/perlmutter/Pyquda_flowed_quark_ringed_norm.py": "FLOWED_RINGED_CONFIG_NUM",
+        "application/flowed_quark_ringed_norm/Aurora/Pyquda_flowed_quark_ringed_norm.py": "FLOWED_RINGED_CONFIG_NUM",
+    }
+    for relpath, removed_env in single_config_scripts.items():
+        arguments = _parser_arguments(relpath)
+        assert _keyword_constant(arguments["--config_num"], "required") is True
+        assert removed_env not in _source(relpath)
+        assert "conf = args.config_num" in _source(relpath)
+
+    build = (
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_build_3pt.py"
+    )
+    arguments = _parser_arguments(build)
+    assert "--config_num" not in arguments
+    assert _keyword_constant(arguments["--configs"], "required") is True
+    assert "configs = parse_int_list(args.configs)" in _source(build)
+    assert "EMT_1PT_CONFIG_NUM" not in _source(build)
+    assert "EMT_DISC_CONFIGS" not in _source(build)
+
+
+def test_disconnected_shell_wrappers_reject_missing_or_unknown_configuration():
+    wrappers = [
+        "application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh",
+        "application/EMT_disconnected_1pt/perlmutter/run_gluon_1pt.sh",
+        "application/EMT_disconnected_1pt/perlmutter/run_proton_2pt.sh",
+        "application/EMT_disconnected_1pt/perlmutter/run_finalize_quark_1pt.sh",
+        "application/qTMD_disconnected_1pt/perlmutter/run_qTMD_1pt.sh",
+        "application/qTMD_disconnected_1pt/perlmutter/run_finalize_qTMD_1pt.sh",
+        "application/qTMD_disconnected_1pt/perlmutter/submit_qTMD_1pt.sh",
+        "application/flowed_quark_ringed_norm/perlmutter/run_flowed_quark_ringed_norm.sh",
+        "application/flowed_quark_ringed_norm/perlmutter/run_login_smoke.sh",
+        "application/flowed_quark_ringed_norm/Aurora/run_flowed_quark_ringed_norm.sh",
+        "application/flowed_quark_ringed_norm/Aurora/submit_or_run_interactive.sh",
+    ]
+    removed_envs = {
+        "EMT_1PT_CONFIG_NUM", "QTMD_1PT_CONFIG_NUM", "FLOWED_RINGED_CONFIG_NUM"
+    }
+    for relpath in wrappers:
+        source = _source(relpath)
+        for removed_env in removed_envs:
+            assert removed_env not in source
+        missing = subprocess.run(
+            ["bash", str(REPO_ROOT / relpath)], capture_output=True, text=True
+        )
+        unknown = subprocess.run(
+            ["bash", str(REPO_ROOT / relpath), "--unknown", "7"],
+            capture_output=True,
+            text=True,
+        )
+        assert missing.returncode == 2
+        assert unknown.returncode == 2
+
+    build = "application/EMT_disconnected_1pt/perlmutter/run_build_disconnected_3pt.sh"
+    source = _source(build)
+    assert "EMT_1PT_CONFIG_NUM" not in source
+    assert "EMT_DISC_CONFIGS" not in source
+    for args in ([], ["--config_num", "7"], ["--configs", ""], ["--configs", "7,"]):
+        result = subprocess.run(
+            ["bash", str(REPO_ROOT / build), *args], capture_output=True, text=True
+        )
+        assert result.returncode == 2
 
 
 def test_connected_tmd_parameter_dict_contains_analysis_knobs():

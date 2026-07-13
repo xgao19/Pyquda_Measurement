@@ -25,9 +25,9 @@ def parse_mg_block(text):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--config_num", type=int, default=int(os.environ.get("FLOWED_RINGED_CONFIG_NUM", "0")))
+parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("FLOWED_RINGED_MPI_GEOMETRY", "1.1.1.1"))
-args, unknown = parser.parse_known_args()
+args = parser.parse_args()
 
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -65,6 +65,11 @@ parameters = {
         "single_flavor_trace_for_this_dirac_operator",
     ),
     "block_interval_solves": int(os.environ.get("FLOWED_RINGED_BLOCK_INTERVAL_SOLVES", "64")),
+    "base_start": int(os.environ.get("FLOWED_RINGED_BASE_START", "0")),
+    "base_stop": int(os.environ.get("FLOWED_RINGED_BASE_STOP", os.environ.get("FLOWED_RINGED_N_VEC", "1"))),
+    "shard_dir": os.environ.get(
+        "FLOWED_RINGED_SHARD_DIR", os.path.join(data_dir, "FlowedQuarkRinged", "shards")
+    ),
 }
 
 init(mpi_geometry, enable_mps=True)

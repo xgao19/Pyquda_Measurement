@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
+  echo "Usage: $0 --config_num CFG" >&2
+  exit 2
+fi
+config_num="$2"
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cd "$script_dir"
@@ -29,4 +35,4 @@ env \
   FLOWED_RINGED_BLOCK_INTERVAL_SOLVES="$block_interval_solves" \
   QUDA_RESOURCE_PATH="$quda_cache" \
   CUPY_CACHE_DIR="$cupy_cache" \
-  bash "$script_dir/run_flowed_quark_ringed_norm.sh"
+  bash "$script_dir/run_flowed_quark_ringed_norm.sh" --config_num "$config_num"

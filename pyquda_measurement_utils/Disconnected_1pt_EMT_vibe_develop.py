@@ -21,12 +21,6 @@ from pyquda_comm.array import arrayIdentity, arrayZeros
 
 from pyquda_measurement_utils.io_corr import (
     save_emt_gluon_1pt_hdf5,
-    save_emt_quark_1pt_hdf5,
-    save_flowed_quark_ringed_norm_hdf5,
-)
-from pyquda_measurement_utils.flowed_quark_ringed_norm import (
-    kinetic_spacetime_from_raw,
-    natural_estimator_block_size,
 )
 from pyquda_measurement_utils.disconnected_shards import (
     base_completion_path,
@@ -35,11 +29,10 @@ from pyquda_measurement_utils.disconnected_shards import (
     completion_payload,
     expected_part_attrs,
     hp_vectors_per_base,
-    normalize_output_mode,
-    read_base_completion_marker,
     selected_base_range,
     shard_part_path,
     validate_raw_part_hdf5,
+    validate_complete_shard_set,
     write_base_completion_marker,
     write_raw_part_hdf5,
 )
@@ -47,9 +40,9 @@ from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
     effective_n_inversions,
-    iter_noise_sources,
+    iter_noise_base_hp_interval,
     normalize_noise_scheme,
-    source_bookkeeping_arrays,
+    part_source_bookkeeping,
     validate_hierarchical_probing_options,
 )
 
@@ -126,6 +119,18 @@ def ringed_kinetic_pervec_from_emt(Tmunu_pervec, zero_momentum_index, spatial_vo
 
     diagonal_sum = sum(tensor[:, mu, mu, q0_index, :, :] for mu in range(4))
     return (-2.0 / spatial_volume) * diagonal_sum
+
+
+def validate_quark_gluon_loop_axes(
+    quark_qext, gluon_qext, quark_flow_times, gluon_flow_times
+):
+    """Require matched momentum and flow axes before quark/gluon analysis."""
+    if not np.array_equal(np.asarray(quark_qext), np.asarray(gluon_qext)):
+        raise ValueError("Quark and gluon 1pt files must use matching qext")
+    if not np.array_equal(
+        np.asarray(quark_flow_times), np.asarray(gluon_flow_times)
+    ):
+        raise ValueError("Quark and gluon 1pt files must use matching flow_times")
 
 
 class EMTDisconnectedQuark1pt:
@@ -268,7 +273,6 @@ class EMTDisconnectedQuark1pt:
             "effective_n_inversions": n_eff,
             "n_zn": n_zn,
             "config_num": counter_config,
-            "rand_seed": counter_stream,
             "noise_stream": counter_stream,
             "noise_generator": COUNTER_NOISE_ALGORITHM,
             "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
@@ -308,8 +312,14 @@ class EMTDisconnectedQuark1pt:
                     "base_noise_index": (count,),
                     "hp_index": (count,),
                 }
+                bookkeeping = part_source_bookkeeping(
+                    base_idx, hp_start, hp_stop, hp_count
+                )
                 if U.latt_info.mpi_rank == 0:
-                    present = validate_raw_part_hdf5(path, expected_attrs, raw_shapes)
+                    present = validate_raw_part_hdf5(
+                        path, expected_attrs, raw_shapes,
+                        source_bookkeeping=bookkeeping,
+                    )
                 else:
                     present = None
                 present = comm.bcast(present, root=0)
@@ -319,23 +329,14 @@ class EMTDisconnectedQuark1pt:
 
                 tmunu_part = np.zeros(raw_shapes["Tmunu_pervec"], dtype=np.complex128)
                 chi_part = np.zeros(raw_shapes["CHI_pervec"], dtype=np.complex128)
-                global_indices = np.arange(base_idx * hp_count + hp_start, base_idx * hp_count + hp_stop, dtype=np.int32)
-                bookkeeping = {
-                    "source_index": global_indices,
-                    "base_noise_index": np.full(count, base_idx, dtype=np.int32),
-                    "hp_index": np.arange(hp_start, hp_stop, dtype=np.int32),
-                }
-                skip_bases = set(range(n_vec)) - {base_idx}
-                keep_indices = set(int(idx) for idx in global_indices)
-                skip_effective = set(range(n_vec * hp_count)) - keep_indices
-                for vec_picked, _, hp_idx, xi in iter_noise_sources(
-                    U.latt_info, n_vec, n_zn, self.noise_scheme, self.hp_num_vectors,
-                    self.hp_ordering, skip_base_indices=skip_bases,
-                    skip_effective_indices=skip_effective,
-                    counter_noise_config=int(attrs["config_num"]),
-                    counter_noise_stream=int(attrs["noise_stream"]),
+                for _, _, hp_idx, xi in iter_noise_base_hp_interval(
+                    U.latt_info, base_idx, hp_start, hp_stop, n_zn,
+                    self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
+                    config_num=int(attrs["config_num"]),
+                    noise_stream=int(attrs["noise_stream"]),
                 ):
                     local_idx = hp_idx - hp_start
+                    # The previous source leaves a flowed gauge resident in QUDA.
                     dirac.loadGauge(U)
                     eta = dirac.invert(xi)
                     tmunu_part[local_idx], chi_part[local_idx] = self._measure_flowed_source(
@@ -361,7 +362,9 @@ class EMTDisconnectedQuark1pt:
                         "Tmunu_pervec": (count, 4, 4, len(self.qlist), n_flow, nt),
                         "CHI_pervec": (count, 2, len(self.qlist), n_flow, nt),
                         "source_index": (count,), "base_noise_index": (count,), "hp_index": (count,),
-                    })
+                    }, source_bookkeeping=part_source_bookkeeping(
+                        base_idx, hp_start, hp_stop, hp_count
+                    ))
                 write_base_completion_marker(
                     base_completion_path(shard_dir, tag, base_idx),
                     completion_payload(tag, base_idx, hp_count, block_interval_solves, part_paths),
@@ -376,7 +379,6 @@ class EMTDisconnectedQuark1pt:
         randPara,
         tag: str = "",
         ringed_tag=None,
-        output_mode="monolithic",
         shard_dir=None,
         base_start=0,
         base_stop=None,
@@ -386,13 +388,10 @@ class EMTDisconnectedQuark1pt:
         n_vec, n_zn, randseed = randPara
         mass, csw, tol, maxiter = invPara
         U = gauge
-        Nsteps = self.flow_steps
-        output_mode = normalize_output_mode(output_mode)
         latt_info = U.latt_info
 
         global_size = latt_info.global_size
         Ns3 = global_size[0] * global_size[1] * global_size[2]
-        Nt = global_size[3]
 
         if ringed_tag is not None:
             if not str(ringed_tag).strip():
@@ -400,6 +399,11 @@ class EMTDisconnectedQuark1pt:
             q0_index = _unique_zero_momentum_index(self.qlist)
         else:
             q0_index = None
+
+        if self.config_num is None:
+            raise ValueError("config_num is required for counter-based disconnected noise")
+        counter_config = int(self.config_num)
+        counter_stream = int(randseed)
 
         mpi_print(latt_info, f"t_boundary = {latt_info.t_boundary}")
         dirac = core.getDirac(
@@ -415,129 +419,14 @@ class EMTDisconnectedQuark1pt:
         dirac.loadGauge(U)
         mpi_print(latt_info, "Multigrid inverter ready.")
 
-        if self.config_num is None:
-            counter_config = int(randseed)
-            counter_stream = 0
-        else:
-            counter_config = int(self.config_num)
-            counter_stream = int(randseed)
-
         n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
         qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
         phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, [0, 0, 0, 0])
         attrs = self._measurement_attrs(latt_info, invPara, randPara, counter_config, counter_stream, n_eff, Ns3)
-        if output_mode == "base_shards":
-            return self._measure_base_shards(
-                U, dirac, invPara, randPara, tag, phases_3pt, attrs,
-                shard_dir, base_start, base_stop, block_interval_solves,
-            )
-
-        Tmunu = np.zeros([n_eff, 4, 4, len(self.qlist), Nsteps + 1, Nt], dtype=np.complex128)
-        CHI = np.zeros([n_eff, 2, len(self.qlist), Nsteps + 1, Nt], dtype=np.complex128)
-        source_bookkeeping = source_bookkeeping_arrays(n_eff)
-        for vec_picked, base_idx, hp_idx, xi in iter_noise_sources(
-            latt_info,
-            n_vec,
-            n_zn,
-            self.noise_scheme,
-            self.hp_num_vectors,
-            self.hp_ordering,
-            counter_noise_config=counter_config,
-            counter_noise_stream=counter_stream,
-        ):
-            mpi_print(U.latt_info, f"vec {vec_picked} base {base_idx} hp {hp_idx}")
-            source_bookkeeping["base_noise_index"][vec_picked] = base_idx
-            source_bookkeeping["hp_index"][vec_picked] = hp_idx
-            dirac.loadGauge(U)
-            eta = dirac.invert(xi)
-            Tmunu[vec_picked], CHI[vec_picked] = self._measure_flowed_source(U, xi, eta, phases_3pt)
-
-        mpi_print(U.latt_info, "random vectors done.")
-
-        Tmunu_avg = np.mean(Tmunu, axis=0) / Ns3
-        CHI_avg = np.mean(CHI, axis=0) / Ns3
-        if ringed_tag is not None:
-            kinetic_pervec = ringed_kinetic_pervec_from_emt(Tmunu, q0_index, Ns3)
-            kinetic_spacetime = kinetic_spacetime_from_raw(kinetic_pervec)
-            ringed_source_bookkeeping = dict(source_bookkeeping)
-            ringed_source_bookkeeping["spin_index"] = np.full(n_eff, -1, dtype=np.int32)
-            ringed_source_bookkeeping["color_index"] = np.full(n_eff, -1, dtype=np.int32)
-            ringed_attrs = {
-                "measurement": "flowed_quark_ringed_norm",
-                "producer": "emt_quark_1pt",
-                "content": "kinetic_only",
-                "normalization_scope": "all_flowed_quark_fields",
-                "operator": "bar_chi_overleftrightarrow_Dslash_chi",
-                "Nc": self.nc,
-                "flavor_convention": self.flavor_convention,
-                "flow_type": self.flow_type,
-                "flow_epsilon": self.flow_epsilon,
-                "flow_steps": self.flow_steps,
-                "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
-                "mass": mass,
-                "csw": csw,
-                "tol": tol,
-                "maxiter": maxiter,
-                "gauge_preprocessing": self.gauge_preprocessing,
-                "t_boundary": latt_info.t_boundary,
-                "noise_scheme": self.noise_scheme,
-                "n_vec": n_vec,
-                "n_base_noise": n_vec,
-                "n_zn": n_zn,
-                "config_num": counter_config,
-                "rand_seed": counter_stream,
-                "noise_stream": counter_stream,
-                "noise_generator": COUNTER_NOISE_ALGORITHM,
-                "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
-                "hp_num_vectors": self.hp_num_vectors,
-                "hp_ordering": self.hp_ordering,
-                "spin_color_dilution": "none",
-                "spin_color_dilution_factor": 1,
-                "spin_color_trace_factor": 1,
-                "site_noise_scope": "site_spin_color",
-                "effective_n_inversions": n_eff,
-                "natural_block_size": natural_estimator_block_size(
-                    self.noise_scheme,
-                    self.hp_num_vectors,
-                    "none",
-                ),
-                "volume_norm": Ns3,
-                "volume_average": "mean_over_effective_sources_and_absolute_time_of_raw_kinetic_pervec",
-                "kinetic_source": "raw_Tmunu_pervec_zero_momentum_diagonal_trace",
-                "kinetic_relation": "K_pervec=-2*sum_mu(Tmunu_pervec[mu,mu,q0])/spatial_volume",
-                "zero_momentum_index": q0_index,
-                "ringed_factors_stored": False,
-                "ringed_factor_stage": "ensemble_analysis_from_configuration_averaged_kinetic",
-            }
-        else:
-            kinetic_pervec = None
-            kinetic_spacetime = None
-            ringed_source_bookkeeping = None
-            ringed_attrs = None
-
-        if latt_info.mpi_rank == 0:
-            save_emt_quark_1pt_hdf5(
-                tag,
-                Tmunu,
-                CHI,
-                Tmunu_avg,
-                CHI_avg,
-                attrs=attrs,
-                source_bookkeeping=source_bookkeeping,
-            )
-            if ringed_tag is not None:
-                save_flowed_quark_ringed_norm_hdf5(
-                    ringed_tag,
-                    kinetic_pervec,
-                    kinetic_spacetime,
-                    None,
-                    None,
-                    _flow_times(self.flow_epsilon, self.flow_steps),
-                    attrs=ringed_attrs,
-                    source_bookkeeping=ringed_source_bookkeeping,
-                )
-
-        return Tmunu_avg, CHI_avg
+        return self._measure_base_shards(
+            U, dirac, invPara, randPara, tag, phases_3pt, attrs,
+            shard_dir, base_start, base_stop, block_interval_solves,
+        )
 
     @staticmethod
     def _covdev_sym_prop(U_f: LatticeGauge, prop: LatticePropagator, mu: int):
@@ -633,68 +522,16 @@ def _copy_h5_attrs(obj, attrs):
 
 def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, ringed_tag, n_base_noise):
     """Validate complete EMT base shards and atomically build canonical outputs."""
-    shard_dir = Path(shard_dir)
     n_base_noise = int(n_base_noise)
-    if n_base_noise <= 0:
-        raise ValueError(f"n_base_noise should be positive, got {n_base_noise}")
-
-    markers = []
-    for base_idx in range(n_base_noise):
-        marker_path = base_completion_path(shard_dir, canonical_tag, base_idx)
-        marker = read_base_completion_marker(marker_path)
-        if marker is None:
-            raise ValueError(f"missing completion marker for base {base_idx}: {marker_path}")
-        if int(marker.get("base_noise_index", -1)) != base_idx:
-            raise ValueError(f"completion marker has wrong base index: {marker_path}")
-        markers.append(marker)
-
-    hp_count = int(markers[0]["hp_vectors_per_base"])
-    interval = int(markers[0]["block_interval_solves"])
-    all_parts = []
-    reference_attrs = None
-    source_shape = None
-    compatibility_excluded = {
-        "base_noise_index", "part_index", "hp_start", "hp_stop_exclusive",
-        "part_complete", "configured_n_base_noise",
-    }
-    for base_idx, marker in enumerate(markers):
-        if int(marker["hp_vectors_per_base"]) != hp_count or int(marker["block_interval_solves"]) != interval:
-            raise ValueError(f"base {base_idx} completion marker has incompatible part layout")
-        expected_names = []
-        for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, interval):
-            path = shard_part_path(shard_dir, canonical_tag, base_idx, part_idx, hp_start, hp_stop)
-            expected_names.append(path.name)
-            if not path.exists():
-                raise ValueError(f"missing EMT shard part {path}")
-            with h5py.File(path, "r") as h5:
-                if not bool(h5.attrs.get("part_complete", False)):
-                    raise ValueError(f"incomplete EMT shard part {path}")
-                attrs = {key: h5.attrs[key] for key in h5.attrs}
-                common = {key: value for key, value in attrs.items() if key not in compatibility_excluded}
-                if reference_attrs is None:
-                    reference_attrs = common
-                    source_shape = tuple(h5["raw/Tmunu_pervec"].shape[1:])
-                else:
-                    for key, value in reference_attrs.items():
-                        if key not in common or not np.array_equal(np.asarray(common[key]), np.asarray(value)):
-                            raise ValueError(f"EMT shard {path} has incompatible attribute {key}")
-                count = hp_stop - hp_start
-                if tuple(h5["raw/Tmunu_pervec"].shape) != (count,) + source_shape:
-                    raise ValueError(f"EMT shard {path} has incompatible Tmunu shape")
-                if tuple(h5["raw/CHI_pervec"].shape)[0] != count:
-                    raise ValueError(f"EMT shard {path} has incompatible CHI shape")
-                expected_sources = np.arange(base_idx * hp_count + hp_start, base_idx * hp_count + hp_stop)
-                if not np.array_equal(h5["raw/source_index"][()], expected_sources):
-                    raise ValueError(f"EMT shard {path} has incompatible source indices")
-                if not np.array_equal(h5["raw/base_noise_index"][()], np.full(count, base_idx)):
-                    raise ValueError(f"EMT shard {path} has incompatible base indices")
-                if not np.array_equal(h5["raw/hp_index"][()], np.arange(hp_start, hp_stop)):
-                    raise ValueError(f"EMT shard {path} has incompatible HP indices")
-            all_parts.append((base_idx, hp_start, hp_stop, path))
-        if marker.get("parts") != expected_names:
-            raise ValueError(f"base {base_idx} completion marker has incompatible part list")
-
-    total_sources = n_base_noise * hp_count
+    manifest = validate_complete_shard_set(
+        shard_dir, canonical_tag, n_base_noise,
+        raw_dataset_names=("Tmunu_pervec", "CHI_pervec"),
+    )
+    reference_attrs = manifest["reference_attrs"]
+    source_shape = manifest["raw_tails"]["Tmunu_pervec"]
+    chi_shape = manifest["raw_tails"]["CHI_pervec"]
+    all_parts = manifest["parts"]
+    total_sources = manifest["total_sources"]
     canonical_attrs = {
         key: value for key, value in reference_attrs.items()
         if key not in {"shard_schema", "output_kind", "block_interval_solves", "hp_vectors_per_base"}
@@ -716,14 +553,13 @@ def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, ringed_tag, n_base_n
         _copy_h5_attrs(out, canonical_attrs)
         raw = out.require_group("raw")
         raw_t = raw.create_dataset("Tmunu_pervec", shape=(total_sources,) + source_shape, dtype=np.complex128)
-        chi_shape = None
-        raw_chi = None
+        raw_chi = raw.create_dataset("CHI_pervec", shape=(total_sources,) + chi_shape, dtype=np.complex128)
         source_datasets = {
             name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
             for name in ("source_index", "base_noise_index", "hp_index")
         }
         t_sum = np.zeros(source_shape, dtype=np.complex128)
-        chi_sum = None
+        chi_sum = np.zeros(chi_shape, dtype=np.complex128)
 
         ringed_attrs = dict(canonical_attrs)
         ringed_attrs.update({
@@ -753,16 +589,13 @@ def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, ringed_tag, n_base_n
         }
         kinetic_sum = np.zeros(n_flow, dtype=np.complex128)
 
-        for base_idx, hp_start, hp_stop, path in all_parts:
-            start = base_idx * hp_count + hp_start
-            stop = base_idx * hp_count + hp_stop
+        for part_info in all_parts:
+            path = part_info["path"]
+            start = part_info["output_start"]
+            stop = part_info["output_stop"]
             with h5py.File(path, "r") as part:
                 t_data = part["raw/Tmunu_pervec"][()]
                 chi_data = part["raw/CHI_pervec"][()]
-                if raw_chi is None:
-                    chi_shape = tuple(chi_data.shape[1:])
-                    raw_chi = raw.create_dataset("CHI_pervec", shape=(total_sources,) + chi_shape, dtype=np.complex128)
-                    chi_sum = np.zeros(chi_shape, dtype=np.complex128)
                 raw_t[start:stop] = t_data
                 raw_chi[start:stop] = chi_data
                 t_sum += np.sum(t_data, axis=0)
@@ -811,6 +644,7 @@ class EMTDisconnectedGluon1pt:
         self.flow_type = _normalize_flow_type(parameters["flow_type"])
         self.flow_epsilon = parameters["flow_epsilon"]
         self.flow_steps = parameters["flow_steps"]
+        self.config_num = parameters.get("config_num")
 
     def _advance_flowed_gauge(self, U_flow, step, stepsize, Nsteps):
         """Advance the flowed gauge field using the gluon-flow schedule."""
@@ -908,6 +742,7 @@ class EMTDisconnectedGluon1pt:
         Tmunu_t /= Ns3
         attrs = {
             "measurement": "gluon_1pt",
+            "config_num": self.config_num,
             "flow_type": self.flow_type,
             "flow_epsilon": self.flow_epsilon,
             "flow_steps": self.flow_steps,
@@ -931,4 +766,5 @@ __all__ = [
     "EMTDisconnectedQuark1pt",
     "EMTDisconnectedGluon1pt",
     "my_gammas",
+    "validate_quark_gluon_loop_axes",
 ]

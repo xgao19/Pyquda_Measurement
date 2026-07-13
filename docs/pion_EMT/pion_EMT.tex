@@ -961,7 +961,7 @@ For each gauge configuration, four HDF5 files are read:
                        & \code{avg/CHI}      & \code{[2, Nq, Ns+1, Nt]} \\
                        & \code{raw/Tmunu\_pervec} & \code{[Nv, 4, 4, Nq, Ns+1, Nt]} \\
 \midrule
-\code{EMTg/...h5}     & \code{Tmunu/Tij}   & \code{[Nq, Ns+1, Nt]} each \\
+\code{EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5} & \code{Tmunu/Tij} & \code{[Nq, Ns+1, Nt]} each \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1347,7 +1347,7 @@ Quark 3pt     & \code{EMT3pt/}  & \code{C2}          & \code{[Nt]} \\
               &                  & \code{C3\_Tmunu}    & \code{[Nts, Ns+1, Nq, 4, 4, Nt]} \\
 Quark 1pt     & \code{EMTc/}    & \code{raw/Tmunu\_pervec} & \code{[Nv, 4, 4, Nq, Ns+1, Nt]} \\
               &                  & \code{avg/Tmunu/Tij}    & \code{[Nq, Ns+1, Nt]} \\
-Gluon 1pt       & \code{EMTg/}    & \code{Tmunu/Tij}        & \code{[Nq, Ns+1, Nt]} \\
+Gluon 1pt       & \code{EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5} & \code{Tmunu/Tij} & \code{[Nq, Ns+1, Nt]} \\
 \bottomrule
 \end{tabular}
 \end{table}

@@ -41,17 +41,16 @@ from pyquda.field import LatticeFermion, LatticeGauge, LatticeLink
 from pyquda_utils import core, phase
 from pyquda_utils.convert import fermionToLink, linkToFermion
 
-from pyquda_measurement_utils.io_corr import save_disconnected_qTMD_1pt_hdf5
 from pyquda_measurement_utils.pion_utils_vibe_develop import gamma_stack, my_gammas
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
     array_to_numpy,
     effective_n_inversions,
-    iter_noise_sources,
+    iter_noise_base_hp_interval,
     normalize_noise_scheme,
     create_gi_qtmd_wilsonline_index_lists,
-    source_bookkeeping_arrays,
+    part_source_bookkeeping,
     validate_hierarchical_probing_options,
 )
 from pyquda_measurement_utils.disconnected_shards import (
@@ -61,17 +60,15 @@ from pyquda_measurement_utils.disconnected_shards import (
     completion_payload,
     expected_part_attrs,
     hp_vectors_per_base,
-    normalize_output_mode,
-    read_base_completion_marker,
     selected_base_range,
     shard_part_path,
     validate_raw_part_hdf5,
+    validate_complete_shard_set,
     write_base_completion_marker,
     write_raw_part_hdf5,
 )
 
 _VALID_OPERATOR_KINDS = {"CG_qTMD", "CG_PDF", "GI_PDF", "GI_qTMD"}
-_VALID_GI_QTMD_STAPLE_MODES = {"link_cache", "direct_covdev"}
 
 
 def gi_qtmd_staple_segments(W_index):
@@ -101,8 +98,8 @@ def gi_qtmd_staple_segments(W_index):
     ]
 
 
-def apply_signed_covariant_shift(gauge: LatticeGauge, fermion: LatticeFermion, direction: int, steps: int):
-    """Apply signed nearest-neighbor covariant shifts to a fermion field."""
+def _apply_signed_covariant_shift(gauge, fermion, direction, steps):
+    """Transport a field while constructing a cached staple link."""
     shifted = fermion
     if steps > 0:
         for _ in range(steps):
@@ -113,11 +110,10 @@ def apply_signed_covariant_shift(gauge: LatticeGauge, fermion: LatticeFermion, d
     return shifted
 
 
-def create_fermion_TMD_GI(gauge: LatticeGauge, fermion: LatticeFermion, W_index):
-    """Apply the fixed-length gauge-invariant qTMD staple to a fermion."""
+def _transport_staple_field(gauge, fermion, W_index):
     shifted = fermion.copy()
     for direction, steps in gi_qtmd_staple_segments(W_index):
-        shifted = apply_signed_covariant_shift(gauge, shifted, direction, steps)
+        shifted = _apply_signed_covariant_shift(gauge, shifted, direction, steps)
     return shifted
 
 
@@ -125,7 +121,7 @@ def build_gi_qtmd_staple_link(gauge: LatticeGauge, W_index):
     """Build a gauge-only staple transporter matching direct covDev convention."""
     link = LatticeLink(gauge.latt_info)
     link_as_fermion = linkToFermion(link)
-    transported = create_fermion_TMD_GI(gauge, link_as_fermion, W_index)
+    transported = _transport_staple_field(gauge, link_as_fermion, W_index)
     return fermionToLink(transported)
 
 
@@ -157,11 +153,10 @@ class DisconnectedQuarkqTMD1pt:
         self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
         self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
         self.hp_ordering = parameters.get("hp_ordering", "global_xyzt_gray_projected_to_evenodd")
-        self.gi_qtmd_staple_mode = parameters.get("gi_qtmd_staple_mode", "link_cache")
-        self.config_num = parameters.get("config_num")
+        if parameters.get("config_num") is None:
+            raise ValueError("config_num is required for counter-based disconnected noise")
+        self.config_num = int(parameters["config_num"])
         self.gauge_preprocessing = parameters.get("gauge_preprocessing", "unspecified")
-        if self.gi_qtmd_staple_mode not in _VALID_GI_QTMD_STAPLE_MODES:
-            raise ValueError(f"gi_qtmd_staple_mode should be one of {_VALID_GI_QTMD_STAPLE_MODES}, got {self.gi_qtmd_staple_mode!r}")
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
 
     def create_TMD_Wilsonline_index_list_CG(self):
@@ -275,9 +270,8 @@ class DisconnectedQuarkqTMD1pt:
                 shifted_xi = self.create_fermion_PDF_GI(gauge, shifted_xi, W_index, W_index_previous)
             elif operator_kind == "GI_qTMD":
                 if staple_links is None:
-                    shifted_xi = create_fermion_TMD_GI(gauge, xi, W_index)
-                else:
-                    shifted_xi = create_fermion_TMD_GI_from_link(staple_links[tuple(W_index)], xi, W_index)
+                    raise ValueError("GI_qTMD production requires the staple-link cache")
+                shifted_xi = create_fermion_TMD_GI_from_link(staple_links[tuple(W_index)], xi, W_index)
             else:
                 raise ValueError(f"Unsupported operator_kind {operator_kind!r}")
 
@@ -325,8 +319,14 @@ class DisconnectedQuarkqTMD1pt:
                     "base_noise_index": (count,),
                     "hp_index": (count,),
                 }
+                bookkeeping = part_source_bookkeeping(
+                    base_idx, hp_start, hp_stop, hp_count
+                )
                 if U.latt_info.mpi_rank == 0:
-                    present = validate_raw_part_hdf5(path, expected_attrs, raw_shapes, metadata)
+                    present = validate_raw_part_hdf5(
+                        path, expected_attrs, raw_shapes, metadata,
+                        source_bookkeeping=bookkeeping,
+                    )
                 else:
                     present = None
                 present = comm.bcast(present, root=0)
@@ -335,22 +335,11 @@ class DisconnectedQuarkqTMD1pt:
                     continue
 
                 loop_part = np.zeros((count,) + loop_shape, dtype=np.complex128)
-                global_indices = np.arange(base_idx * hp_count + hp_start, base_idx * hp_count + hp_stop, dtype=np.int32)
-                bookkeeping = {
-                    "source_index": global_indices,
-                    "base_noise_index": np.full(count, base_idx, dtype=np.int32),
-                    "hp_index": np.arange(hp_start, hp_stop, dtype=np.int32),
-                }
-                skip_bases = set(range(n_vec)) - {base_idx}
-                keep_indices = set(int(idx) for idx in global_indices)
-                skip_effective = set(range(n_vec * hp_count)) - keep_indices
-                for _, _, hp_idx, xi in iter_noise_sources(
-                    U.latt_info, n_vec, n_zn, self.noise_scheme,
-                    self.hp_num_vectors, self.hp_ordering,
-                    skip_base_indices=skip_bases,
-                    skip_effective_indices=skip_effective,
-                    counter_noise_config=int(attrs["config_num"]),
-                    counter_noise_stream=int(attrs["noise_stream"]),
+                for _, _, hp_idx, xi in iter_noise_base_hp_interval(
+                    U.latt_info, base_idx, hp_start, hp_stop, n_zn,
+                    self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
+                    config_num=int(attrs["config_num"]),
+                    noise_stream=int(attrs["noise_stream"]),
                 ):
                     eta = dirac.invert(xi)
                     loops = self._contract_one_operator_list(
@@ -375,7 +364,9 @@ class DisconnectedQuarkqTMD1pt:
                     validate_raw_part_hdf5(path, expected_attrs, {
                         "loop_pervec": (count,) + loop_shape,
                         "source_index": (count,), "base_noise_index": (count,), "hp_index": (count,),
-                    }, metadata)
+                    }, metadata, source_bookkeeping=part_source_bookkeeping(
+                        base_idx, hp_start, hp_stop, hp_count
+                    ))
                 write_base_completion_marker(
                     base_completion_path(shard_dir, tag, base_idx),
                     completion_payload(tag, base_idx, hp_count, block_interval_solves, part_paths),
@@ -390,7 +381,6 @@ class DisconnectedQuarkqTMD1pt:
         randPara,
         tag: str,
         operator_kind: str = "GI_PDF",
-        output_mode="monolithic",
         shard_dir=None,
         base_start=0,
         base_stop=None,
@@ -406,11 +396,7 @@ class DisconnectedQuarkqTMD1pt:
         latt_info = U.latt_info
         global_size = latt_info.global_size
         Ns3 = global_size[0] * global_size[1] * global_size[2]
-        output_mode = normalize_output_mode(output_mode)
-        if self.config_num is None:
-            counter_config, counter_stream = int(randseed), 0
-        else:
-            counter_config, counter_stream = int(self.config_num), int(randseed)
+        counter_config, counter_stream = int(self.config_num), int(randseed)
 
         xi_0, nu = 1.0, 1.0
         multigrid = [[
@@ -437,7 +423,7 @@ class DisconnectedQuarkqTMD1pt:
         if len(W_index_list) == 0:
             raise ValueError(f"No Wilson-line indices were generated for operator_kind {operator_kind!r}")
         staple_links = None
-        if operator_kind == "GI_qTMD" and self.gi_qtmd_staple_mode == "link_cache":
+        if operator_kind == "GI_qTMD":
             mpi_print(latt_info, f"Build {len(W_index_list)} GI_qTMD staple transporters.")
             staple_links = build_gi_qtmd_staple_links(U, W_index_list)
 
@@ -460,127 +446,35 @@ class DisconnectedQuarkqTMD1pt:
             "effective_n_inversions": n_eff,
             "n_zn": n_zn,
             "config_num": counter_config,
-            "rand_seed": counter_stream,
             "noise_stream": counter_stream,
             "noise_generator": COUNTER_NOISE_ALGORITHM,
             "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
             "noise_scheme": self.noise_scheme,
             "hp_num_vectors": self.hp_num_vectors,
             "hp_ordering": self.hp_ordering,
-            "gi_qtmd_staple_mode": self.gi_qtmd_staple_mode,
+            "gi_qtmd_staple_mode": "link_cache",
             "loop_convention": "eta_dagger_Gamma_O_b_xi",
         }
-        if output_mode == "base_shards":
-            return self._measure_base_shards(
-                U, dirac, randPara, tag, operator_kind, phases_q, W_index_list,
-                staple_links, attrs, shard_dir, base_start, base_stop,
-                block_interval_solves,
-            )
-
-        source_bookkeeping = source_bookkeeping_arrays(n_eff)
-        loop_pervec = None
-
-        for vec_picked, base_idx, hp_idx, xi in iter_noise_sources(
-            latt_info, n_vec, n_zn, self.noise_scheme, self.hp_num_vectors,
-            self.hp_ordering, counter_noise_config=counter_config,
-            counter_noise_stream=counter_stream,
-        ):
-            mpi_print(latt_info, f"vec {vec_picked} base {base_idx} hp {hp_idx}")
-            source_bookkeeping["base_noise_index"][vec_picked] = base_idx
-            source_bookkeeping["hp_index"][vec_picked] = hp_idx
-            eta = dirac.invert(xi)
-
-            loops = self._contract_one_operator_list(latt_info, U, eta, xi, phases_q, W_index_list, operator_kind, staple_links=staple_links)
-            loops = getMPIComm().bcast(loops, root=0)
-            if loop_pervec is None:
-                loop_pervec = np.zeros(
-                    (n_eff, loops.shape[0], loops.shape[1], loops.shape[2], loops.shape[3]),
-                    dtype=np.complex128,
-                )
-            loop_pervec[vec_picked] = loops
-            del eta, loops
-
-        mpi_print(latt_info, "disconnected qTMD random vectors done.")
-
-        loop_avg = np.mean(loop_pervec, axis=0) / Ns3
-        if latt_info.mpi_rank == 0:
-            save_disconnected_qTMD_1pt_hdf5(
-                tag, loop_pervec, loop_avg, my_gammas, qlist, W_index_list,
-                attrs=attrs, source_bookkeeping=source_bookkeeping,
-            )
-
-        return loop_avg
+        return self._measure_base_shards(
+            U, dirac, randPara, tag, operator_kind, phases_q, W_index_list,
+            staple_links, attrs, shard_dir, base_start, base_stop,
+            block_interval_solves,
+        )
 
 
 def finalize_disconnected_qtmd_1pt_shards(shard_dir, canonical_tag, n_base_noise):
     """Validate qTMD base shards and atomically build the canonical loop file."""
-    shard_dir = Path(shard_dir)
     n_base_noise = int(n_base_noise)
-    if n_base_noise <= 0:
-        raise ValueError(f"n_base_noise should be positive, got {n_base_noise}")
-    markers = []
-    for base_idx in range(n_base_noise):
-        marker_path = base_completion_path(shard_dir, canonical_tag, base_idx)
-        marker = read_base_completion_marker(marker_path)
-        if marker is None:
-            raise ValueError(f"missing completion marker for base {base_idx}: {marker_path}")
-        markers.append(marker)
-
-    hp_count = int(markers[0]["hp_vectors_per_base"])
-    interval = int(markers[0]["block_interval_solves"])
-    excluded = {
-        "base_noise_index", "part_index", "hp_start", "hp_stop_exclusive",
-        "part_complete", "configured_n_base_noise",
-    }
-    reference_attrs = None
-    reference_metadata = None
-    loop_shape = None
-    all_parts = []
-    for base_idx, marker in enumerate(markers):
-        if int(marker.get("base_noise_index", -1)) != base_idx:
-            raise ValueError(f"qTMD completion marker has wrong base index {base_idx}")
-        if int(marker["hp_vectors_per_base"]) != hp_count or int(marker["block_interval_solves"]) != interval:
-            raise ValueError(f"base {base_idx} completion marker has incompatible part layout")
-        expected_names = []
-        for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, interval):
-            path = shard_part_path(shard_dir, canonical_tag, base_idx, part_idx, hp_start, hp_stop)
-            expected_names.append(path.name)
-            if not path.exists():
-                raise ValueError(f"missing qTMD shard part {path}")
-            with h5py.File(path, "r") as h5:
-                if not bool(h5.attrs.get("part_complete", False)):
-                    raise ValueError(f"incomplete qTMD shard part {path}")
-                common = {key: h5.attrs[key] for key in h5.attrs if key not in excluded}
-                metadata = {
-                    name: h5[name][()]
-                    for name in ("gamma_list", "momentum_list", "W_index_list")
-                }
-                if reference_attrs is None:
-                    reference_attrs = common
-                    reference_metadata = metadata
-                    loop_shape = tuple(h5["raw/loop_pervec"].shape[1:])
-                else:
-                    for key, value in reference_attrs.items():
-                        if key not in common or not np.array_equal(np.asarray(common[key]), np.asarray(value)):
-                            raise ValueError(f"qTMD shard {path} has incompatible attribute {key}")
-                    for name, value in reference_metadata.items():
-                        if not np.array_equal(metadata[name], value):
-                            raise ValueError(f"qTMD shard {path} has incompatible {name}")
-                count = hp_stop - hp_start
-                if tuple(h5["raw/loop_pervec"].shape) != (count,) + loop_shape:
-                    raise ValueError(f"qTMD shard {path} has incompatible loop shape")
-                expected_sources = np.arange(base_idx * hp_count + hp_start, base_idx * hp_count + hp_stop)
-                if not np.array_equal(h5["raw/source_index"][()], expected_sources):
-                    raise ValueError(f"qTMD shard {path} has incompatible source indices")
-                if not np.array_equal(h5["raw/base_noise_index"][()], np.full(count, base_idx)):
-                    raise ValueError(f"qTMD shard {path} has incompatible base indices")
-                if not np.array_equal(h5["raw/hp_index"][()], np.arange(hp_start, hp_stop)):
-                    raise ValueError(f"qTMD shard {path} has incompatible HP indices")
-            all_parts.append((base_idx, hp_start, hp_stop, path))
-        if marker.get("parts") != expected_names:
-            raise ValueError(f"base {base_idx} completion marker has incompatible part list")
-
-    total_sources = n_base_noise * hp_count
+    manifest = validate_complete_shard_set(
+        shard_dir, canonical_tag, n_base_noise,
+        raw_dataset_names=("loop_pervec",),
+        metadata_dataset_names=("gamma_list", "momentum_list", "W_index_list"),
+    )
+    reference_attrs = manifest["reference_attrs"]
+    reference_metadata = manifest["metadata"]
+    loop_shape = manifest["raw_tails"]["loop_pervec"]
+    all_parts = manifest["parts"]
+    total_sources = manifest["total_sources"]
     canonical_attrs = {
         key: value for key, value in reference_attrs.items()
         if key not in {"shard_schema", "output_kind", "block_interval_solves", "hp_vectors_per_base"}
@@ -604,9 +498,10 @@ def finalize_disconnected_qtmd_1pt_shards(shard_dir, canonical_tag, n_base_noise
             for name in ("source_index", "base_noise_index", "hp_index")
         }
         loop_sum = np.zeros(loop_shape, dtype=np.complex128)
-        for base_idx, hp_start, hp_stop, path in all_parts:
-            start = base_idx * hp_count + hp_start
-            stop = base_idx * hp_count + hp_stop
+        for part_info in all_parts:
+            path = part_info["path"]
+            start = part_info["output_start"]
+            stop = part_info["output_stop"]
             with h5py.File(path, "r") as part:
                 values = part["raw/loop_pervec"][()]
                 raw_loop[start:stop] = values

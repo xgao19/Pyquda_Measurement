@@ -1314,7 +1314,8 @@ The EMT output files are organized in subdirectories:
   \item \texttt{EMTproton2pt/} -- proton two-point functions;
   \item \texttt{EMTproton3pt/} -- proton connected three-point functions;
   \item \texttt{EMTc/} -- stochastic quark one-point loops (shared with meson);
-  \item \texttt{EMTg/} -- flowed gluon one-point functions (shared with meson).
+  \item \texttt{EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5} -- source-independent
+        flowed gluon one-point functions shared by all hadrons.
 \end{itemize}
 The canonical EMTc loop name is source independent,
 \texttt{<lat>.EMTc.<cfg>.<ama>.<sm>.h5}.  It stores all absolute insertion
@@ -1493,8 +1494,8 @@ over gauge configurations first, then evaluate the nonlinear factor; averaging
 the inverses formed on separate configurations is incorrect.  The unflowed
 step \(t=0\) must not be used for ringed normalization because the formula
 contains \(t^{-2}\).  The standalone ringed-normalization workflow remains
-available for dedicated high-statistics, spin--color dilution, block-output,
-and resume runs.
+available for dedicated high-statistics and spin--color-diluted runs, using the
+same base/HP-part checkpoint model as EMT.
 The production quark one-point wrapper uses base-oriented HP-interval shards;
 an explicit streaming finalizer validates complete base coverage before
 publishing the canonical loop and kinetic companion.

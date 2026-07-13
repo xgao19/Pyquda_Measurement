@@ -14,59 +14,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pyquda_measurement_utils.io_corr import (
     save_emt_gluon_1pt_hdf5,
     save_emt_meson_2pt_hdf5,
-    save_emt_quark_1pt_hdf5,
     save_emt_quark_3pt_hdf5,
 )
-
-
-def test_emt_quark_1pt_hdf5_schema_and_upper_triangle(tmp_path):
-    tag = str(tmp_path / "EMTquark1pt" / "schema")
-    tmunu_pervec = np.zeros((2, 4, 4, 3), dtype=np.complex128)
-    chi_pervec = np.ones((2, 3), dtype=np.complex128)
-    tmunu = np.arange(4 * 4 * 3, dtype=np.float64).reshape(4, 4, 3)
-    chi = np.arange(3, dtype=np.float64)
-    attrs = {
-        "measurement": "EMT_quark_1pt",
-        "flow_epsilon": 0.01,
-        "operator_normalization": "unrenormalized_flowed_quark_bilinear",
-        "renormalization_applied": False,
-        "renormalization_stage": "analysis_stage",
-        "n_zn": 4,
-        "config_num": 11,
-        "noise_stream": 2,
-        "noise_generator": "splitmix64_global_coordinate_v1",
-    }
-    source_bookkeeping = {"hp_source_index": [0, 1], "hp_distance": [0, 2]}
-
-    save_emt_quark_1pt_hdf5(tag, tmunu_pervec, chi_pervec, tmunu, chi, attrs=attrs, source_bookkeeping=source_bookkeeping)
-
-    with h5py.File(tag + ".h5", "r") as h5:
-        assert h5.attrs["measurement"] == "EMT_quark_1pt"
-        assert h5.attrs["operator_normalization"] == "unrenormalized_flowed_quark_bilinear"
-        assert not h5.attrs["renormalization_applied"]
-        assert h5.attrs["renormalization_stage"] == "analysis_stage"
-        assert h5.attrs["n_zn"] == 4
-        assert h5.attrs["config_num"] == 11
-        assert h5.attrs["noise_stream"] == 2
-        assert h5.attrs["noise_generator"] == "splitmix64_global_coordinate_v1"
-        assert h5["raw/Tmunu_pervec"].shape == tmunu_pervec.shape
-        assert h5["raw/CHI_pervec"].shape == chi_pervec.shape
-        assert h5["raw/hp_source_index"].shape == (2,)
-        assert h5["avg/CHI"].shape == (3,)
-        assert bool(h5["avg/Tmunu"].attrs["upper_triangle_only"])
-        assert "avg/Tmunu/T11" in h5
-        assert "avg/Tmunu/T14" in h5
-        assert "avg/Tmunu/T41" not in h5
 
 
 def test_emt_gluon_1pt_hdf5_schema_and_upper_triangle(tmp_path):
     tag = str(tmp_path / "EMTgluon1pt" / "schema")
     tmunu_t = np.arange(4 * 4 * 5, dtype=np.float64).reshape(4, 4, 5)
 
-    save_emt_gluon_1pt_hdf5(tag, tmunu_t, attrs={"measurement": "EMT_gluon_1pt"})
+    attrs = {
+        "measurement": "EMT_gluon_1pt",
+        "config_num": 17,
+        "flow_epsilon": 0.207936,
+        "flow_times": np.asarray([0.0, 0.207936]),
+    }
+    save_emt_gluon_1pt_hdf5(tag, tmunu_t, attrs=attrs)
 
     with h5py.File(tag + ".h5", "r") as h5:
         assert h5.attrs["measurement"] == "EMT_gluon_1pt"
+        assert h5.attrs["config_num"] == 17
+        assert h5.attrs["flow_epsilon"] == 0.207936
+        np.testing.assert_array_equal(h5.attrs["flow_times"], [0.0, 0.207936])
         assert bool(h5["Tmunu"].attrs["upper_triangle_only"])
         assert h5["Tmunu/T22"].shape == (5,)
         assert "Tmunu/T21" not in h5

@@ -5,15 +5,15 @@ used for EMT disconnected diagrams.
 The Perlmutter entry points are:
 
 ```bash
-bash perlmutter/run_quark_1pt.sh
-bash perlmutter/run_gluon_1pt.sh
+bash perlmutter/run_quark_1pt.sh --config_num 1000
+bash perlmutter/run_gluon_1pt.sh --config_num 1000
 ```
 
 Quark production runs default to base-oriented shards.  A measurement job
 writes only recoverable parts; after every requested base is complete, run:
 
 ```bash
-bash perlmutter/run_finalize_quark_1pt.sh
+bash perlmutter/run_finalize_quark_1pt.sh --config_num 1000
 ```
 
 The finalizer validates every base/HP interval before atomically publishing the
@@ -173,7 +173,7 @@ attrs/
   upper_triangle_only
   mass, csw, tol, maxiter
   n_vec, n_base_noise, effective_n_inversions
-  n_zn, config_num, rand_seed, noise_stream
+  n_zn, config_num, noise_stream
   noise_generator, noise_counter_order
   noise_scheme, hp_num_vectors, hp_ordering
 
@@ -229,8 +229,10 @@ hp_index          hierarchical-probing vector index for that base noise
 Gluon output:
 
 ```text
+EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5
 attrs/
   measurement
+  config_num
   flow_type, flow_epsilon, flow_steps, flow_times
   qext, pf, p_2pt
   volume_norm
@@ -238,6 +240,10 @@ attrs/
 
 Tmunu/T11, T12, ..., T44
 ```
+
+The gluon loop is source independent and is reused for every hadron source on
+the same configuration.  Shared quark and gluon wrappers both read
+`EMT_1PT_FLOW_EPSILON`, whose default is `0.207936`.
 
 ## Minimal HP Smoke Test
 
@@ -252,7 +258,7 @@ EMT_1PT_N_VEC=1 \
 EMT_1PT_NOISE_SCHEME=hierarchical_probing \
 EMT_1PT_HP_NUM_VECTORS=2 \
 EMT_1PT_HP_ORDERING=interleaved_xyz_binary_projected_to_evenodd \
-bash run_quark_1pt.sh
+bash run_quark_1pt.sh --config_num 1000
 ```
 
 Expected checks:
@@ -271,7 +277,6 @@ raw/hp_index = [0, 1]
 Production controls are:
 
 ```text
-EMT_1PT_OUTPUT_MODE=base_shards
 EMT_1PT_BASE_START=0
 EMT_1PT_BASE_STOP=EMT_1PT_N_VEC
 EMT_1PT_BLOCK_INTERVAL_SOLVES=64
@@ -285,6 +290,9 @@ all its parts are reopened and validated.  Partial HP parts are checkpoints,
 not complete estimators.  Jobs may process non-overlapping base ranges in
 parallel, but overlapping ranges are unsupported.
 
-`EMT_1PT_OUTPUT_MODE=monolithic` retains the legacy library/output path for
-small comparisons.  The production shard path never overwrites a conflicting
-or corrupt part automatically.
+There is no monolithic production mode.  Configuration identity is accepted
+only through the required `--config_num` CLI option; it is never inferred from
+an environment variable or silently defaulted to zero.  Small numerical references belong in
+tests; the production shard path never overwrites a conflicting or corrupt
+part automatically.  `config_num` is mandatory and HDF5 provenance stores only
+`noise_stream`, not a duplicate `rand_seed` alias.

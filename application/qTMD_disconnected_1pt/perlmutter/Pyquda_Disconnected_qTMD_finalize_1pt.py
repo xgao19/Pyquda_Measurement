@@ -6,7 +6,7 @@ from pyquda_measurement_utils.io_corr import get_disconnected_qTMD_loop_file_tag
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--config_num", type=int, default=int(os.environ.get("QTMD_1PT_CONFIG_NUM", "0")))
+parser.add_argument("--config_num", type=int, required=True)
 args = parser.parse_args()
 
 conf = args.config_num

@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-07-11
+Last updated: 2026-07-13
 
 This file contains only reusable environment facts, stable conventions, and
 pitfalls that are easy to repeat.  Commit history and completed-work summaries
@@ -19,10 +19,19 @@ belong in `log.md` and Git history.
 
 ### Perlmutter
 
-- Use `systems/perlmutter/activate-venv-quda.sh` rather than reconstructing the
-  module stack manually.
-- The production QUDA install is normally
-  `/global/cfs/cdirs/m3760/xgao/software/quda/install`.
+- The default software root is
+  `/global/cfs/cdirs/m4559/xgao/software_gradientflow`; do not fall back to the
+  old `/global/cfs/cdirs/m3760/xgao/software` stack.
+- The default Python environment is
+  `/global/cfs/cdirs/m4559/xgao/software_gradientflow/venv-quda-develop`.
+- The QUDA install prefix is
+  `/global/cfs/cdirs/m4559/xgao/software_gradientflow/quda-develop/install`.
+- PyQUDA is installed editable from
+  `/global/cfs/cdirs/m4559/xgao/software_gradientflow/PyQUDA-develop` (core at
+  `PyQUDA-develop/pyquda_core`).
+- Use `systems/perlmutter/activate-venv-quda.sh` for the module stack, but verify
+  that `python` and `QUDA_PATH` resolve to the locations above; do not accept
+  stale helper defaults silently.
 - The activation helper supplies the required Cray MPI/HDF5 settings.  Keep
   `MPICH_GPU_SUPPORT_ENABLED=1` and verify `h5py.get_config().mpi` when parallel
   HDF5 is required.
@@ -100,9 +109,14 @@ python tests/run_smoke_tests.py
 - Quark loops use decomposition-independent full-volume counter-based `Z4`
   noise.  The counter includes global `x,y,z,t`, spin, color, configuration,
   base-noise index, and an optional stream salt.
+- Production configuration identity must be supplied explicitly on the CLI;
+  never infer it from an environment variable or silently default it to zero.
 - One source-independent EMTc file is written per configuration and contains
   every absolute insertion time.  Reuse it for all hadron source times and
   align with `tau_abs = (t0 + tau_rel) % Nt` in analysis.
+- Gluon EMT loops are also source independent and use
+  `EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5`.  Quark and gluon wrappers must share
+  the same flow grid; the production epsilon default is `0.207936`.
 - Fermion flow is four dimensional.  With `xi_f=K(t_f)xi` and
   `eta_f=K(t_f)D^{-1}xi`, a fixed-time loop estimates
   `Tr[P_tau Gamma K D^{-1} K^dag]`: the observable is spatially summed at fixed
@@ -146,13 +160,12 @@ python tests/run_smoke_tests.py
 
 ## Flowed-Quark Ringed Normalization
 
-- Persistent production output uses fixed-interval `.block*.h5` files;
-  `block_interval_solves` defaults to 64.
-- HP256 sample-log resume is intentionally narrow: hierarchical probing,
-  `hp_num_vectors=256`, and no spin-color dilution.  A completed sample-log
-  entry represents a full base-noise sample, not one interval block.
-- HP256 sample identity is the counter algorithm plus configuration, stream,
-  and base index, so skipped or resumed bases reconstruct the same source.
-- Point spin-color dilution has 12 channels.  The final kinetic observable must
-  sum the spin-color trace via `spin_color_trace_factor=12`; averaging those
-  channels would give the wrong normalization.
+- Standalone ringed, EMT, and qTMD share base/HP-part shards, strict resume
+  validation, and per-base completion markers.  There is no text sample log or
+  monolithic production mode.
+- Point spin-color dilution has 12 channels and a shard part must never split
+  one HP pattern across those channels.  The finalized kinetic observable uses
+  `spin_color_trace_factor=12`; a plain channel average is wrong.
+- Per-configuration canonical files store kinetic data only.  Average `K`
+  equally across configurations before evaluating the nonlinear ringed factors;
+  never average per-configuration `1/K`.

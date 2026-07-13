@@ -144,7 +144,7 @@ EMT_1PT_N_VEC=2 \
 EMT_1PT_N_ZN=4 \
 EMT_1PT_RAND_SEED=0 \
 EMT_1PT_NOISE_SCHEME=zn \
-bash run_quark_1pt.sh
+bash run_quark_1pt.sh --config_num 1000
 ```
 
 Expected quark output:
@@ -200,23 +200,25 @@ gauge ensemble.
 ```bash
 EMT_1PT_FLOW_STEPS=1 \
 EMT_1PT_QMAX=0 \
-bash run_gluon_1pt.sh
+bash run_gluon_1pt.sh --config_num 1000
 ```
 
 Expected gluon output:
 
 ```text
-data/EMTg/*.h5
+data/EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5
 Tmunu/T11 ... T44
 ```
 
-There is no stochastic source axis for the gluon loop.
+There is no stochastic source axis or hadron source-position tag for the gluon
+loop.  Run the shared `application/EMT_disconnected_1pt/perlmutter/run_gluon_1pt.sh`
+entry; meson/proton-specific gluon wrappers are intentionally not maintained.
 
 ### Step 3: Proton C2
 
 ```bash
 EMT_1PT_QMAX=0 \
-bash run_proton_2pt.sh
+bash run_proton_2pt.sh --config_num 1000
 ```
 
 Expected C2 output:
@@ -237,7 +239,7 @@ momentum = PX0PY0PZ0
 
 ```bash
 EMT_DISC_T_SEPS=2 \
-bash run_build_disconnected_3pt.sh
+bash run_build_disconnected_3pt.sh --configs 1000
 ```
 
 Expected merger output:
@@ -312,11 +314,10 @@ error analysis.
 To build the physical disconnected building block, provide matching lists:
 
 ```bash
-EMT_DISC_CONFIGS=1000,1008,1016
 EMT_DISC_C2_FILES=/path/c2_1000.h5,/path/c2_1008.h5,/path/c2_1016.h5
 EMT_DISC_QUARK_1PT_FILES=/path/q_1000.h5,/path/q_1008.h5,/path/q_1016.h5
 EMT_DISC_GLUON_1PT_FILES=/path/g_1000.h5,/path/g_1008.h5,/path/g_1016.h5
-bash run_build_disconnected_3pt.sh
+bash run_build_disconnected_3pt.sh --configs 1000,1008,1016
 ```
 
 For `Ncfg >= 2`, the builder writes:
@@ -344,12 +345,15 @@ Shared input/output controls:
 ```text
 EMT_1PT_DATA_DIR
 EMT_1PT_GAUGE_PATH
-EMT_1PT_CONFIG_NUM
 EMT_1PT_MPI_GEOMETRY
 EMT_1PT_QMAX
 EMT_1PT_FLOW_STEPS
 EMT_1PT_SM_TAG
 ```
+
+Configuration identity is deliberately not an environment variable.  Pass
+`--config_num CFG` to measurement/finalize wrappers and `--configs
+CFG[,CFG...]` to the disconnected 3pt builder.
 
 Quark stochastic controls:
 

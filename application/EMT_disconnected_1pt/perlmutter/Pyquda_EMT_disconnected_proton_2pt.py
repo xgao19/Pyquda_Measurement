@@ -30,10 +30,10 @@ def parse_mg_block(default):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--config_num", type=int, default=int(os.environ.get("EMT_1PT_CONFIG_NUM", "0")))
+parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("EMT_1PT_MPI_GEOMETRY", "1.1.1.1"))
 parser.add_argument("--interpolator", type=str, default=os.environ.get("EMT_DISC_INTERPOLATOR", "5"))
-args, unknown = parser.parse_known_args()
+args = parser.parse_args()
 
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]

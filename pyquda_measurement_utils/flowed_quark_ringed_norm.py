@@ -6,9 +6,12 @@ the resulting factors can be consumed by any flowed-quark operator measured with
 the same Dirac operator, gauge preprocessing, and flow schedule.
 """
 
+import os
 from pathlib import Path
 from time import perf_counter
+from uuid import uuid4
 
+import h5py
 import numpy as np
 from opt_einsum import contract
 
@@ -16,14 +19,28 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
     array_to_numpy,
     effective_n_inversions,
-    iter_noise_sources,
+    iter_noise_base_hp_interval,
     normalize_noise_scheme,
     normalize_spin_color_dilution,
-    source_bookkeeping_arrays,
+    part_source_bookkeeping,
     spin_color_dilution_factor,
     validate_hierarchical_probing_options,
 )
-from pyquda_measurement_utils.io_corr import save_flowed_quark_ringed_norm_hdf5
+from pyquda_measurement_utils.disconnected_shards import (
+    base_completion_path,
+    base_part_ranges,
+    canonical_temp_path,
+    completion_payload,
+    expected_part_attrs,
+    hp_vectors_per_base,
+    read_base_completion_marker,
+    selected_base_range,
+    shard_part_path,
+    validate_complete_shard_set,
+    validate_raw_part_hdf5,
+    write_base_completion_marker,
+    write_raw_part_hdf5,
+)
 from pyquda_measurement_utils.tools import (
     _asarray_on_queue,
     _get_xp_from_array,
@@ -78,60 +95,6 @@ def natural_estimator_block_size(noise_scheme, hp_num_vectors, spin_color_diluti
     scheme = normalize_noise_scheme(noise_scheme)
     hp_factor = int(hp_num_vectors) if scheme == "hierarchical_probing" else 1
     return hp_factor * spin_color_dilution_factor(spin_color_dilution)
-
-
-def flowed_quark_ringed_norm_block_tag(tag, block_index, block_start, block_stop_exclusive):
-    """Return the output tag for an interval block HDF5 file."""
-    return (
-        f"{tag}.block{int(block_index):04d}"
-        f".src{int(block_start):06d}-{int(block_stop_exclusive) - 1:06d}"
-    )
-
-
-def flowed_quark_ringed_norm_hp256_sample_log_tag(config_num, noise_stream, base_idx):
-    """Return the completion tag for one counter-based HP256 base noise."""
-    return (
-        f"ringed_hp256_{COUNTER_NOISE_ALGORITHM}"
-        f"_cfg{int(config_num)}_stream{int(noise_stream)}_base{int(base_idx):03d}"
-    )
-
-
-def hp256_sample_source_range(base_idx, hp_num_vectors=256):
-    """Return the absolute source range for one HP base-noise sample."""
-    source_start = int(base_idx) * int(hp_num_vectors)
-    return source_start, source_start + int(hp_num_vectors)
-
-
-def hp256_sample_block_ranges(base_idx, block_interval_solves, hp_num_vectors=256):
-    """Return interval block ranges covering one HP base-noise sample."""
-    source_start, source_stop = hp256_sample_source_range(base_idx, hp_num_vectors)
-    block_interval_solves = int(block_interval_solves)
-    if int(hp_num_vectors) % block_interval_solves != 0:
-        raise ValueError("hp_num_vectors should be divisible by block_interval_solves for HP256 sample logging")
-    ranges = []
-    for block_start in range(source_start, source_stop, block_interval_solves):
-        block_stop = block_start + block_interval_solves
-        block_index = block_start // block_interval_solves
-        ranges.append((block_index, block_start, block_stop))
-    return ranges
-
-
-def _read_sample_log_tags(sample_log_file):
-    path = Path(sample_log_file)
-    if not path.exists():
-        return set()
-    return {line.strip() for line in path.read_text().splitlines() if line.strip()}
-
-
-def _append_sample_log_tag_once(sample_log_file, sample_log_tag):
-    path = Path(sample_log_file)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    completed_tags = _read_sample_log_tags(path)
-    if sample_log_tag in completed_tags:
-        return False
-    with path.open("a+") as f:
-        f.write(sample_log_tag + "\n")
-    return True
 
 
 def _gamma_matrix(gamma_like):
@@ -294,8 +257,7 @@ class FlowedQuarkRingedNorm:
         self.multigrid = parameters.get("multigrid", [[8, 8, 4, 4]])
         self.gauge_preprocessing = parameters.get("gauge_preprocessing", "unspecified")
         self.flavor_convention = parameters.get("flavor_convention", "single_flavor_trace_for_this_dirac_operator")
-        self.sample_log_file = parameters.get("sample_log_file")
-        self.sample_log_mode = parameters.get("sample_log_mode", "hp256_base_noise")
+        self.shard_dir = parameters.get("shard_dir")
         self.base_start = parameters.get("base_start")
         self.base_stop = parameters.get("base_stop")
         self.block_size = int(parameters.get("block_interval_solves", 64))
@@ -307,65 +269,6 @@ class FlowedQuarkRingedNorm:
             self.spin_color_dilution,
         )
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
-        if self.sample_log_file is not None:
-            self._validate_sample_log_options()
-
-    def _validate_sample_log_options(self):
-        if self.sample_log_mode != "hp256_base_noise":
-            raise ValueError(f"unsupported sample_log_mode {self.sample_log_mode!r}")
-        if self.noise_scheme != "hierarchical_probing" or self.hp_num_vectors != 256 or self.spin_color_dilution != "none":
-            raise ValueError("sample_log_file currently supports only HP256 hierarchical probing without spin-color dilution")
-        if self.natural_block_size != 256:
-            raise ValueError(f"HP256 sample log expects natural_block_size=256, got {self.natural_block_size}")
-        if self.natural_block_size % self.block_size != 0:
-            raise ValueError("HP256 sample log requires block_interval_solves to divide 256")
-
-    def _sample_log_tag(self, base_idx, counter_config, counter_stream):
-        return flowed_quark_ringed_norm_hp256_sample_log_tag(counter_config, counter_stream, base_idx)
-
-    def _selected_base_indices(self, n_vec):
-        n_vec = int(n_vec)
-        base_start = 0 if self.base_start is None else int(self.base_start)
-        base_stop = n_vec if self.base_stop is None else int(self.base_stop)
-        if base_start < 0 or base_stop > n_vec or base_start >= base_stop:
-            raise ValueError(f"invalid base range [{base_start}, {base_stop}) for n_vec={n_vec}")
-        return set(range(base_start, base_stop))
-
-    def _sample_block_files_exist(self, tag, base_idx):
-        for block_index, block_start, block_stop in hp256_sample_block_ranges(base_idx, self.block_size, self.hp_num_vectors):
-            block_tag = flowed_quark_ringed_norm_block_tag(tag, block_index, block_start, block_stop)
-            if not Path(block_tag + ".h5").exists():
-                return False
-        return True
-
-    def _completed_sample_log_tags(self, latt_info, tag, counter_config, counter_stream, n_vec):
-        if self.sample_log_file is None:
-            return set()
-
-        from pyquda import getMPIComm
-
-        if latt_info.mpi_rank == 0:
-            sample_log_path = Path(self.sample_log_file)
-            sample_log_path.parent.mkdir(parents=True, exist_ok=True)
-            sample_log_path.touch(exist_ok=True)
-            logged_tags = _read_sample_log_tags(sample_log_path)
-            completed_tags = {
-                self._sample_log_tag(base_idx, counter_config, counter_stream)
-                for base_idx in range(int(n_vec))
-                if self._sample_log_tag(base_idx, counter_config, counter_stream) in logged_tags
-                and self._sample_block_files_exist(tag, base_idx)
-            }
-        else:
-            completed_tags = None
-        completed_tags = getMPIComm().bcast(completed_tags, root=0)
-        return set(completed_tags)
-
-    def _log_sample_done(self, latt_info, sample_log_tag):
-        if self.sample_log_file is None:
-            return
-        if latt_info.mpi_rank == 0 and _append_sample_log_tag_once(self.sample_log_file, sample_log_tag):
-            print(f"RingedNorm LOGGED: {sample_log_tag}", flush=True)
-        mpi_print(latt_info, f"RingedNorm DONE: {sample_log_tag}")
 
     def _metadata_attrs(
         self,
@@ -418,54 +321,13 @@ class FlowedQuarkRingedNorm:
             "volume_average": "spin_color_trace_factor_times_spacetime_average_from_raw_kinetic_pervec",
             "flow0_factor": np.nan,
             "derivative_convention": "gamma_mu*(Dplus_mu-Dminus_mu)",
-            "field_factor_dataset": "avg/Z_ring_field_sqrt",
-            "bilinear_factor_dataset": "avg/Z_ring_bilinear",
             "natural_block_size": self.natural_block_size,
             "block_interval_solves": self.block_size,
+            "content": "kinetic_only",
+            "producer": "standalone_ringed",
+            "ringed_factors_stored": False,
+            "ringed_factor_stage": "ensemble_analysis_from_configuration_averaged_kinetic",
         }
-
-    def _write_block_file(
-        self,
-        tag,
-        kinetic_pervec,
-        flow_time_values,
-        base_attrs,
-        source_bookkeeping,
-        block_index,
-        block_start,
-        block_stop,
-    ):
-        block_raw = kinetic_pervec[block_start:block_stop]
-        block_kinetic = kinetic_spacetime_from_raw(block_raw, self.spin_color_dilution_factor)
-        block_z_field, block_z_bilinear = compute_ringed_factors(block_kinetic, flow_time_values, nc=self.nc)
-        block_size = int(block_stop - block_start)
-        estimator_remainder = block_size % self.natural_block_size
-        block_attrs = dict(base_attrs)
-        block_attrs.update(
-            {
-                "block_index": int(block_index),
-                "block_start": int(block_start),
-                "block_stop_exclusive": int(block_stop),
-                "block_interval_solves": self.block_size,
-                "estimator_complete": estimator_remainder == 0,
-                "complete_estimator_units": block_size // self.natural_block_size,
-                "estimator_remainder": estimator_remainder,
-            }
-        )
-        block_bookkeeping = {
-            name: np.asarray(values[block_start:block_stop], dtype=np.int32)
-            for name, values in source_bookkeeping.items()
-        }
-        save_flowed_quark_ringed_norm_hdf5(
-            flowed_quark_ringed_norm_block_tag(tag, block_index, block_start, block_stop),
-            block_raw,
-            block_kinetic,
-            block_z_field,
-            block_z_bilinear,
-            flow_time_values,
-            attrs=block_attrs,
-            source_bookkeeping=block_bookkeeping,
-        )
 
     @staticmethod
     def _project_zero_momentum_per_time(latt_info, local_field, q0_phase):
@@ -511,19 +373,17 @@ class FlowedQuarkRingedNorm:
         return flowed[0], flowed[1]
 
     def flowed_kinetic_norm(self, gauge, invPara, randPara, tag: str):
-        """Compute and save the standalone flowed-quark ringed normalization."""
+        """Measure selected complete bases into resumable base/HP shard parts."""
         if not tag:
             raise ValueError("flowed_kinetic_norm requires a non-empty output tag")
 
         n_vec, n_zn, noise_stream = randPara
         if int(noise_stream) < 0:
             raise ValueError(f"noise stream should be non-negative, got {noise_stream}")
-        n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors, self.spin_color_dilution)
-        if n_eff % self.block_size != 0:
-            raise ValueError(
-                "effective_n_inversions must be divisible by block_interval_solves: "
-                f"n_eff={n_eff}, block_interval_solves={self.block_size}"
-            )
+        n_eff = effective_n_inversions(
+            n_vec, self.noise_scheme, self.hp_num_vectors,
+            self.spin_color_dilution,
+        )
 
         from pyquda_utils import core, phase
 
@@ -534,7 +394,6 @@ class FlowedQuarkRingedNorm:
         spatial_volume = global_size[0] * global_size[1] * global_size[2]
         nt = global_size[3]
         n_flow = self.flow_steps + 1
-        flow_time_values = flow_times(self.flow_epsilon, self.flow_steps)
 
         dirac = core.getDirac(
             latt_info,
@@ -549,8 +408,6 @@ class FlowedQuarkRingedNorm:
         dirac.loadGauge(U)
         mpi_print(latt_info, "Flowed-quark ringed normalization inverter ready.")
 
-        kinetic_pervec = np.zeros((n_eff, n_flow, nt), dtype=np.complex128)
-        source_bookkeeping = source_bookkeeping_arrays(n_eff, include_spin_color=True)
         counter_config, counter_stream = self.config_num, int(noise_stream)
         attrs = self._metadata_attrs(
             latt_info,
@@ -561,140 +418,267 @@ class FlowedQuarkRingedNorm:
             n_eff,
             spatial_volume,
         )
-        mpi_print(
-            latt_info,
-            (
-                "Flowed-quark ringed normalization interval block output enabled: "
-                f"natural_block_size={self.natural_block_size}, block_interval_solves={self.block_size}"
-            ),
-        )
-
-        selected_base_indices = self._selected_base_indices(n_vec)
-        completed_sample_tags = self._completed_sample_log_tags(
-            latt_info,
-            tag,
-            counter_config,
-            counter_stream,
-            n_vec,
-        )
-        completed_base_indices = {
-            base_idx
-            for base_idx in range(int(n_vec))
-            if self._sample_log_tag(base_idx, counter_config, counter_stream) in completed_sample_tags
-        } if self.sample_log_file is not None else set()
-        out_of_range_base_indices = set(range(int(n_vec))) - selected_base_indices
-        skipped_base_indices = completed_base_indices | out_of_range_base_indices
-        for base_idx in sorted(completed_base_indices & selected_base_indices):
-            mpi_print(
-                latt_info,
-                f"RingedNorm SKIP: {self._sample_log_tag(base_idx, counter_config, counter_stream)}",
-            )
-        if self.base_start is not None or self.base_stop is not None:
-            mpi_print(latt_info, f"RingedNorm selected base range: {min(selected_base_indices)}:{max(selected_base_indices) + 1}")
-
+        hp_count = hp_vectors_per_base(self.noise_scheme, self.hp_num_vectors)
+        solves_per_hp = self.spin_color_dilution_factor
+        shard_dir = Path(self.shard_dir) if self.shard_dir else Path(tag).parent / "shards"
+        common_attrs = {
+            key: value for key, value in attrs.items()
+            if key not in {"n_vec", "effective_n_inversions"}
+        }
+        common_attrs["output_kind"] = "flowed_quark_ringed_norm"
         q0_phase = phase.MomentumPhase(latt_info).getPhases([[0, 0, 0]], [0, 0, 0, 0])
-        block_timers = _reset_block_timers(n_flow, self.flow_steps)
-        computed_source_mask = np.zeros(n_eff, dtype=bool)
-        for vec_picked, base_idx, hp_idx, spin_idx, color_idx, xi in iter_noise_sources(
-            latt_info,
-            n_vec,
-            n_zn,
-            self.noise_scheme,
-            self.hp_num_vectors,
-            self.hp_ordering,
-            spin_color_dilution=self.spin_color_dilution,
-            include_spin_color=True,
-            skip_base_indices=skipped_base_indices,
-            counter_noise_config=counter_config,
-            counter_noise_stream=counter_stream,
-        ):
-            if self.sample_log_file is not None and hp_idx == 0:
-                mpi_print(
-                    latt_info,
-                    f"RingedNorm START: {self._sample_log_tag(base_idx, counter_config, counter_stream)}",
+        from pyquda import getMPIComm
+        comm = getMPIComm()
+        for base_idx in selected_base_range(n_vec, self.base_start or 0, self.base_stop):
+            part_paths = []
+            for part_idx, hp_start, hp_stop in base_part_ranges(
+                hp_count, self.block_size, solves_per_hp
+            ):
+                bookkeeping = part_source_bookkeeping(
+                    base_idx, hp_start, hp_stop, hp_count,
+                    self.spin_color_dilution, include_spin_color=True,
                 )
-            if vec_picked % self.block_size == 0:
-                block_timers = _reset_block_timers(n_flow, self.flow_steps)
-                block_timers["block_start"] = _timer_start(xi)
-
-            mpi_print(latt_info, f"ringed norm vec {vec_picked} base {base_idx} hp {hp_idx} spin {spin_idx} color {color_idx}")
-            computed_source_mask[vec_picked] = True
-            source_bookkeeping["base_noise_index"][vec_picked] = base_idx
-            source_bookkeeping["hp_index"][vec_picked] = hp_idx
-            source_bookkeeping["spin_index"][vec_picked] = spin_idx
-            source_bookkeeping["color_index"][vec_picked] = color_idx
-
-            t0 = _timer_start(xi)
-            dirac.loadGauge(U)
-            eta = dirac.invert(xi)
-            block_timers["invert"] += _timer_stop(t0, eta)
-
-            U_f = U.copy()
-            U_f.setAntiPeriodicT()
-            for step in range(n_flow):
-                t0 = _timer_start(xi, eta)
-                kinetic_pervec[vec_picked, step] = self._kinetic_per_time_for_source(
-                    U_f,
-                    xi,
-                    eta,
-                    q0_phase,
-                    spatial_volume,
+                count = len(bookkeeping["source_index"])
+                path = shard_part_path(
+                    shard_dir, tag, base_idx, part_idx, hp_start, hp_stop
                 )
-                block_timers["contract"][step] += _timer_stop(t0, xi, eta)
-
-                if step < self.flow_steps:
-                    t0 = _timer_start(xi, eta)
-                    xi, eta = self._advance_flowed_pair(U_f, xi, eta, step)
-                    block_timers["flow"][step] += _timer_stop(t0, xi, eta)
-
-            del U_f, xi, eta
-
-            if (vec_picked + 1) % self.block_size == 0:
-                block_stop = vec_picked + 1
-                block_start = block_stop - self.block_size
-                block_index = block_start // self.block_size
-                mpi_print(
-                    latt_info,
-                    f"writing ringed norm block {block_index} sources {block_start}:{block_stop}",
+                part_paths.append(path)
+                expected_attrs = expected_part_attrs(
+                    common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
                 )
+                raw_shapes = {
+                    "kinetic_pervec": (count, n_flow, nt),
+                    **{name: (count,) for name in bookkeeping},
+                }
+                present = (
+                    validate_raw_part_hdf5(
+                        path, expected_attrs, raw_shapes,
+                        source_bookkeeping=bookkeeping,
+                    )
+                    if latt_info.mpi_rank == 0 else None
+                )
+                present = comm.bcast(present, root=0)
+                if present:
+                    mpi_print(latt_info, f"Ringed shard SKIP: {path.name}")
+                    continue
+
+                kinetic_part = np.zeros((count, n_flow, nt), dtype=np.complex128)
+                timers = _reset_block_timers(n_flow, self.flow_steps)
+                timers["block_start"] = _timer_start()
+                for local_idx, fields in enumerate(iter_noise_base_hp_interval(
+                    latt_info, base_idx, hp_start, hp_stop, n_zn,
+                    self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
+                    config_num=counter_config, noise_stream=counter_stream,
+                    spin_color_dilution=self.spin_color_dilution,
+                    include_spin_color=True,
+                )):
+                    _, _, hp_idx, spin_idx, color_idx, xi = fields
+                    mpi_print(
+                        latt_info,
+                        f"ringed base {base_idx} hp {hp_idx} spin {spin_idx} color {color_idx}",
+                    )
+                    t0 = _timer_start(xi)
+                    # Fermion flow leaves U_f resident; restore the inversion gauge.
+                    dirac.loadGauge(U)
+                    eta = dirac.invert(xi)
+                    timers["invert"] += _timer_stop(t0, eta)
+                    U_f = U.copy()
+                    U_f.setAntiPeriodicT()
+                    for step in range(n_flow):
+                        t0 = _timer_start(xi, eta)
+                        kinetic_part[local_idx, step] = self._kinetic_per_time_for_source(
+                            U_f, xi, eta, q0_phase, spatial_volume
+                        )
+                        timers["contract"][step] += _timer_stop(t0, xi, eta)
+                        if step < self.flow_steps:
+                            t0 = _timer_start(xi, eta)
+                            xi, eta = self._advance_flowed_pair(U_f, xi, eta, step)
+                            timers["flow"][step] += _timer_stop(t0, xi, eta)
+                    del U_f, xi, eta
+
                 t0 = _timer_start()
                 if latt_info.mpi_rank == 0:
-                    self._write_block_file(
-                        tag,
-                        kinetic_pervec,
-                        flow_time_values,
-                        attrs,
-                        source_bookkeeping,
-                        block_index,
-                        block_start,
-                        block_stop,
+                    write_attrs = dict(expected_attrs)
+                    write_attrs["configured_n_base_noise"] = int(n_vec)
+                    write_raw_part_hdf5(
+                        path, {"kinetic_pervec": kinetic_part}, write_attrs,
+                        bookkeeping,
                     )
-                block_timers["write"] = _timer_stop(t0)
-                total_seconds = _timer_stop(block_timers["block_start"])
-                _print_block_timers(latt_info, block_index, block_start, block_stop, block_timers, total_seconds)
-                if self.sample_log_file is not None and block_stop % self.natural_block_size == 0:
-                    self._log_sample_done(
-                        latt_info,
-                        self._sample_log_tag(base_idx, counter_config, counter_stream),
+                timers["write"] = _timer_stop(t0)
+                _print_block_timers(
+                    latt_info, part_idx, int(bookkeeping["source_index"][0]),
+                    int(bookkeeping["source_index"][-1]) + 1, timers,
+                    _timer_stop(timers["block_start"]),
+                )
+                comm.Barrier()
+
+            if latt_info.mpi_rank == 0:
+                for part_idx, hp_start, hp_stop in base_part_ranges(
+                    hp_count, self.block_size, solves_per_hp
+                ):
+                    bookkeeping = part_source_bookkeeping(
+                        base_idx, hp_start, hp_stop, hp_count,
+                        self.spin_color_dilution, include_spin_color=True,
                     )
+                    count = len(bookkeeping["source_index"])
+                    validate_raw_part_hdf5(
+                        shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop),
+                        expected_part_attrs(
+                            common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
+                        ),
+                        {"kinetic_pervec": (count, n_flow, nt), **{
+                            name: (count,) for name in bookkeeping
+                        }}, source_bookkeeping=bookkeeping,
+                    )
+                write_base_completion_marker(
+                    base_completion_path(shard_dir, tag, base_idx),
+                    completion_payload(
+                        tag, base_idx, hp_count, self.block_size, part_paths,
+                        solves_per_hp=solves_per_hp,
+                        spin_color_dilution=self.spin_color_dilution,
+                    ),
+                )
+            comm.Barrier()
+        return None
 
-        if np.any(computed_source_mask):
-            kinetic_spacetime = kinetic_spacetime_from_raw(kinetic_pervec[computed_source_mask], self.spin_color_dilution_factor)
-        else:
-            kinetic_spacetime = np.full(n_flow, np.nan + 0j, dtype=np.complex128)
-        z_field_sqrt, z_bilinear = compute_ringed_factors(kinetic_spacetime, flow_time_values, nc=self.nc)
 
-        return kinetic_spacetime, z_field_sqrt, z_bilinear
+def finalize_flowed_quark_ringed_norm_shards(shard_dir, canonical_tag, n_base_noise):
+    """Stream complete standalone ringed shards into one kinetic-only file."""
+    marker_path = base_completion_path(shard_dir, canonical_tag, 0)
+    marker = read_base_completion_marker(marker_path)
+    if marker is None:
+        raise ValueError(f"missing completion marker for base 0: {marker_path}")
+    spin_color_dilution = marker.get("spin_color_dilution")
+    solves_per_hp = int(marker.get("solves_per_hp", -1))
+    manifest = validate_complete_shard_set(
+        shard_dir, canonical_tag, n_base_noise,
+        raw_dataset_names=("kinetic_pervec",),
+        spin_color_dilution=spin_color_dilution,
+        solves_per_hp=solves_per_hp,
+        include_spin_color=True,
+    )
+    attrs = {
+        key: value for key, value in manifest["reference_attrs"].items()
+        if key not in {
+            "shard_schema", "output_kind", "block_interval_solves",
+            "hp_vectors_per_base",
+        }
+    }
+    total_sources = manifest["total_sources"]
+    n_base_noise = int(n_base_noise)
+    attrs.update({
+        "measurement": "flowed_quark_ringed_norm",
+        "content": "kinetic_only",
+        "n_vec": n_base_noise,
+        "n_base_noise": n_base_noise,
+        "effective_n_inversions": total_sources,
+        "ringed_factors_stored": False,
+    })
+    kinetic_tail = manifest["raw_tails"]["kinetic_pervec"]
+    nt = kinetic_tail[-1]
+    trace_factor = int(attrs["spin_color_trace_factor"])
+    final_path, temp_path = canonical_temp_path(canonical_tag)
+    with h5py.File(temp_path, "w") as out:
+        for key, value in attrs.items():
+            out.attrs[key] = value
+        out.create_dataset("flow_times", data=np.asarray(attrs["flow_times"], dtype=np.float64))
+        raw = out.require_group("raw")
+        kinetic = raw.create_dataset(
+            "kinetic_pervec", shape=(total_sources,) + kinetic_tail,
+            dtype=np.complex128,
+        )
+        book = {
+            name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
+            for name in (
+                "source_index", "base_noise_index", "hp_index",
+                "spin_index", "color_index",
+            )
+        }
+        kinetic_sum = np.zeros(kinetic_tail[:-1], dtype=np.complex128)
+        for info in manifest["parts"]:
+            start, stop, path = info["output_start"], info["output_stop"], info["path"]
+            with h5py.File(path, "r") as part:
+                values = part["raw/kinetic_pervec"][()]
+                kinetic[start:stop] = values
+                kinetic_sum += np.sum(values, axis=(0, -1))
+                for name, dataset in book.items():
+                    dataset[start:stop] = part[f"raw/{name}"][()]
+        out.require_group("avg").create_dataset(
+            "kinetic_spacetime",
+            data=trace_factor * kinetic_sum / total_sources / nt,
+        )
+        out.flush()
+    os.replace(temp_path, final_path)
+    return str(final_path)
+
+
+def analyze_ringed_ensemble(input_files, output_file, nc=3):
+    """Average per-configuration kinetic values, then compute ringed factors."""
+    paths = [Path(path) for path in input_files]
+    if not paths:
+        raise ValueError("at least one explicit kinetic-only input file is required")
+    configs = []
+    kinetics = []
+    reference = None
+    flow_time_values = None
+    match_keys = (
+        "flow_type", "flow_epsilon", "flow_steps", "mass", "csw", "tol",
+        "maxiter", "gauge_preprocessing", "t_boundary", "flavor_convention",
+        "derivative_convention", "Nc",
+    )
+    for path in paths:
+        with h5py.File(path, "r") as h5:
+            if h5.attrs.get("content") != "kinetic_only":
+                raise ValueError(f"{path} is not a kinetic-only ringed input")
+            config_num = int(h5.attrs["config_num"])
+            if config_num in configs:
+                raise ValueError(f"duplicate configuration {config_num}")
+            configs.append(config_num)
+            current = {key: h5.attrs[key] for key in match_keys}
+            times = h5["flow_times"][()]
+            if reference is None:
+                reference = current
+                flow_time_values = times
+            else:
+                for key, expected in reference.items():
+                    if not np.array_equal(np.asarray(current[key]), np.asarray(expected)):
+                        raise ValueError(f"{path} has incompatible attribute {key}")
+                if not np.array_equal(times, flow_time_values):
+                    raise ValueError(f"{path} has incompatible flow_times")
+            kinetics.append(h5["avg/kinetic_spacetime"][()])
+
+    kinetic_ensemble = np.mean(np.asarray(kinetics), axis=0)
+    z_field, z_bilinear = compute_ringed_factors(
+        kinetic_ensemble, flow_time_values, nc=nc
+    )
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = output_path.with_name(
+        output_path.name + f".tmp.{os.getpid()}.{uuid4().hex}"
+    )
+    with h5py.File(temp_path, "w") as out:
+        out.attrs["measurement"] = "flowed_quark_ringed_norm_ensemble"
+        out.attrs["ringed_factors_stored"] = True
+        out.attrs["n_configurations"] = len(configs)
+        out.attrs["configuration_numbers"] = np.asarray(configs, dtype=np.int64)
+        for key, value in reference.items():
+            out.attrs[key] = value
+        out.create_dataset("flow_times", data=flow_time_values)
+        avg = out.require_group("avg")
+        avg.create_dataset("kinetic_ensemble", data=kinetic_ensemble)
+        avg.create_dataset("Z_ring_field_sqrt", data=z_field)
+        avg.create_dataset("Z_ring_bilinear", data=z_bilinear)
+        out.flush()
+    os.replace(temp_path, output_path)
+    return str(output_path)
 
 
 __all__ = [
     "FlowedQuarkRingedNorm",
+    "analyze_ringed_ensemble",
     "compute_ringed_factors",
-    "flowed_quark_ringed_norm_block_tag",
-    "flowed_quark_ringed_norm_hp256_sample_log_tag",
+    "finalize_flowed_quark_ringed_norm_shards",
     "flow_times",
-    "hp256_sample_block_ranges",
-    "hp256_sample_source_range",
     "natural_estimator_block_size",
     "normalize_flow_type",
 ]

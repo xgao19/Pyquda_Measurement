@@ -66,7 +66,6 @@ def _common_attrs(configured_n_vec):
         "t_boundary": -1,
         "n_zn": 4,
         "config_num": 9,
-        "rand_seed": 3,
         "noise_stream": 3,
         "noise_generator": "splitmix64_global_coordinate_v1",
         "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
@@ -164,7 +163,6 @@ def _write_synthetic_qtmd_base(shard_dir, tag, base_idx):
         "t_boundary": -1,
         "n_zn": 4,
         "config_num": 9,
-        "rand_seed": 2,
         "noise_stream": 2,
         "noise_generator": "splitmix64_global_coordinate_v1",
         "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
@@ -207,3 +205,4 @@ def test_qtmd_finalize_streams_source_independent_canonical(tmp_path):
         np.testing.assert_allclose(h5["avg/SS/5/PX0PY0PZ0/b_X/eta0/bT0/bz0"][()], 1.5 / 8.0)
         assert h5.attrs["n_zn"] == 4
         assert h5.attrs["noise_generator"] == "splitmix64_global_coordinate_v1"
+        assert "rand_seed" not in h5.attrs

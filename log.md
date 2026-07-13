@@ -4,6 +4,33 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-13: Simplify disconnected production workflows
+
+- Replaced skip-set stochastic iteration with direct deterministic generation
+  of one base and HP interval; EMT, qTMD, and standalone ringed now share the
+  same part layout, strict resume validator, and completion markers.
+- Removed EMT/qTMD monolithic production, configuration fallbacks, duplicate
+  `rand_seed` metadata, source-tag loop helpers, and obsolete meson quark-1pt
+  platform wrappers.
+- Migrated standalone ringed away from `.block*.h5` and HP256 text sample logs;
+  its explicit finalizer writes kinetic-only configuration files, and a new
+  ensemble analyzer averages K before computing nonlinear ringed factors.
+- Made qTMD GI production link-cache-only and moved direct covariant transport
+  to a test reference.  Removed stale platform convergence scripts.
+- Unified shared quark/gluon flow epsilon defaults at `0.207936`, changed gluon
+  loops to one source-independent canonical file per configuration, and removed
+  duplicate hadron-specific gluon wrappers.
+- Required explicit CLI configuration identity throughout disconnected EMT,
+  disconnected qTMD, and standalone ringed production and analysis entry points.
+- Updated the durable Perlmutter memory to use the `software_gradientflow`
+  venv, QUDA install, and editable PyQUDA checkout instead of the old shared
+  `m3760/software` stack.
+- Updated workflow documentation and regression tests for the intentionally
+  incompatible production schema and rebuilt the four affected PDFs.
+- Verified `113 passed, 12 skipped`, Python and shell syntax, and
+  `git diff --check` using the `software_gradientflow/venv-quda-develop`
+  environment.
+
 ## 2026-07-11: Remove rank-local RNG from disconnected sources
 
 - Removed backend RNG generation from the shared disconnected source utility

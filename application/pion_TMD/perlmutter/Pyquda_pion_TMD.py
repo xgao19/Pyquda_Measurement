@@ -25,7 +25,6 @@ parser.add_argument("--sink_interpolator", type=str, default=os.environ.get("PIO
 parser.add_argument("--run_cg_qtmd", type=int, default=int(os.environ.get("PION_TMD_RUN_CG_QTMD", 1)))
 parser.add_argument("--run_gi_qtmd", type=int, default=int(os.environ.get("PION_TMD_RUN_GI_QTMD", 1)))
 parser.add_argument("--run_pdf", type=int, default=int(os.environ.get("PION_TMD_RUN_PDF", 1)))
-parser.add_argument("--gi_staple_mode", type=str, default=os.environ.get("PION_TMD_GI_STAPLE_MODE", "link_cache"))
 args, unknown = parser.parse_known_args()
 
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -129,7 +128,6 @@ if getMPIComm().Get_rank() == 0:
     print(f"--run_cg_qtmd {int(run_cg_qtmd)}")
     print(f"--run_gi_qtmd {int(run_gi_qtmd)}")
     print(f"--run_pdf {int(run_pdf)}")
-    print(f"--gi_staple_mode {args.gi_staple_mode}")
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
@@ -259,7 +257,6 @@ for pos in src_positions:
             W_index_list_GI_dir0,
             W_index_list_GI_dir1,
             src_gamma=args.src_interpolator,
-            staple_mode=args.gi_staple_mode,
         )
         mpi_print(latt_info, f"contract_GI_qTMD over: pion_TMDs.shape {np.shape(pion_TMDs)} {time.time() - t0}s")
 

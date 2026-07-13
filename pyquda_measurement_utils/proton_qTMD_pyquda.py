@@ -125,7 +125,6 @@ the current connected contraction path.
 from pyquda_utils import core, gamma
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
-    create_fermion_TMD_GI,
     create_fermion_TMD_GI_from_link,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import create_gi_qtmd_wilsonline_index_lists
@@ -488,17 +487,14 @@ class proton_TMD():
 
         return prop_shift
 
-    def create_fw_prop_TMD_GI(self, gauge, prop_f, W_index, staple_links=None):
+    def create_fw_prop_TMD_GI(self, gauge, prop_f, W_index, staple_links):
         prop_shift = prop_f.copy()
-        staple_link = None if staple_links is None else staple_links[tuple(W_index)]
+        staple_link = staple_links[tuple(W_index)]
 
         for spin in range(4):
             for color in range(3):
                 fermion = prop_f.getFermion(spin, color)
-                if staple_link is None:
-                    fermion_shift = create_fermion_TMD_GI(gauge, fermion, W_index)
-                else:
-                    fermion_shift = create_fermion_TMD_GI_from_link(staple_link, fermion, W_index)
+                fermion_shift = create_fermion_TMD_GI_from_link(staple_link, fermion, W_index)
                 prop_shift.setFermion(fermion_shift, spin, color)
 
         return prop_shift

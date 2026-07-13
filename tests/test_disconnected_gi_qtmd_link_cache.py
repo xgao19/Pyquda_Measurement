@@ -22,9 +22,9 @@ def _run_link_cache_check():
         from pyquda_utils import io
         from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
             build_gi_qtmd_staple_link,
-            create_fermion_TMD_GI,
             create_fermion_TMD_GI_from_link,
         )
+        from qtmd_gi_reference import create_fermion_TMD_GI
         from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
     except Exception as err:
         raise SkipTest(f"PyQUDA environment is not available: {err}") from err

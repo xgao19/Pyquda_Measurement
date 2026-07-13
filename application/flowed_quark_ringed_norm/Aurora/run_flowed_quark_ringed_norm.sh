@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
+  echo "Usage: $0 --config_num CFG" >&2
+  exit 2
+fi
+config_num="$2"
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 measurement_root="$(cd "$script_dir/../../.." && pwd)"
 
@@ -16,7 +22,6 @@ export MPICH_GPU_SUPPORT_ENABLED="${MPICH_GPU_SUPPORT_ENABLED:-1}"
 
 export FLOWED_RINGED_DATA_DIR="${FLOWED_RINGED_DATA_DIR:-$script_dir/data}"
 export FLOWED_RINGED_GAUGE_PATH="${FLOWED_RINGED_GAUGE_PATH:-$measurement_root/test_gauge/S8T32_wilson_b6.cg.1e-08.0}"
-export FLOWED_RINGED_CONFIG_NUM="${FLOWED_RINGED_CONFIG_NUM:-0}"
 export FLOWED_RINGED_LAT_TAG="${FLOWED_RINGED_LAT_TAG:-S8T32}"
 export FLOWED_RINGED_MPI_GEOMETRY="${FLOWED_RINGED_MPI_GEOMETRY:-1.1.1.2}"
 export FLOWED_RINGED_FLOW_STEPS="${FLOWED_RINGED_FLOW_STEPS:-1}"
@@ -33,12 +38,12 @@ mkdir -p "$QUDA_RESOURCE_PATH" "$FLOWED_RINGED_DATA_DIR"
 echo "Running flowed-quark ringed normalization"
 echo "  FLOWED_RINGED_GAUGE_PATH=$FLOWED_RINGED_GAUGE_PATH"
 echo "  FLOWED_RINGED_DATA_DIR=$FLOWED_RINGED_DATA_DIR"
-echo "  FLOWED_RINGED_CONFIG_NUM=$FLOWED_RINGED_CONFIG_NUM"
+echo "  config_num=$config_num"
 echo "  FLOWED_RINGED_MPI_GEOMETRY=$FLOWED_RINGED_MPI_GEOMETRY"
 echo "  FLOWED_RINGED_LAT_TAG=$FLOWED_RINGED_LAT_TAG"
 echo "  FLOWED_RINGED_SPIN_COLOR_DILUTION=${FLOWED_RINGED_SPIN_COLOR_DILUTION:-none}"
 echo "  QUDA_RESOURCE_PATH=$QUDA_RESOURCE_PATH"
 
 python -u "$script_dir/Pyquda_flowed_quark_ringed_norm.py" \
-  --config_num "$FLOWED_RINGED_CONFIG_NUM" \
+  --config_num "$config_num" \
   --mpi_geometry "$FLOWED_RINGED_MPI_GEOMETRY"

@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
+  echo "Usage: $0 --config_num CFG" >&2
+  exit 2
+fi
+config_num="$2"
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
 measurement_root="${MEASUREMENT_ROOT:-$software_root/Pyquda_Measurement}"
@@ -19,7 +25,6 @@ export MPICH_GPU_SUPPORT_ENABLED="${MPICH_GPU_SUPPORT_ENABLED:-1}"
 
 export EMT_1PT_DATA_DIR="${EMT_1PT_DATA_DIR:-$script_dir/data}"
 export EMT_1PT_GAUGE_PATH="${EMT_1PT_GAUGE_PATH:-$software_root/Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0}"
-export EMT_1PT_CONFIG_NUM="${EMT_1PT_CONFIG_NUM:-0}"
 export EMT_1PT_MPI_GEOMETRY="${EMT_1PT_MPI_GEOMETRY:-1.1.1.1}"
 export EMT_1PT_QMAX="${EMT_1PT_QMAX:-0}"
 export EMT_1PT_FLOW_STEPS="${EMT_1PT_FLOW_STEPS:-1}"
@@ -29,7 +34,6 @@ export EMT_1PT_RAND_SEED="${EMT_1PT_RAND_SEED:-0}"
 export EMT_1PT_NOISE_SCHEME="${EMT_1PT_NOISE_SCHEME:-zn}"
 export EMT_1PT_HP_NUM_VECTORS="${EMT_1PT_HP_NUM_VECTORS:-1}"
 export EMT_1PT_HP_ORDERING="${EMT_1PT_HP_ORDERING:-interleaved_xyz_binary_projected_to_evenodd}"
-export EMT_1PT_OUTPUT_MODE="${EMT_1PT_OUTPUT_MODE:-base_shards}"
 export EMT_1PT_BASE_START="${EMT_1PT_BASE_START:-0}"
 export EMT_1PT_BASE_STOP="${EMT_1PT_BASE_STOP:-$EMT_1PT_N_VEC}"
 export EMT_1PT_BLOCK_INTERVAL_SOLVES="${EMT_1PT_BLOCK_INTERVAL_SOLVES:-64}"
@@ -39,5 +43,5 @@ mkdir -p "$QUDA_RESOURCE_PATH" "$CUPY_CACHE_DIR" "$EMT_1PT_DATA_DIR"
 
 echo "Running disconnected quark EMT 1pt"
 python3 -u "$script_dir/Pyquda_EMT_disconnected_quark_1pt.py" \
-  --config_num "$EMT_1PT_CONFIG_NUM" \
+  --config_num "$config_num" \
   --mpi_geometry "$EMT_1PT_MPI_GEOMETRY"

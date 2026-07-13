@@ -25,7 +25,6 @@ parser.add_argument("--pol", type=str, default=os.environ.get("NUCLEON_TMD_POL",
 parser.add_argument("--run_cg_qtmd", type=int, default=int(os.environ.get("NUCLEON_TMD_RUN_CG_QTMD", 1)))
 parser.add_argument("--run_gi_qtmd", type=int, default=int(os.environ.get("NUCLEON_TMD_RUN_GI_QTMD", 1)))
 parser.add_argument("--run_pdf", type=int, default=int(os.environ.get("NUCLEON_TMD_RUN_PDF", 1)))
-parser.add_argument("--gi_staple_mode", type=str, default=os.environ.get("NUCLEON_TMD_GI_STAPLE_MODE", "link_cache"))
 args, unknown = parser.parse_known_args()
 
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -76,7 +75,6 @@ def contract_nucleon_operator_list(
     phases,
     W_index_list,
     operator_kind,
-    staple_mode="link_cache",
 ):
     xp = _get_xp_from_array(prop_f.data)
     phases = _asarray_on_queue(phases, xp, prop_f.data)
@@ -85,11 +83,9 @@ def contract_nucleon_operator_list(
     shifted_prop = prop_f.copy()
     staple_links = None
 
-    if operator_kind == "GI_qTMD" and staple_mode == "link_cache":
+    if operator_kind == "GI_qTMD":
         mpi_print(latt_info, f"Build {len(W_index_list)} connected nucleon GI_qTMD staple transporters.")
         staple_links = build_gi_qtmd_staple_links(gauge, W_index_list)
-    elif operator_kind == "GI_qTMD" and staple_mode != "direct_covdev":
-        raise ValueError(f"Unsupported GI_qTMD staple_mode {staple_mode!r}")
 
     for iW, W_index in enumerate(W_index_list):
         mpi_print(latt_info, f"Contract nucleon {operator_kind} {iW + 1}/{len(W_index_list)} {W_index}")
@@ -292,7 +288,6 @@ if getMPIComm().Get_rank() == 0:
     print(f"--run_cg_qtmd {int(run_cg_qtmd)}")
     print(f"--run_gi_qtmd {int(run_gi_qtmd)}")
     print(f"--run_pdf {int(run_pdf)}")
-    print(f"--gi_staple_mode {args.gi_staple_mode}")
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
@@ -412,7 +407,6 @@ for pos in src_positions:
             phases_TMD,
             W_index_list_GI,
             "GI_qTMD",
-            staple_mode=args.gi_staple_mode,
         )
         mpi_print(latt_info, f"contract_GI_qTMD over: {np.shape(corr_down)} {time.time() - t0}s")
         corr_down = roll_trim_bcast(corr_down, pos[3], parameters["t_insert"])

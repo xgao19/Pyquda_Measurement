@@ -45,18 +45,6 @@ def get_qTMD_file_tag(data_dir, lat, cfg, ama,src, sm):
     return data_dir + "/qTMD/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag
 
 
-# Build the standard disconnected qTMD one-point output tag.
-def get_disconnected_qTMD_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
-
-    cfg_tag = str(cfg)
-    lat_tag = str(lat) + ".qTMD1pt"
-    ama_tag = str(ama)
-    src_tag = "x"+str(src[0]) + "y"+str(src[1]) + "z"+str(src[2]) + "t"+str(src[3])
-    sm_tag  = str(sm)
-
-    return data_dir + "/qTMD1pt/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag
-
-
 # Build the source-independent disconnected qTMD loop output tag.
 def get_disconnected_qTMD_loop_file_tag(data_dir, lat, cfg, ama, sm):
     return str(Path(data_dir) / "qTMD1pt" / (str(lat) + ".qTMD1pt." + str(cfg) + "." + str(ama) + "." + str(sm)))
@@ -163,14 +151,9 @@ def _emt_site_tag(src):
     return "x" + str(src[0]) + "y" + str(src[1]) + "z" + str(src[2]) + "t" + str(src[3])
 
 
-# Build the gluon EMT one-point output tag.
-def get_emt_gluon_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
-    return str(Path(data_dir) / "EMTg" / (str(lat) + ".EMTg." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
-
-
-# Build the quark EMT one-point output tag.
-def get_emt_quark_1pt_file_tag(data_dir, lat, cfg, ama, src, sm):
-    return str(Path(data_dir) / "EMTc" / (str(lat) + ".EMTc." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+# Build the canonical source-independent gluon EMT loop output tag.
+def get_emt_gluon_loop_file_tag(data_dir, lat, cfg, ama, sm):
+    return str(Path(data_dir) / "EMTg" / (str(lat) + ".EMTg." + str(cfg) + "." + str(ama) + "." + str(sm)))
 
 
 # Build the canonical source-independent quark EMT loop output tag.
@@ -236,26 +219,6 @@ def _prepare_h5_file(path, attrs=None):
 # EMT HDF5 writers
 # -----------------------------------------------------------------------------
 
-# Save flowed quark EMT one-point data and scalar CHI diagnostics.
-def save_emt_quark_1pt_hdf5(tag, Tmunu_pervec, CHI_pervec, Tmunu, CHI, attrs=None, source_bookkeeping=None):
-    save_h5 = f"{tag}.h5"
-    with _prepare_h5_file(save_h5, attrs) as f:
-        raw = f.require_group("raw")
-        raw.create_dataset("Tmunu_pervec", data=Tmunu_pervec)
-        raw.create_dataset("CHI_pervec", data=CHI_pervec)
-        if source_bookkeeping is not None:
-            for name, values in source_bookkeeping.items():
-                raw.create_dataset(name, data=np.asarray(values, dtype=np.int32))
-
-        avg = f.require_group("avg")
-        avg.create_dataset("CHI", data=CHI)
-        g_t = avg.require_group("Tmunu")
-        g_t.attrs["upper_triangle_only"] = True
-        for mu in range(4):
-            for nu in range(mu, 4):
-                g_t.create_dataset(f"T{mu+1}{nu+1}", data=Tmunu[mu, nu])
-
-
 # Save quark EMT three-point functions without embedding two-point data.
 def save_emt_quark_3pt_hdf5(tag, C3_chi, C3_Tmunu, momentum_transfer_list=None, attrs=None):
     save_h5 = f"{tag}.h5"
@@ -284,37 +247,6 @@ def save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=None):
         for mu in range(4):
             for nu in range(mu, 4):
                 g_t.create_dataset(f"T{mu+1}{nu+1}", data=Tmunu_t[mu, nu])
-
-
-# Save flowed-quark ringed-normalization data.
-def save_flowed_quark_ringed_norm_hdf5(
-    tag,
-    kinetic_pervec,
-    kinetic_spacetime,
-    z_ring_field_sqrt,
-    z_ring_bilinear,
-    flow_times,
-    attrs=None,
-    source_bookkeeping=None,
-):
-    if (z_ring_field_sqrt is None) != (z_ring_bilinear is None):
-        raise ValueError("ringed field and bilinear factors should either both be present or both be omitted")
-
-    save_h5 = f"{tag}.h5"
-    with _prepare_h5_file(save_h5, attrs) as f:
-        f.create_dataset("flow_times", data=np.asarray(flow_times, dtype=np.float64))
-
-        raw = f.require_group("raw")
-        raw.create_dataset("kinetic_pervec", data=kinetic_pervec)
-        if source_bookkeeping is not None:
-            for name, values in source_bookkeeping.items():
-                raw.create_dataset(name, data=np.asarray(values, dtype=np.int32))
-
-        avg = f.require_group("avg")
-        avg.create_dataset("kinetic_spacetime", data=kinetic_spacetime)
-        if z_ring_field_sqrt is not None:
-            avg.create_dataset("Z_ring_field_sqrt", data=z_ring_field_sqrt)
-            avg.create_dataset("Z_ring_bilinear", data=z_ring_bilinear)
 
 
 # -----------------------------------------------------------------------------
@@ -377,33 +309,6 @@ def save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep
 # Save pion qTMD/PDF data using the same HDF5 layout as the proton writer.
 def save_qTMD_pion_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info, attrs=None):
     save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info, attrs=attrs)
-
-
-# Save disconnected qTMD/PDF one-point loops.
-def save_disconnected_qTMD_1pt_hdf5(tag, loop_pervec, loop_avg, gammalist, plist, W_index_list, attrs=None, source_bookkeeping=None):
-    save_h5 = tag + ".h5"
-    with _prepare_h5_file(save_h5, attrs) as f:
-        raw = f.require_group("raw")
-        raw.create_dataset("loop_pervec", data=loop_pervec)
-        if source_bookkeeping is not None:
-            for name, values in source_bookkeeping.items():
-                raw.create_dataset(name, data=np.asarray(values, dtype=np.int32))
-
-        f.create_dataset("gamma_list", data=np.asarray(gammalist, dtype="S"))
-        f.create_dataset("momentum_list", data=np.asarray(plist, dtype=np.int32))
-        f.create_dataset("W_index_list", data=np.asarray(W_index_list, dtype=np.int32))
-
-        bT_list = ["b_X", "b_Y"]
-        sm = f.require_group("avg").require_group("SS")
-        for ig, gm in enumerate(gammalist):
-            g_gm = sm.require_group(gm)
-            for ip, p in enumerate(plist):
-                p_tag = "PX" + str(p[0]) + "PY" + str(p[1]) + "PZ" + str(p[2])
-                g_p = g_gm.require_group(p_tag)
-                for i, idx in enumerate(W_index_list):
-                    path = bT_list[idx[3]] + "/" + "eta" + str(idx[2]) + "/" + "bT" + str(idx[0])
-                    g_data = g_p.require_group(path)
-                    g_data.create_dataset("bz" + str(idx[1]), data=loop_avg[i, ig, ip])
 
 
 # -----------------------------------------------------------------------------

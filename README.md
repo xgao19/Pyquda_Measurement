@@ -93,20 +93,17 @@ Perlmutter examples:
 ```bash
 # Pion/meson EMT
 bash application/EMT_meson/perlmutter/run_quark_3pt.sh
-bash application/EMT_meson/perlmutter/run_quark_1pt.sh
-bash application/EMT_meson/perlmutter/run_gluon_1pt.sh
 
 # Proton EMT
 bash application/EMT_proton/perlmutter/run_proton_quark_3pt.sh
 bash application/EMT_proton/perlmutter/run_proton_quark_1pt.sh
-bash application/EMT_proton/perlmutter/run_proton_gluon_1pt.sh
 
 # Shared EMT disconnected one-point workflows
-bash application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh
-bash application/EMT_disconnected_1pt/perlmutter/run_gluon_1pt.sh
+bash application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh --config_num 1000
+bash application/EMT_disconnected_1pt/perlmutter/run_gluon_1pt.sh --config_num 1000
 
 # Shared qTMD/PDF disconnected one-point workflow
-bash application/qTMD_disconnected_1pt/perlmutter/run_qTMD_1pt.sh
+bash application/qTMD_disconnected_1pt/perlmutter/run_qTMD_1pt.sh --config_num 1000
 
 # Pion qTMD and pion EMFF
 bash application/pion_TMD_CG/perlmutter/run_pion_TMD_CG.sh
@@ -282,8 +279,10 @@ For quark/gluon one-point data:
   `FlowedQuarkRinged` companion from the same EMT stochastic vectors.  It adds
   no inversions, flow updates, or derivative contractions.
 - The standalone `application/flowed_quark_ringed_norm` workflow remains
-  available for dedicated high-statistics, dilution, block-output, and resume
-  runs.  Final ringed factors are computed from the ensemble-averaged kinetic
+  available for dedicated high-statistics and dilution runs.  It uses the same
+  base/HP-part shards, validator, completion markers, and explicit finalization
+  as EMT/qTMD; no separate text sample log is used.  Final ringed factors are
+  computed from the ensemble-averaged kinetic
   expectation value, not by averaging per-configuration inverse factors.
 - Production quark 1pt wrappers default to base/HP interval shards.  Completed
   bases can be resumed independently, and an explicit streaming finalizer

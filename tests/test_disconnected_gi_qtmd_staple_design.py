@@ -1,8 +1,8 @@
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
     DisconnectedQuarkqTMD1pt,
-    create_fermion_TMD_GI,
     gi_qtmd_staple_segments,
 )
+from qtmd_gi_reference import create_fermion_TMD_GI
 
 
 def _path_length(segments):
@@ -48,6 +48,7 @@ def test_gi_qtmd_staple_invalid_indices():
 def test_gi_qtmd_production_wilson_index_list():
     measurement = DisconnectedQuarkqTMD1pt(
         {
+            "config_num": 0,
             "eta": [0, 1, 2],
             "b_z": 4,
             "b_T": 1,

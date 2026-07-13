@@ -12,7 +12,14 @@
 
 set -euo pipefail
 
+if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
+  echo "Usage: sbatch $0 --config_num CFG" >&2
+  exit 2
+fi
+config_num="$2"
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$script_dir/logs"
 
-srun -n 1 -c 32 --cpu-bind=cores bash "$script_dir/run_qTMD_1pt.sh"
+srun -n 1 -c 32 --cpu-bind=cores bash "$script_dir/run_qTMD_1pt.sh" \
+  --config_num "$config_num"
