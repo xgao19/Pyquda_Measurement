@@ -260,6 +260,10 @@ For quark/gluon one-point data:
   repeated local noise, violating the intended global covariance.  EMT, qTMD,
   and standalone ringed production all use global-coordinate counter noise;
   old backend-RNG data should not be mixed with these outputs.
+- Disconnected qTMD loops use
+  `xi^dagger P(q,tau) Gamma O_b D^{-1} xi`: apply every displacement or Wilson
+  line to the solved field, not to the noise.  The removed reversed-trace qTMD
+  outputs are invalid and must be regenerated.
 - Quark 1pt can use either ordinary `zn` noise or `hierarchical_probing`.
 - For hierarchical probing, `effective_n_inversions = n_base_noise * hp_num_vectors`.
 - Raw quark 1pt files store `source_index`, `base_noise_index`, and `hp_index`

@@ -20,7 +20,7 @@
 
 \section{Purpose}
 
-This note documents the first PyQUDA implementation of disconnected qTMD/PDF
+This note documents the PyQUDA implementation of disconnected qTMD/PDF
 one-point quark loops.  The source file is
 \code{pyquda\_measurement\_utils/Disconnected\_1pt\_qTMD\_vibe\_develop.py},
 and the Perlmutter application is
@@ -37,34 +37,64 @@ For a stochastic source \(\xi_r\), define
   \eta_r = D^{-1}\xi_r,
 \end{equation}
 where \(D\) is the same clover Dirac operator used by the connected qTMD
-measurements.  The implemented disconnected qTMD/PDF loop is
+measurements.  Let \(P_{q,\tau}\) project the left endpoint onto time \(\tau\)
+and multiply it by \(e^{i\mathbf q\cdot\mathbf x}\).  For the bilocal operator
+\begin{equation}
+  \overline q(x)\,\Gamma\,
+  U_{\mathcal C}(x,x+b)\,q(x+b),
+\end{equation}
+define \(O_b f(x)=U_{\mathcal C}(x,x+b)f(x+b)\).  The required loop building
+block is
 \begin{equation}
   L_{\Gamma,b}(q,\tau)
   =
-  \frac{1}{N_r}
-  \sum_{r=1}^{N_r}
-  \sum_{\mathbf{x}}
-  e^{i\mathbf{q}\cdot\mathbf{x}}\,
-  \Trsc\!\left[
-    \eta_r^\dagger(x)\,
-    \Gamma\,
-    O_b\,\xi_r(x)
+  \operatorname{Tr}\!\left[
+    P_{q,\tau}\Gamma O_bD^{-1}
+  \right].
+\end{equation}
+Its stochastic estimator is
+\begin{equation}
+  \widehat L_{\Gamma,b}^{(r)}(q,\tau)
+  =
+  \xi_r^\dagger P_{q,\tau}\Gamma O_b\eta_r
+  =
+  \sum_{\mathbf x}e^{i\mathbf q\cdot\mathbf x}
+  \xi_r^\dagger(x)\Gamma (O_b\eta_r)(x).
+\end{equation}
+Indeed, with the combined site--spin--color indices \(a,b\),
+\begin{align}
+  \mathbb E_\xi\!\left[\xi_a^\ast\xi_b\right]&=\delta_{ab},\\
+  \mathbb E_\xi\!\left[\xi^\dagger A\xi\right]
+  &=\sum_{a,b}A_{ab}\delta_{ab}=\operatorname{Tr}A,
+  \qquad
+  A=P_{q,\tau}\Gamma O_bD^{-1}.
+\end{align}
+Thus \(O_b\) acts on the solved field \(\eta=D^{-1}\xi\), while the original
+noise remains at the left endpoint.  The projector fixes the insertion time;
+the loop is a spatial trace at each stored \(\tau\), not a trace over time.
+
+\subsection{Removed reversed estimator}
+
+The removed implementation instead contracted
+\begin{equation}
+  \eta^\dagger P_{q,\tau}\Gamma O_b\xi,
+\end{equation}
+whose noise average is
+\begin{equation}
+  \operatorname{Tr}\!\left[
+    (D^{-1})^\dagger P_{q,\tau}\Gamma O_b
   \right],
 \end{equation}
-where \(x=(\mathbf{x},\tau)\), \(\Gamma\) is one of the 16 bilinear gamma
-matrices, and \(O_b\) is a nonlocal displacement or Wilson-line operator.
+and therefore is not the required trace.  Using
+\((D^{-1})^\dagger=\gamma_5D^{-1}\gamma_5\), together with the fact that
+\(P_{q,\tau}\) and \(O_b\) are spin diagonal, the reversed trace can be written
+as the target trace with \(\Gamma\) replaced by \(\gamma_5\Gamma\gamma_5\).
+Consequently it leaves the \(5\), \(I\), and six tensor labels unchanged but
+reverses the sign of \(T/X/Y/Z\) and \(T5/X5/Y5/Z5\).
 
-The current code convention is therefore
-\begin{equation}
-  \boxed{
-  \mathrm{loop\ convention}
-  =
-  \eta^\dagger \Gamma O_b \xi
-  }.
-\end{equation}
-The nonlocal operator \(O_b\) acts on the stochastic source side.  This choice
-is intentionally minimal and makes the first implementation easy to compare
-against connected PDF and local-current limits.
+This identity diagnoses the error only.  No channel remapping or data migration
+is supported.  All disconnected qTMD shards and canonical files made with the
+reversed estimator are invalid and must be deleted and regenerated.
 
 \section{Supported Operators}
 
@@ -90,15 +120,15 @@ For PDF operators,
 \end{equation}
 The coordinate-gauge version is a plain lattice shift:
 \begin{equation}
-  O_b^{\mathrm{CG\_PDF}}\xi(x) = \xi(x + b_z\hat{z}).
+  O_b^{\mathrm{CG\_PDF}}\eta(x) = \eta(x + b_z\hat{z}).
 \end{equation}
 The gauge-invariant version applies the straight Wilson line through repeated
 covariant shifts:
 \begin{equation}
-  O_b^{\mathrm{GI\_PDF}}\xi(x)
+  O_b^{\mathrm{GI\_PDF}}\eta(x)
   =
   U_z(x)U_z(x+\hat{z})\cdots
-  \xi(x+b_z\hat{z}),
+  \eta(x+b_z\hat{z}),
 \end{equation}
 with the corresponding backward-link product for negative \(b_z\).  In code
 this is implemented by repeated calls to \code{gauge.pure\_gauge.covDev}.
@@ -107,9 +137,9 @@ this is implemented by repeated calls to \code{gauge.pure\_gauge.covDev}.
 
 The current qTMD operator follows the connected qTMD diagnostic convention:
 \begin{equation}
-  O_b^{\mathrm{CG\_qTMD}}\xi(x)
+  O_b^{\mathrm{CG\_qTMD}}\eta(x)
   =
-  \xi(x + b_T \hat{e}_{\perp} + b_z\hat{z}),
+  \eta(x + b_T \hat{e}_{\perp} + b_z\hat{z}),
 \end{equation}
 where \(\hat{e}_{\perp}\) is either \(\hat{x}\) or \(\hat{y}\).  The two
 transverse directions are stored as \(\code{b\_X}\) and \(\code{b\_Y}\) in the
@@ -275,7 +305,11 @@ New output uses the source-independent helper
 \code{qTMD1pt/<lat>.qTMD1pt.<cfg>.<ama>.<sm>.h5}.
 \end{center}
 The obsolete source-position helper has been removed because the full-volume
-loop has no hadron source position.  The finalizer stores:
+loop has no hadron source position.  New shards and canonical files record
+\(\code{schema\_version=2}\),
+\(\code{loop\_convention=xi\_dagger\_Gamma\_O\_b\_eta}\), and
+\(\code{trace\_target=Tr[P\_qtau Gamma O\_b Dinv]}\).  The finalizer rejects
+any other convention before replacing a canonical file.  It stores:
 \begin{equation}
   \code{raw/loop\_pervec}
   \quad\mathrm{with\ shape}\quad
@@ -298,150 +332,31 @@ All serial HDF5 files are opened only by MPI rank zero.  Because no fermion
 flow changes the resident gauge in this workflow, the Dirac gauge is loaded
 once before the source loop and reused.
 
-\section{Validation Status}
+\section{Validation Strategy}
 
-The first implementation has been checked with:
-\begin{itemize}
-  \item Python syntax compilation.
-  \item A Perlmutter login-node smoke test for \(\code{GI\_PDF}\) at \(b_z=0\).
-  \item A Perlmutter login-node smoke test for \(\code{GI\_PDF}\) at \(b_z=1\).
-  \item A Perlmutter login-node smoke test for \(\code{CG\_qTMD}\) at
-        \(b_T=1,b_z=1\).
-\end{itemize}
-
-\subsection{Local/PDF Limit Sanity Checks}
-
-At zero displacement and zero momentum transfer, the different disconnected
-operator implementations should collapse to the same local bilinear loop:
+The trace direction is tested without precomputed stochastic HDF5 baselines.
+A complete basis of source vectors is applied to arbitrary complex matrices
+\(D^{-1}\), \(O_b\), and \(\Gamma\), including a fixed-time projector and a
+nonzero spatial phase.  The summed estimator must reproduce
 \begin{equation}
-  O^{\mathrm{GI\_PDF}}_{b_z=0}
-  =
-  O^{\mathrm{CG\_PDF}}_{b_z=0}
-  =
-  O^{\mathrm{CG\_qTMD}}_{b_T=0,b_z=0}
-  =
-  1 .
+  \operatorname{Tr}[P_{q,\tau}\Gamma O_bD^{-1}],
 \end{equation}
-Therefore, for the same gauge field, stochastic source, gamma matrix, and
-momentum \(q=0\), the expected equality is
+and must differ from the removed
+\(\operatorname{Tr}[(D^{-1})^\dagger P_{q,\tau}\Gamma O_b]\) for a generic
+test matrix.  A separate field-level test records which object is displaced
+and requires that only \(\eta\), never \(\xi\), receives the qTMD shift.
+
+Operator tests generated from the current code cover the local limit,
+coordinate-gauge positive and negative shifts, cached-link equality with the
+direct covariant-transport reference, and
 \begin{equation}
-  L^{\mathrm{GI\_PDF}}_{\Gamma,b_z=0}(0,\tau)
+  \code{GI\_qTMD}(b_T=0,\eta=|b_z|/2)
   =
-  L^{\mathrm{CG\_PDF}}_{\Gamma,b_z=0}(0,\tau)
-  =
-  L^{\mathrm{CG\_qTMD}}_{\Gamma,b_T=0,b_z=0,\hat{x}}(0,\tau)
-  =
-  L^{\mathrm{CG\_qTMD}}_{\Gamma,b_T=0,b_z=0,\hat{y}}(0,\tau).
+  \code{GI\_PDF}(b_z).
 \end{equation}
-This check is useful because it tests the HDF5 bookkeeping, Wilson-index
-ordering, gamma loop ordering, and the coordinate-gauge/GI local limits without
-requiring a hadron two-point function.
-
-The current S8T32 Perlmutter login-node check used one matched counter-based
-stochastic vector and found exact agreement:
-\begin{equation}
-  \max\left|
-  L^{\mathrm{GI\_PDF}}
-  -
-  L^{\mathrm{CG\_PDF}}
-  \right|
-  =
-  \max\left|
-  L^{\mathrm{GI\_PDF}}
-  -
-  L^{\mathrm{CG\_qTMD}}_{\hat{x}}
-  \right|
-  =
-  \max\left|
-  L^{\mathrm{GI\_PDF}}
-  -
-  L^{\mathrm{CG\_qTMD}}_{\hat{y}}
-  \right|
-  =
-  0 .
-\end{equation}
-The same equality was verified for both \(\code{raw/loop\_pervec}\) and the
-averaged \(\Gamma=\gamma_5\) HDF5 path
-\(\code{avg/SS/5/PX0PY0PZ0/b\_X/eta0/bT0/bz0}\), with the \(y\)-direction
-branch stored under \(\code{b\_Y}\) for \(\code{CG\_qTMD}\).
-
-The regression helper is
-\code{tests/test\_qtmd\_disconnected\_local\_pdf\_limit.py}.  It skips
-automatically if the local HDF5 smoke-test files are not present, and otherwise
-requires exact equality for the local/PDF limit above.
-
-\subsection{Nonzero-\(b_z\) Shift Sanity Check}
-
-A second check probes the straight-\(z\) displacement convention at nonzero
-separation.  For the coordinate-gauge operators, the PDF path at \(b_T=0\)
-should be exactly the \(b_T=0\) limit of the qTMD coordinate shift:
-\begin{equation}
-  O^{\mathrm{CG\_PDF}}_{b_z=\pm 1}
-  =
-  O^{\mathrm{CG\_qTMD}}_{b_T=0,b_z=\pm 1,\hat{x}}
-  =
-  O^{\mathrm{CG\_qTMD}}_{b_T=0,b_z=\pm 1,\hat{y}} .
-\end{equation}
-This equality checks the sign of the \(z\)-shift, the Wilson-index ordering,
-and the transverse-branch bookkeeping.  The corresponding S8T32 check found
-exact agreement for both \(b_z=+1\) and \(b_z=-1\):
-\begin{equation}
-  \max\left|
-  L^{\mathrm{CG\_PDF}}_{\Gamma,b_z=\pm1}
-  -
-  L^{\mathrm{CG\_qTMD}}_{\Gamma,b_T=0,b_z=\pm1,\hat{x}/\hat{y}}
-  \right|
-  =
-  0 .
-\end{equation}
-
-The gauge-invariant PDF loop uses the same Wilson-index labels,
-\([0,0,0,0]\), \([0,+1,0,0]\), and \([0,-1,0,0]\), but it is not expected to
-equal the coordinate-gauge loop on a nontrivial gauge field because the
-straight Wilson line is active:
-\begin{equation}
-  O^{\mathrm{GI\_PDF}}_{b_z=\pm1}
-  =
-  U_z \cdots \xi(x\pm\hat{z})
-  \ne
-  \xi(x\pm\hat{z})
-  =
-  O^{\mathrm{CG\_PDF}}_{b_z=\pm1}.
-\end{equation}
-The nonzero difference between \(\code{GI\_PDF}\) and \(\code{CG\_PDF}\)
-therefore confirms that the GI path is not accidentally falling back to the
-plain coordinate shift.
-
-The regression helper is
-\code{tests/test\_qtmd\_disconnected\_nonzero\_bz.py}.  During this check it
-also exposed and fixed a transverse-branch bug in the \(\code{CG\_qTMD}\)
-operator: when switching from the \(\hat{x}\) branch to the \(\hat{y}\) branch,
-the shifted stochastic source must be reset to the local source before applying
-the new branch displacement.
-
-\subsection{Nonzero-\(q\) Phase Sanity Check}
-
-The regression helper
-\code{tests/test\_disconnected\_momentum\_phase.py} uses a pure NumPy toy field
-to check the nonzero-momentum Fourier sign.  For a tiny lattice and
-\(q=(1,-2,3)\), it verifies
-\begin{equation}
-  \sum_{\mathbf{x}}
-  \Phi_q(\mathbf{x};0)\,
-  \Phi_q^\ast(\mathbf{x};0)
-  =
-  L_xL_yL_z,
-\end{equation}
-while the opposite projection vanishes:
-\begin{equation}
-  \sum_{\mathbf{x}}
-  \Phi_{-q}(\mathbf{x};0)\,
-  \Phi_q^\ast(\mathbf{x};0)
-  =
-  0 .
-\end{equation}
-The same test also checks that changing \(x_0\) only changes the expected
-overall phase, not the selected momentum magnitude.
+The previous tests that conditionally read old smoke-test HDF5 files were
+removed because those files contain the reversed estimator and cannot serve as
+valid regression references.
 
 \section{Gauge-Invariant Staple qTMD Design}
 
@@ -451,16 +366,17 @@ Wilson line.  The convention is the fixed-staple-length convention used by the
 legacy GPT proton qTMD workflow.  In the current notation, \(b_z\) is the
 physical final longitudinal separation and must be an even integer:
 \begin{equation}
-  O_{b,\eta,\perp}^{\mathrm{GI\_qTMD}}\xi(x)
+  O_{b,\eta,\perp}^{\mathrm{GI\_qTMD}}\psi(x)
   =
   U_{\mathcal{C}(x;b,\eta,\perp)}
-  \xi(x+b_T\hat{e}_{\perp}+b_z\hat{z}),
+  \psi(x+b_T\hat{e}_{\perp}+b_z\hat{z}),
 \end{equation}
 with
 \begin{equation}
   b_z \in 2\mathbb{Z}, \qquad
   \eta \geq \frac{|b_z|}{2}.
 \end{equation}
+Production applies this operator with \(\psi=\eta=D^{-1}\xi\).
 The three-segment staple path is
 \begin{equation}
   \mathcal{C}(x;b,\eta,\perp):

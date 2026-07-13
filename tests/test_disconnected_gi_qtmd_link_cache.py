@@ -62,6 +62,23 @@ def _run_link_cache_check():
         from_link = create_fermion_TMD_GI_from_link(staple_link, fermion, W_index)
         np.testing.assert_allclose(array_to_numpy(from_link.data), array_to_numpy(direct.data), atol=1e-12, rtol=1e-12)
 
+    for b_z in (-2, 2):
+        pdf = fermion.copy()
+        direction = 2 if b_z > 0 else 6
+        for _ in range(abs(b_z)):
+            pdf = gauge.pure_gauge.covDev(pdf, direction)
+        w_index = [0, b_z, abs(b_z) // 2, 0]
+        staple_link = build_gi_qtmd_staple_link(gauge, w_index)
+        qtmd_pdf_limit = create_fermion_TMD_GI_from_link(
+            staple_link, fermion, w_index
+        )
+        np.testing.assert_allclose(
+            array_to_numpy(qtmd_pdf_limit.data),
+            array_to_numpy(pdf.data),
+            atol=1e-12,
+            rtol=1e-12,
+        )
+
 
 def test_gi_qtmd_link_cache_matches_direct_covdev():
     _run_link_cache_check()

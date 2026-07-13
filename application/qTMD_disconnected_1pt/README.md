@@ -13,6 +13,21 @@ base/HP-part shards, and explicit finalization. `config_num` is mandatory;
 `QTMD_1PT_RAND_SEED` is a stream salt and is recorded only as `noise_stream`.
 There is no backend RNG, source-position tag, or monolithic output mode.
 
+The loop convention is
+
+```text
+eta = D^{-1} xi
+L_hat(q,tau) = xi^dagger P(q,tau) Gamma O_b eta
+E[L_hat] = Tr[P(q,tau) Gamma O_b D^{-1}]
+```
+
+`O_b` always acts on the solved field `eta`; the original noise `xi` remains
+at the left endpoint.  Output records `schema_version=2`,
+`loop_convention=xi_dagger_Gamma_O_b_eta`, and
+`trace_target=Tr[P_qtau Gamma O_b Dinv]`.  Shards and canonical files produced
+with the removed `eta^dagger Gamma O_b xi` contraction are invalid and must be
+deleted and regenerated.  There is no conversion path.
+
 For `GI_qTMD`, the fixed-length staple requires even `b_z` and
 `eta >= abs(b_z)/2`. Gauge-only staple links are built once per configuration
 and reused for every stochastic source. The slow direct-covDev implementation

@@ -4,6 +4,22 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-13: Fix disconnected qTMD trace direction
+
+- Replaced the reversed `eta^dagger Gamma O_b xi` contraction with the unbiased
+  estimator `xi^dagger Gamma O_b eta`, applying every qTMD/PDF operator to
+  `eta=D^{-1}xi` for the target trace `Tr[P_qtau Gamma O_b Dinv]`.
+- Added qTMD schema-version and trace-convention provenance, and made the
+  finalizer reject old reversed-trace shards without replacing canonical data.
+- Replaced regression checks that depended on invalid old HDF5 outputs with
+  complete-basis trace-direction and current-operator tests.
+- Updated the qTMD workflow documentation and derivation; old disconnected
+  qTMD shards and canonical files must be discarded and regenerated.
+- Rebuilt the qTMD PDF and verified `121 passed, 8 skipped`, Python syntax,
+  LaTeX references, and `git diff --check` with the `software_gradientflow`
+  development environment.  The nontrivial-gauge cached-link/direct and
+  staple/PDF-limit GPU regression also passed on `login32`.
+
 ## 2026-07-13: Simplify disconnected production workflows
 
 - Replaced skip-set stochastic iteration with direct deterministic generation

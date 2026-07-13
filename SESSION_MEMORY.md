@@ -149,7 +149,11 @@ python tests/run_smoke_tests.py
   `eta >= abs(b_z)/2`, `b_T >= 0`, and total length `2*eta + b_T`.
 - Prefer cached gauge-only staple transporters and apply them to the shifted
   endpoint field.  Keep the direct covariant-shift path for validation.
-- When constructing disconnected `CG_qTMD`, reset the shifted source before
+- The disconnected estimator is `xi^dagger P Gamma O_b eta`, with
+  `eta=D^{-1}xi`; apply `O_b` to `eta`, never to `xi`.  The reversed
+  `eta^dagger P Gamma O_b xi` estimator targets the wrong trace, so its data
+  must not be reused.
+- When constructing disconnected `CG_qTMD`, reset the shifted solution before
   changing transverse direction; otherwise the `b_Y` path incorrectly starts
   from the final `b_X` displacement.
 - Local-limit invariant:

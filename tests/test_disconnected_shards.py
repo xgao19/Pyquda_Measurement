@@ -10,6 +10,9 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     ringed_kinetic_pervec_from_emt,
 )
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+    QTMD_LOOP_CONVENTION,
+    QTMD_SCHEMA_VERSION,
+    QTMD_TRACE_TARGET,
     finalize_disconnected_qtmd_1pt_shards,
 )
 from pyquda_measurement_utils.disconnected_shards import (
@@ -143,7 +146,7 @@ def test_finalize_rejects_partial_base_and_preserves_old_canonical(tmp_path):
         assert h5.attrs["sentinel"] == "old"
 
 
-def _write_synthetic_qtmd_base(shard_dir, tag, base_idx):
+def _write_synthetic_qtmd_base(shard_dir, tag, base_idx, legacy=False):
     path = shard_part_path(shard_dir, tag, base_idx, 0, 0, 1)
     attrs = expected_part_attrs({
         "measurement": "disconnected_qTMD_1pt",
@@ -170,7 +173,9 @@ def _write_synthetic_qtmd_base(shard_dir, tag, base_idx):
         "hp_num_vectors": 1,
         "hp_ordering": "global_xyzt_gray_projected_to_evenodd",
         "gi_qtmd_staple_mode": "link_cache",
-        "loop_convention": "eta_dagger_Gamma_O_b_xi",
+        "schema_version": 1 if legacy else QTMD_SCHEMA_VERSION,
+        "loop_convention": "eta_dagger_Gamma_O_b_xi" if legacy else QTMD_LOOP_CONVENTION,
+        "trace_target": "legacy_incorrect_trace" if legacy else QTMD_TRACE_TARGET,
     }, base_idx, 0, 0, 1, 1)
     metadata = {
         "gamma_list": np.asarray(["5", "T"], dtype="S"),
@@ -205,4 +210,22 @@ def test_qtmd_finalize_streams_source_independent_canonical(tmp_path):
         np.testing.assert_allclose(h5["avg/SS/5/PX0PY0PZ0/b_X/eta0/bT0/bz0"][()], 1.5 / 8.0)
         assert h5.attrs["n_zn"] == 4
         assert h5.attrs["noise_generator"] == "splitmix64_global_coordinate_v1"
+        assert h5.attrs["schema_version"] == QTMD_SCHEMA_VERSION
+        assert h5.attrs["loop_convention"] == QTMD_LOOP_CONVENTION
+        assert h5.attrs["trace_target"] == QTMD_TRACE_TARGET
         assert "rand_seed" not in h5.attrs
+
+
+def test_qtmd_finalize_rejects_legacy_trace_and_preserves_canonical(tmp_path):
+    tag = str(tmp_path / "qTMD1pt" / "lat.qTMD1pt.9.0.sm")
+    shard_dir = tmp_path / "qTMD1pt" / "shards"
+    _write_synthetic_qtmd_base(shard_dir, tag, 0, legacy=True)
+    Path(tag).parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(tag + ".h5", "w") as h5:
+        h5.attrs["sentinel"] = "old"
+
+    with pytest.raises(ValueError, match="old disconnected qTMD data"):
+        finalize_disconnected_qtmd_1pt_shards(shard_dir, tag, 1)
+
+    with h5py.File(tag + ".h5", "r") as h5:
+        assert h5.attrs["sentinel"] == "old"

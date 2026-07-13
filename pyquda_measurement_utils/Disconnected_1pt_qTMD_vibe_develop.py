@@ -6,8 +6,8 @@ functions in downstream analysis:
 
     C3_disc = < C2_H L_qTMD > - < C2_H > < L_qTMD >.
 
-The first implementation intentionally mirrors the connected qTMD operator
-choices already used in ``pion_qTMD_vibe_develop.py``:
+The operator choices mirror the connected qTMD definitions already used in
+``pion_qTMD_vibe_develop.py``:
 
     CG_qTMD: coordinate-gauge style spatial displacement, no explicit links.
     CG_PDF:  straight-z displacement, no explicit links.
@@ -17,9 +17,9 @@ choices already used in ``pion_qTMD_vibe_develop.py``:
 The stochastic estimator uses eta = D^{-1} xi and the loop convention
 
     L_Gamma,b(q,tau) =
-        sum_x exp(i q.x) eta^\dagger(x) Gamma O_b xi(x).
+        sum_x exp(i q.x) xi^\dagger(x) Gamma O_b eta(x).
 
-The nonlocal operator O_b acts on the source/noise side.  The GI qTMD staple
+The nonlocal operator O_b acts on the solved propagator side.  The GI qTMD staple
 uses the fixed-total-length convention
 
     x -> x + (eta + b_z / 2) zhat
@@ -69,6 +69,9 @@ from pyquda_measurement_utils.disconnected_shards import (
 )
 
 _VALID_OPERATOR_KINDS = {"CG_qTMD", "CG_PDF", "GI_PDF", "GI_qTMD"}
+QTMD_SCHEMA_VERSION = 2
+QTMD_LOOP_CONVENTION = "xi_dagger_Gamma_O_b_eta"
+QTMD_TRACE_TARGET = "Tr[P_qtau Gamma O_b Dinv]"
 
 
 def gi_qtmd_staple_segments(W_index):
@@ -138,6 +141,18 @@ def create_fermion_TMD_GI_from_link(staple_link: LatticeLink, fermion: LatticeFe
     xp = _get_xp_from_array(fermion.data)
     shifted.data[:] = xp.einsum("wtzyxab,wtzyxib->wtzyxia", staple_link.data, endpoint.data, optimize=True)
     return shifted
+
+
+def _contract_xi_dagger_gamma_shifted_eta(xi_data, gamma_ls, shifted_eta_data):
+    """Contract xi^dagger Gamma shifted_eta at every lattice site."""
+    xp = _get_xp_from_array(xi_data)
+    return xp.einsum(
+        "wtzyxia,gij,wtzyxja->gwtzyx",
+        xi_data.conj(),
+        gamma_ls,
+        shifted_eta_data,
+        optimize=True,
+    )
 
 
 class DisconnectedQuarkqTMD1pt:
@@ -250,32 +265,34 @@ class DisconnectedQuarkqTMD1pt:
         gamma_ls = gamma_stack(xi.data)
 
         loops = []
-        shifted_xi = xi.copy()
+        shifted_eta = eta.copy()
         for iW, W_index in enumerate(W_index_list):
             mpi_print(latt_info, f"Contract disconnected {operator_kind} {iW + 1}/{len(W_index_list)} {W_index}")
             W_index_previous = [0, 0, 0, 0] if iW == 0 else W_index_list[iW - 1]
 
             if operator_kind in {"CG_qTMD", "CG_PDF"}:
                 if operator_kind == "CG_PDF" and W_index[1] in {0, -1}:
-                    shifted_xi = xi.copy()
+                    shifted_eta = eta.copy()
                     W_index_previous = [0, 0, 0, 0]
                 if operator_kind == "CG_qTMD" and W_index[3] != W_index_previous[3]:
-                    shifted_xi = xi.copy()
+                    shifted_eta = eta.copy()
                     W_index_previous = [0, 0, 0, W_index[3]]
-                shifted_xi = self.create_fermion_TMD_CG(shifted_xi, W_index, W_index_previous)
+                shifted_eta = self.create_fermion_TMD_CG(shifted_eta, W_index, W_index_previous)
             elif operator_kind == "GI_PDF":
                 if W_index[1] in {0, -1}:
-                    shifted_xi = xi.copy()
+                    shifted_eta = eta.copy()
                     W_index_previous = [0, 0, 0, 0]
-                shifted_xi = self.create_fermion_PDF_GI(gauge, shifted_xi, W_index, W_index_previous)
+                shifted_eta = self.create_fermion_PDF_GI(gauge, shifted_eta, W_index, W_index_previous)
             elif operator_kind == "GI_qTMD":
                 if staple_links is None:
                     raise ValueError("GI_qTMD production requires the staple-link cache")
-                shifted_xi = create_fermion_TMD_GI_from_link(staple_links[tuple(W_index)], xi, W_index)
+                shifted_eta = create_fermion_TMD_GI_from_link(staple_links[tuple(W_index)], eta, W_index)
             else:
                 raise ValueError(f"Unsupported operator_kind {operator_kind!r}")
 
-            local_loop = xp.einsum("wtzyxia,gij,wtzyxja->gwtzyx", eta.data.conj(), gamma_ls, shifted_xi.data, optimize=True)
+            local_loop = _contract_xi_dagger_gamma_shifted_eta(
+                xi.data, gamma_ls, shifted_eta.data
+            )
             loop = xp.einsum("qwtzyx,gwtzyx->gqt", phases, local_loop, optimize=True)
             loops.append(core.gatherLattice(array_to_numpy(loop), [2, -1, -1, -1]))
             del local_loop, loop
@@ -453,7 +470,9 @@ class DisconnectedQuarkqTMD1pt:
             "hp_num_vectors": self.hp_num_vectors,
             "hp_ordering": self.hp_ordering,
             "gi_qtmd_staple_mode": "link_cache",
-            "loop_convention": "eta_dagger_Gamma_O_b_xi",
+            "schema_version": QTMD_SCHEMA_VERSION,
+            "loop_convention": QTMD_LOOP_CONVENTION,
+            "trace_target": QTMD_TRACE_TARGET,
         }
         return self._measure_base_shards(
             U, dirac, randPara, tag, operator_kind, phases_q, W_index_list,
@@ -471,6 +490,21 @@ def finalize_disconnected_qtmd_1pt_shards(shard_dir, canonical_tag, n_base_noise
         metadata_dataset_names=("gamma_list", "momentum_list", "W_index_list"),
     )
     reference_attrs = manifest["reference_attrs"]
+    if int(reference_attrs.get("schema_version", -1)) != QTMD_SCHEMA_VERSION:
+        raise ValueError(
+            f"qTMD shards require schema_version={QTMD_SCHEMA_VERSION}; "
+            "old disconnected qTMD data must be discarded and regenerated"
+        )
+    if reference_attrs.get("loop_convention") != QTMD_LOOP_CONVENTION:
+        raise ValueError(
+            f"qTMD shards require loop_convention={QTMD_LOOP_CONVENTION}; "
+            "old disconnected qTMD data must be discarded and regenerated"
+        )
+    if reference_attrs.get("trace_target") != QTMD_TRACE_TARGET:
+        raise ValueError(
+            f"qTMD shards require trace_target={QTMD_TRACE_TARGET}; "
+            "old disconnected qTMD data must be discarded and regenerated"
+        )
     reference_metadata = manifest["metadata"]
     loop_shape = manifest["raw_tails"]["loop_pervec"]
     all_parts = manifest["parts"]
