@@ -96,7 +96,6 @@ The class hierarchy is:
   \code{EMTDisconnectedQuark1pt} & shared quark-1pt loop \\
   \code{EMTDisconnectedGluon1pt} & shared gluon-1pt loop \\
   \code{QuarkEMT(EMTDisconnectedQuark1pt)} & connected meson 3pt + 2pt \\
-  \code{GluonEMT(EMTDisconnectedGluon1pt)} & alias for gluon 1pt \\
 \end{tabular}
 \end{center}
 
@@ -105,8 +104,7 @@ The class hierarchy is:
 The application-level entry points are:
 \begin{itemize}[nosep]
   \item \code{application/EMT\_meson/perlmutter/Pyquda\_EMT\_quark\_3pt.py} -- connected 3pt
-  \item \code{application/EMT\_meson/perlmutter/Pyquda\_EMT\_quark\_1pt.py} -- quark 1pt
-  \item \code{application/EMT\_meson/perlmutter/Pyquda\_EMT\_gluon\_1pt.py} -- gluon 1pt
+  \item \code{application/EMT\_disconnected\_1pt/perlmutter/} -- shared quark/gluon loops
 \end{itemize}
 
 % ==============================================================================
@@ -168,7 +166,15 @@ The implementation scans all 16 gamma structures for the sink while keeping $\Ga
 \end{center}
 }
 
-with $\sigma_{\mu\nu} = \frac{i}{2}[\gamma_\mu, \gamma_\nu]$. The ordering is fixed by \code{pyquda\_gammas\_order}:
+The raw PyQUDA tensor masks obey
+$S_{\mu\nu}=\frac{1}{2}[\gamma_\mu,\gamma_\nu]$ without an extra $i$; multiply
+them by $i$ if the Hermitian convention
+$\sigma_{\mu\nu}=\frac{i}{2}[\gamma_\mu,\gamma_\nu]$ is desired.  Likewise the
+raw bit-mask labels satisfy
+$Y5_{\rm phys}=-Y5_{\rm raw}$ and
+$T5_{\rm phys}=-T5_{\rm raw}$ when every physical axial matrix is defined as
+$\gamma_\mu\gamma_5$.  These transformations are stored explicitly in
+\code{physical\_from\_pyquda}. The ordering is fixed by \code{pyquda\_gammas\_order}:
 \code{[15, 8, 7, 1, 14, 2, 13, 4, 11, 0, 9, 3, 5, 10, 6, 12]}.
 
 In the einsum contraction, the data layout is
@@ -362,7 +368,13 @@ for mu in range(4):
         C3_Tmunu[:, nu, mu] = C3_Tmunu[:, mu, nu]
 \end{verbatim}
 
-The Dirac gamma matrices used in the contraction are $\gamma_1, \gamma_2, \gamma_3, \gamma_4$, indexed by \code{D\_GAMMA\_IDS = [1, 2, 4, 8]}. The index \code{mu=0} corresponds to $\gamma_1$ ($x$-direction in PyQUDA convention), \code{mu=1} to $\gamma_2$ ($y$), \code{mu=2} to $\gamma_3$ ($z$), and \code{mu=3} to $\gamma_4$ (time).
+The production contraction now evaluates all 16 gamma matrices for each of the
+four derivative directions.  The primitive array is unsymmetrized; selecting
+the vector channels $\gamma_1,\gamma_2,\gamma_3,\gamma_4$ and symmetrizing
+reproduces the previous \code{C3\_Tmunu} exactly.  Here derivative index zero is
+$x$, one is $y$, two is $z$, and three is Euclidean time.  The batched Gamma
+contraction adds no propagator inversion, fermion-flow step, or covariant
+derivative call.
 
 \begin{remark}[Trace ordering]
 The einsum pattern \code{abij, bcji, ca} should be read as:
@@ -601,9 +613,13 @@ The \code{connected\_3pt} method orchestrates the full measurement:
 The output file (written by \code{save\_emt\_quark\_3pt\_hdf5}) contains:
 
 \begin{itemize}[nosep]
-  \item \code{C2}: 1D array of length $N_t$ -- two-point function at the selected sink gamma and zero momentum, for normalization.
   \item \code{C3\_chi}: 4D array \code{[N\_ts, Nsteps+1, Nq, Nt]} -- scalar diagnostic.
   \item \code{C3\_Tmunu}: 6D array \code{[N\_ts, Nsteps+1, Nq, 4, 4, Nt]} -- quark EMT 3pt.
+  \item \code{C3\_local\_bilinear}: \code{[N\_ts,16,Nq,Nsteps+1,Nt]}.
+  \item \code{C3\_derivative\_bilinear}: \code{[N\_ts,16,4,Nq,Nsteps+1,Nt]}.
+  \item \code{gamma\_list}, \code{gamma\_pyquda\_ids},
+        \code{gamma\_matrices}, \code{physical\_from\_pyquda}, and
+        \code{derivative\_directions}: exact operator-basis metadata.
   \item \code{momentum\_transfer\_list}: list of $[q_x, q_y, q_z, q_t]$ arrays.
   \item HDF5 attributes: \code{measurement}, \code{spin}, \code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{n\_t\_separations}, \code{src\_interpolator}, \code{sink\_interpolator}, \code{contraction\_convention} (``B''), \code{meson\_sign} ($+1$), \code{n\_qext}.
 \end{itemize}
@@ -647,9 +663,9 @@ The solution vector is obtained by inverting the Dirac operator:
   \eta(x) = D^{-1} \xi(x).
 \end{equation}
 
-\subsubsection{CHI diagnostics}
+\subsubsection{Identity channel and flowed-noise norm}
 
-Two scalar diagnostics are computed to monitor the stochastic estimator:
+Two scalar quantities monitor the stochastic estimator:
 
 \begin{align}
   \text{CHI}[0](q, t) &= \sum_{\vec{x}} \Phi_q(x)\;
@@ -661,17 +677,16 @@ Two scalar diagnostics are computed to monitor the stochastic estimator:
     \label{eq:CHI1}
 \end{align}
 
-\text{CHI}[0] is the stochastic estimate of $\Tr(D^{-1})$ and should average to the scalar vacuum condensate. \text{CHI}[1] is the noise normalization (for $\mathbb{Z}_2$ noise, $\xi^\dagger\xi = \text{constant}$ at each site).
+The first quantity is the identity channel of the complete 16-Gamma local
+basis and is not duplicated.  The second is the flowed-noise norm.
 
 In code:
 \begin{verbatim}
-  dot_xi_eta = contract("etzyxbc, etzyxbc -> etzyx",
-                        xi.data.conj(), eta.data)
-  CHI[0] = impose_P_Breit_slice(U_f, dot_xi_eta, phases_3pt)
+  scalar_trace = local_bilinear[gamma_list.index("I")]
 
   dot_xi_xi = contract("etzyxbc, etzyxbc -> etzyx",
                         xi.data.conj(), xi.data)
-  CHI[1] = impose_P_Breit_slice(U_f, dot_xi_xi, phases_3pt)
+  flowed_noise_norm = impose_P_Breit_slice(dot_xi_xi, phases_3pt)
 \end{verbatim}
 
 \subsubsection{Quark EMT one-point building block}
@@ -726,13 +741,15 @@ Finally, the result is divided by the spatial volume $V_3 = L_x L_y L_z$ to obta
 
 \subsubsection{HDF5 output format (Quark 1pt)}
 
-The file (written by \code{save\_emt\_quark\_1pt\_hdf5}) contains:
+The canonical EMTc (written by the shard finalizer) contains:
 
 \begin{itemize}[nosep]
-  \item \code{raw/Tmunu\_pervec}: 6D \code{[n\_vec, 4, 4, Nq, Nsteps+1, Nt]} -- per-noise-vector EMT.
-  \item \code{raw/CHI\_pervec}: 5D \code{[n\_vec, 2, Nq, Nsteps+1, Nt]} -- per-noise-vector CHI.
+  \item \code{raw/local\_bilinear\_pervec}: \code{[n\_vec,16,Nq,Nsteps+1,Nt]}.
+  \item \code{raw/derivative\_bilinear\_pervec}: \code{[n\_vec,16,4,Nq,Nsteps+1,Nt]}.
+  \item \code{raw/flowed\_noise\_norm\_pervec}: \code{[n\_vec,Nq,Nsteps+1,Nt]}.
+  \item \code{avg/local\_bilinear} and \code{avg/derivative\_bilinear}: source-averaged, volume-normalized primitives.
   \item \code{avg/Tmunu/T11, T12, ..., T44}: averaged, volume-normalized tensor components (symmetric storage: only $\mu \leq \nu$).
-  \item \code{avg/CHI}: 4D \code{[2, Nq, Nsteps+1, Nt]} -- averaged CHI.
+  \item \code{avg/flowed\_noise\_norm}: \code{[Nq,Nsteps+1,Nt]}.
   \item Attributes: \code{measurement}, \code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{n\_vec}, \code{n\_zn}.
 \end{itemize}
 
@@ -755,13 +772,10 @@ quark EMT one-point gives, for each effective stochastic source \(r\),
 \end{align}
 
 The EMT 1pt run extracts this identity directly from
-\code{raw/Tmunu\_pervec}, without another solve, flow update, derivative, or
-gather, and writes the kinetic-only companion
-\begin{center}
-\code{FlowedQuarkRinged/<lat>.FlowedQuarkRinged.<cfg>.<ama>.<sm>.h5}.
-\end{center}
-It contains \code{raw/kinetic\_pervec}, source bookkeeping,
-\code{avg/kinetic\_spacetime}, and \code{flow\_times}; it does not contain
+the vector diagonal channels of
+\code{raw/derivative\_bilinear\_pervec}, without another solve, flow update, derivative, or
+gather, and writes \code{derived/ringed/kinetic\_pervec} and
+\code{derived/ringed/kinetic\_spacetime} in the same EMTc; it does not contain
 configuration-local \code{Z\_ring} datasets.  The same quantity can be checked
 against
 
@@ -770,12 +784,12 @@ against
 \end{center}
 
 at the \(q=0\) momentum index.  Final ringed factors must be evaluated from the
-ensemble average of \code{avg/kinetic\_spacetime}; averaging factors formed as
+ensemble average of \code{derived/ringed/kinetic\_spacetime}; averaging factors formed as
 the inverse of each configuration's kinetic value is not equivalent.  The
-\code{CHI} datasets remain scalar-trace and noise diagnostics.  The complete
+local identity and flowed-noise norm remain diagnostics.  The complete
 convention and schema are documented in the disconnected one-point note.
 Production one-point jobs write base/HP-interval shards by default.  Only the
-explicit finalizer publishes the canonical EMTc and kinetic companion after
+explicit finalizer publishes the canonical EMTc with embedded kinetic data after
 all configured bases have complete HP coverage.
 
 \subsection{Gluon One-Point Function}
@@ -874,7 +888,7 @@ The one-point flow schedule mirrors the connected 3pt schedule (measure-before-f
 \textbf{Quark 1pt flow:}
 \begin{verbatim}
   for step in range(Nsteps + 1):
-      measure Tmunu, CHI
+      measure primitive bilinears, flowed_noise_norm
       if Nsteps > 0 and step == 0:
           temp = multiField([xi, eta])
           temp_flow = U_f.gradientFlow(temp, flow_type, 10, stepsize/10)
@@ -958,8 +972,9 @@ For each gauge configuration, four HDF5 files are read:
                        & \code{C3\_Tmunu}   & \code{[Nts, Ns+1, Nq, 4, 4, Nt]} \\
 \midrule
 \code{EMTc/...h5}     & \code{avg/Tmunu/Tij} & \code{[Nq, Ns+1, Nt]} each \\
-                       & \code{avg/CHI}      & \code{[2, Nq, Ns+1, Nt]} \\
-                       & \code{raw/Tmunu\_pervec} & \code{[Nv, 4, 4, Nq, Ns+1, Nt]} \\
+                       & \code{avg/flowed\_noise\_norm} & \code{[Nq, Ns+1, Nt]} \\
+                       & \code{raw/local\_bilinear\_pervec} & \code{[Nv,16,Nq,Ns+1,Nt]} \\
+                       & \code{raw/derivative\_bilinear\_pervec} & \code{[Nv,16,4,Nq,Ns+1,Nt]} \\
 \midrule
 \code{EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5} & \code{Tmunu/Tij} & \code{[Nq, Ns+1, Nt]} each \\
 \bottomrule
@@ -1345,7 +1360,7 @@ Meson 2pt     & \code{EMT2pt/}  & \code{C2}          & \code{[16, Np, Nt]} \\
 Quark 3pt     & \code{EMT3pt/}  & \code{C2}          & \code{[Nt]} \\
               &                  & \code{C3\_chi}      & \code{[Nts, Ns+1, Nq, Nt]} \\
               &                  & \code{C3\_Tmunu}    & \code{[Nts, Ns+1, Nq, 4, 4, Nt]} \\
-Quark 1pt     & \code{EMTc/}    & \code{raw/Tmunu\_pervec} & \code{[Nv, 4, 4, Nq, Ns+1, Nt]} \\
+Quark 1pt     & \code{EMTc/}    & \code{raw/derivative\_bilinear\_pervec} & \code{[Nv,16,4,Nq,Ns+1,Nt]} \\
               &                  & \code{avg/Tmunu/Tij}    & \code{[Nq, Ns+1, Nt]} \\
 Gluon 1pt       & \code{EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5} & \code{Tmunu/Tij} & \code{[Nq, Ns+1, Nt]} \\
 \bottomrule
@@ -1361,7 +1376,7 @@ Notation: \code{Np} = number of momenta, \code{Nq} = number of momentum transfer
 \subsection{Parameter Dictionary}
 \label{sec:parameters}
 
-The \code{QuarkEMT} and \code{GluonEMT} classes are initialized with a parameter dictionary containing:
+The \code{QuarkEMT} class is initialized with a parameter dictionary containing:
 
 \begin{center}
 \begin{tabular}{@{}ll@{}}

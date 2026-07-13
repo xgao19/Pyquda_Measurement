@@ -4,6 +4,30 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-13: Extend quark EMT to the complete Dirac bilinear basis
+
+- Added one canonical 16-element PyQUDA Gamma definition shared by EMT, qTMD,
+  and two-point helpers, together with explicit matrices and a stored
+  `physical_from_pyquda` transform.  This records the `Y5`/`T5` axial signs and
+  distinguishes raw `[gamma_mu,gamma_nu]/2` tensors from the Hermitian
+  `i[gamma_mu,gamma_nu]/2` convention.
+- Extended disconnected quark shards to save 16 local and `16x4`
+  unsymmetrized derivative bilinears.  Removed the redundant raw symmetric
+  `Tmunu_pervec`; the finalizer derives `avg/Tmunu`, ringed kinetic data, and
+  the existing disconnected build products from vector primitive channels.
+- Extended pion and proton connected EMT contractions and HDF5 files with the
+  same primitive basis.  Existing `C3_chi` and `C3_Tmunu` remain derived
+  datasets with their previous shapes and conventions.
+- Batched all Gamma contractions and momentum projections after constructing
+  each derivative once.  No inversion, stochastic source, fermion-flow step,
+  sequential inversion, or covariant-derivative count was added.
+- Added algebra, schema, shard/finalizer, and old-vector-EMT regression tests.
+  A real A100 smoke also verified the CuPy metadata path, the full primitive
+  shard/finalizer schema, exact identity-to-CHI, vector-to-EMT, and
+  vector-diagonal-to-ringed reconstruction.  Final verification passed with
+  138 tests and 8 skips; all three EMT LaTeX documents compiled twice without
+  undefined references and their PDFs were rebuilt.
+
 ## 2026-07-13: Fix disconnected qTMD trace direction
 
 - Replaced the reversed `eta^dagger Gamma O_b xi` contraction with the unbiased
@@ -399,3 +423,32 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Added Perlmutter helper scripts under:
   `systems/perlmutter`.
 - Validated gradient-flow smoke test on `login32`.
+## 2026-07-13: EMT operator schema v3 and production cleanup
+
+- Fixed pion connected serial HDF5 writes so only MPI rank 0 opens the file.
+- Made disconnected quark/gluon loop times source-relative in `build_3pt` and
+  changed quark-loop reading to source chunks containing only X/Y/Z/T Gamma
+  channels.
+- Replaced disconnected `CHI` duplication with the identity local primitive
+  plus `flowed_noise_norm`, and embedded ringed kinetic data under
+  `EMTc/derived/ringed`; finalization now publishes one file atomically.
+- Removed broken Frontier pion, duplicate proton quark-1pt, hadron gluon alias,
+  and unused connected helper entry points.
+- Removed the singleton proton `tsep` data axis, made connected configuration
+  CLI-only, expanded connected provenance, and updated Perlmutter defaults to
+  the current `software_gradientflow` runtime.
+- EMT schema v3 is intentionally incompatible with previous shards, sample
+  logs, canonical loops, and connected outputs; all must be regenerated.
+- Verified one S8T32, one-source, zero-flow shard and finalization on a
+  `login32` A100: schema 3 produced derivative shape `[1,16,4,1,1,32]`,
+  flowed-noise norm, and embedded kinetic shape `[1,1,32]`.
+
+## 2026-07-13: Centralized application analysis helpers
+
+- Moved the disconnected EMT loop readers and source-relative time alignment
+  from `pyquda_measurement_utils` to
+  `application/analysis_helper/emt_disconnected_analysis.py`.
+- Reserved `pyquda_measurement_utils` for production measurements, operators,
+  and reusable computational infrastructure; application data combination and
+  post-processing now have a shared application-level home.
+- Kept the reader formulas, HDF5 schema, chunking, and output axes unchanged.

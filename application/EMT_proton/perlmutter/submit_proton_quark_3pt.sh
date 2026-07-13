@@ -10,5 +10,9 @@
 #SBATCH -o logs/proton_emt_q3pt.%j.out
 
 set -euo pipefail
+if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
+  echo "Usage: sbatch $0 --config_num CFG" >&2
+  exit 2
+fi
 mkdir -p logs
-srun ./run_proton_quark_3pt.sh
+srun ./run_proton_quark_3pt.sh "$@"

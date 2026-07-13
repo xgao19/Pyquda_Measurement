@@ -8,10 +8,12 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     _flow_times,
     _normalize_flow_type,
     _unique_zero_momentum_index,
-    ringed_kinetic_pervec_from_emt,
+    emt_tensor_from_derivative_bilinear,
+    ringed_kinetic_pervec_from_derivative,
     validate_quark_gluon_loop_axes,
 )
 from pyquda_measurement_utils.flowed_quark_ringed_norm import kinetic_spacetime_from_raw
+from pyquda_measurement_utils.fermion_bilinear_basis import gamma_matrices_numpy
 from pyquda_measurement_utils.disconnected_shards import (
     append_completed_base,
     prepare_sample_log,
@@ -33,13 +35,14 @@ def test_flow_type_normalization_accepts_supported_cases_only():
     raise AssertionError("_normalize_flow_type should reject unsupported flow types")
 
 
-def test_ringed_kinetic_is_extracted_from_zero_momentum_diagonal_trace():
-    tmunu = np.zeros((2, 4, 4, 2, 3, 5), dtype=np.complex128)
+def test_ringed_kinetic_is_extracted_from_vector_derivative_diagonal():
+    derivative = np.zeros((2, 16, 4, 2, 3, 5), dtype=np.complex128)
+    vector_positions = [3, 5, 7, 1]
     for source in range(2):
-        for mu in range(4):
-            tmunu[source, mu, mu, 1] = (source + 1) * (mu + 2)
+        for mu, gamma_position in enumerate(vector_positions):
+            derivative[source, gamma_position, mu, 1] = (source + 1) * (mu + 2)
 
-    kinetic = ringed_kinetic_pervec_from_emt(tmunu, 1, spatial_volume=8)
+    kinetic = ringed_kinetic_pervec_from_derivative(derivative, 1, spatial_volume=8)
 
     assert kinetic.shape == (2, 3, 5)
     np.testing.assert_allclose(kinetic[0], -2.0 * sum(range(2, 6)) / 8.0)
@@ -48,6 +51,12 @@ def test_ringed_kinetic_is_extracted_from_zero_momentum_diagonal_trace():
         kinetic_spacetime_from_raw(kinetic),
         np.mean(kinetic, axis=(0, -1)),
     )
+
+    tmunu = emt_tensor_from_derivative_bilinear(derivative)
+    for mu in range(4):
+        np.testing.assert_array_equal(
+            tmunu[:, mu, mu], derivative[:, vector_positions[mu], mu]
+        )
 
 
 def test_ringed_zero_momentum_should_be_unique():
@@ -90,7 +99,6 @@ def test_ringed_zero_momentum_validation_precedes_inverter_setup():
             [0.1, 1.0, 1e-10, 10],
             [1, 4, 0],
             tag="emt",
-            ringed_tag="ringed",
         )
     except ValueError as err:
         assert "exactly one zero momentum" in str(err)
@@ -121,7 +129,7 @@ def test_counter_configuration_validation_precedes_inverter_setup():
     with pytest.raises(ValueError, match="config_num is required"):
         measurement.flowed_fermionic_1pt(
             FakeGauge(), [0.1, 1.0, 1e-10, 10], [1, 4, 0],
-            tag="emt", ringed_tag="ringed",
+            tag="emt",
         )
 
 
@@ -187,3 +195,64 @@ def test_quark_gluon_axes_must_match_before_analysis():
         validate_quark_gluon_loop_axes(qext, qext[:1], flow_times, flow_times)
     with pytest.raises(ValueError, match="matching flow_times"):
         validate_quark_gluon_loop_axes(qext, qext, flow_times, [0.0, 0.1])
+
+
+def test_complete_gamma_basis_does_not_add_covdev_calls(monkeypatch):
+    class FakeField:
+        def __init__(self, data):
+            self.data = np.asarray(data)
+
+        def __sub__(self, other):
+            return FakeField(self.data - other.data)
+
+    class FakePureGauge:
+        def __init__(self):
+            self.calls = []
+
+        def covDev(self, field, direction):
+            self.calls.append(direction)
+            return FakeField((direction + 1) * field.data)
+
+    class FakeGaugeDirac:
+        def loadGauge(self, gauge):
+            return None
+
+    class FakeLatticeInfo:
+        global_size = [1, 1, 1, 1]
+
+    class FakeGauge:
+        latt_info = FakeLatticeInfo()
+        pure_gauge = FakePureGauge()
+        gauge_dirac = FakeGaugeDirac()
+
+    measurement = EMTDisconnectedQuark1pt({
+        "config_num": 1,
+        "qext": [[0, 0, 0, 0]],
+        "pf": [0, 0, 0, 0],
+        "p_2pt": [[0, 0, 0, 0]],
+        "pos_boost": [0, 0, 0],
+        "neg_boost": [0, 0, 0],
+        "width": 1.0,
+        "flow_type": "wilson",
+        "flow_epsilon": 0.1,
+        "flow_steps": 0,
+    })
+    monkeypatch.setattr(measurement, "_gamma_stack_for", lambda _ref: gamma_matrices_numpy())
+    monkeypatch.setattr(
+        measurement,
+        "_project_gamma_fields",
+        lambda fields, _phases: np.zeros((fields.shape[0], 1, 1), dtype=np.complex128),
+    )
+    monkeypatch.setattr(
+        measurement,
+        "_impose_P_Breit_slice",
+        lambda _field, _phases: np.zeros((1, 1), dtype=np.complex128),
+    )
+    data = np.ones((1, 1, 1, 1, 1, 4, 3), dtype=np.complex128)
+    local, derivative, flowed_noise_norm = measurement._get_primitive_bilinears_P_Breit_slice(
+        FakeGauge(), FakeField(data), FakeField(2 * data), [None]
+    )
+    assert local.shape == (16, 1, 1)
+    assert derivative.shape == (16, 4, 1, 1)
+    assert flowed_noise_norm.shape == (1, 1)
+    assert FakeGauge.pure_gauge.calls == [0, 4, 1, 5, 2, 6, 3, 7]

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from pyquda import init
 from pyquda_utils import io
@@ -10,11 +11,11 @@ from pyquda_measurement_utils.io_corr import get_emt_meson_2pt_file_tag, get_emt
 # ============================================================
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--config_num", type=int, default=0, help="Configuration number")
+parser.add_argument("--config_num", type=int, required=True, help="Configuration number")
 parser.add_argument("--mpi_geometry", type=str, default="1.1.1.1", help="MPI geometry")
 parser.add_argument("--src_interpolator", type=str, default="5", help="Source interpolator gamma label")
 parser.add_argument("--sink_interpolator", type=str, default="5", help="Sink interpolator gamma label")
-args, unknown = parser.parse_known_args()
+args = parser.parse_args()
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 
@@ -23,15 +24,17 @@ mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 # ============================================================
 # Production knobs: ensemble paths, output tags, source position,
 # momentum grid, sink separations, smearing, and gradient-flow schedule.
-data_dir = os.environ.get("EMT_DATA_DIR", "/global/cfs/cdirs/m3760/xgao/software/EMT_meson/data")
+repo_root = Path(__file__).resolve().parents[3]
+data_dir = os.environ.get("EMT_DATA_DIR", str(repo_root / "application" / "EMT_meson" / "perlmutter" / "data"))
 gauge_path = os.environ.get(
     "EMT_GAUGE_PATH",
-    "/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0",
+    str(repo_root / "test_gauge" / "S8T32_wilson_b6.cg.1e-08.0"),
 )
-lat_tag = "l64c64a076"
-sm_tag = "1HYP_GSRC_W10_k0"
+lat_tag = os.environ.get("EMT_LAT_TAG", "S8T32")
+sm_tag = os.environ.get("EMT_SM_TAG", "1HYP_GSRC_W1_k0")
 qext = [[x, y, z, 0] for x in range(-2, 3) for y in range(-2, 3) for z in range(-2, 3)]
 parameters = {
+    "config_num": conf,
     "qext": qext,
     "pf": [0, 0, 0, 0],
     "p_2pt": qext,
@@ -42,6 +45,7 @@ parameters = {
     "flow_type": "wilson",
     "flow_epsilon": 0.207936,
     "flow_steps": 10,
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,4)",
 }
 src_pos = [0, 0, 0, 0]
 meson_2pt_tag = get_emt_meson_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
@@ -63,7 +67,7 @@ gauge.latt_info.t_boundary = -1
 # Measurement
 # ============================================================
 # Inverter knobs: mass, clover coefficient, tolerance, max iterations.
-invPara = [0.236, 1.0372, 1e-15, 300]  # mf, csw, prec, cgMax
+invPara = [0.236, 1.0372, 1e-10, 300]  # mf, csw, prec, cgMax
 
 quark_emt = QuarkEMT(parameters)
 
@@ -73,8 +77,8 @@ quark_emt.connected_3pt(
     src_pos=src_pos,
     t_separations=[2, 3],
     spin=5,
-    tag=os.environ.get("EMT_3PT_OUT", quark_3pt_tag),
-    c2_tag=os.environ.get("EMT_2PT_OUT", meson_2pt_tag),
+    tag=quark_3pt_tag,
+    c2_tag=meson_2pt_tag,
     src_interpolator=args.src_interpolator,
     sink_interpolator=args.sink_interpolator,
 )

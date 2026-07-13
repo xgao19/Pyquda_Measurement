@@ -110,12 +110,11 @@ from time import perf_counter
 from opt_einsum import contract
 
 from pyquda import getMPIComm
-from pyquda.field import LatticePropagator
-from pyquda_utils import core, gamma, source, phase
+from pyquda_utils import core, source, phase
 
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
-    EMTDisconnectedGluon1pt,
     EMTDisconnectedQuark1pt,
+    EMT_OPERATOR_SCHEMA_VERSION,
     _flow_times,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
@@ -123,6 +122,11 @@ from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_bw_seq_raw_pyquda
 from pyquda_measurement_utils.io_corr import save_emt_quark_3pt_hdf5
 from pyquda_measurement_utils.proton_qTMD_pyquda import my_gammas, proton_TMD
+from pyquda_measurement_utils.fermion_bilinear_basis import (
+    IDENTITY_GAMMA_POSITION,
+    basis_attrs,
+    symmetric_vector_emt,
+)
 from pyquda_measurement_utils.tools import mpi_print, mpi_timer_print
 
 
@@ -161,6 +165,12 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
 
     def __init__(self, parameters):
         super().__init__(parameters)
+        self.pf = parameters["pf"]
+        self.pilist = parameters["p_2pt"]
+        self.CG_GaussSmear = bool(parameters.get("CG_GaussSmear", False))
+        self.pos_boost = parameters["pos_boost"]
+        self.neg_boost = parameters["neg_boost"]
+        self.width = parameters["width"]
         self.pol_list = parameters["pol"]
         self.t_insert = parameters["t_insert"]
         self.t_separations = [int(t_sep) for t_sep in parameters.get("t_separations", [self.t_insert])]
@@ -215,7 +225,9 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         del src
         return prop
 
-    def contract_proton_2pt(self, latt_info, prop, src_pos, tag=None, interpolator="5"):
+    def contract_proton_2pt(
+        self, latt_info, prop, src_pos, tag=None, interpolator="5", attrs=None
+    ):
         p_2pt_xyz = [[-p[0], -p[1], -p[2]] for p in self.pilist]
         phases_2pt = phase.MomentumPhase(latt_info).getPhases(p_2pt_xyz, src_pos)
         helper = proton_TMD(
@@ -235,82 +247,66 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 "save_propagators": self.save_propagators,
             }
         )
-        C2 = helper.contract_2pt_TMD(latt_info, prop, phases_2pt, tag, interpolator=interpolator)
+        C2 = helper.contract_2pt_TMD(
+            latt_info, prop, phases_2pt, tag, interpolator=interpolator, attrs=attrs
+        )
         return getMPIComm().bcast(C2, root=0)
 
-    @staticmethod
-    def _seq_to_prop(latt_info, seq_data):
-        seq_prop = LatticePropagator(latt_info)
-        seq_prop.data = seq_data
-        return seq_prop
+    @classmethod
+    def _raw_seq_gamma_scalar_fields(cls, raw_seq_prop, prop_fw, G5_gamma_stack):
+        spin_trace = contract(
+            "wtzyxajfc,wtzyxbjfc->wtzyxab",
+            raw_seq_prop.data.conj(), prop_fw.data,
+        )
+        return contract("wtzyxab,gab->gwtzyx", spin_trace, G5_gamma_stack)
 
     @classmethod
-    def _final_seq_from_raw_prop(cls, raw_seq_prop):
-        G5_local = cls._gamma5_for(raw_seq_prop.data)
-        return contract("wtzyxijfc,ik->wtzyxjkcf", raw_seq_prop.data.conj(), G5_local)
-
-    @classmethod
-    def _left_covdev_seq_from_raw_prop(cls, U_f, raw_seq_prop, mu):
-        D_raw_seq = cls._covdev_sym_prop(U_f, raw_seq_prop, mu)
-        return cls._final_seq_from_raw_prop(D_raw_seq)
-
-    @classmethod
-    def _project_scalar_to_qt(cls, scalar_field, phases_3pt, t0):
+    def _project_gamma_scalars_to_qt(cls, scalar_fields, phases_3pt, t0):
         slice_t = core.gatherLattice(
-            array_to_numpy(contract("qwtzyx,wtzyx->qt", phases_3pt, scalar_field)),
-            [1, -1, -1, -1],
+            array_to_numpy(contract("qwtzyx,gwtzyx->gqt", phases_3pt, scalar_fields)),
+            [2, -1, -1, -1],
         )
         slice_t = getMPIComm().bcast(slice_t, root=0)
-        return np.roll(np.array(slice_t), -t0, axis=-1)
+        return np.roll(np.asarray(slice_t), -t0, axis=-1)
 
     @classmethod
-    def _raw_seq_scalar_field(cls, raw_seq_prop, prop_fw):
+    def get_C3_primitive_bilinears_proton(
+        cls, U_f, prop_fw, raw_seq_prop, phases_3pt, t0
+    ):
+        """Compute all local and one-derivative proton insertion bilinears."""
+        gamma_ls = cls._gamma_stack_for(prop_fw.data)
         G5_local = cls._gamma5_for(prop_fw.data)
-        spin_trace = contract("wtzyxajfc,wtzyxijfc->wtzyxai", raw_seq_prop.data.conj(), prop_fw.data)
-        return contract("wtzyxai,ai->wtzyx", spin_trace, G5_local)
+        G5_gamma_stack = contract("ai,gib->gab", G5_local, gamma_ls)
 
-    @classmethod
-    def _raw_seq_gamma_scalar_field(cls, raw_seq_prop, prop_fw, G5_gamma):
-        spin_trace = contract("wtzyxajfc,wtzyxbjfc->wtzyxab", raw_seq_prop.data.conj(), prop_fw.data)
-        return contract("wtzyxab,ab->wtzyx", spin_trace, G5_gamma)
-
-    @classmethod
-    def get_C3_chi_proton(cls, latt_info, prop_fw, raw_seq_prop, phases_3pt, t0):
-        scalar_field = cls._raw_seq_scalar_field(raw_seq_prop, prop_fw)
-        return cls._project_scalar_to_qt(scalar_field, phases_3pt, t0)
-
-    @classmethod
-    def get_C3_Tmunu_symmetrized_proton(cls, U_f, prop_fw, raw_seq_prop, phases_3pt, t0):
-        Nq = len(phases_3pt)
-        Nt = U_f.latt_info.global_size[3]
-        C3_Tmunu = np.zeros((Nq, 4, 4, Nt), dtype=np.complex128)
-        D_gammas_local = cls._dirac_gammas_for(prop_fw.data)
-        G5_local = cls._gamma5_for(prop_fw.data)
-
+        local_fields = cls._raw_seq_gamma_scalar_fields(
+            raw_seq_prop, prop_fw, G5_gamma_stack
+        )
+        local = cls._project_gamma_scalars_to_qt(local_fields, phases_3pt, t0)
+        del local_fields
+        derivative = np.zeros(
+            (16, 4, len(phases_3pt), U_f.latt_info.global_size[3]),
+            dtype=np.complex128,
+        )
         for mu in range(4):
             D_fw = cls._covdev_sym_prop(U_f, prop_fw, mu)
-            for nu in range(4):
-                G5_gamma = contract("ai,ib->ab", G5_local, D_gammas_local[nu])
-                scalar_field = 0.5 * cls._raw_seq_gamma_scalar_field(raw_seq_prop, D_fw, G5_gamma)
-                C3_Tmunu[:, mu, nu] += cls._project_scalar_to_qt(scalar_field, phases_3pt, t0)
-                del scalar_field, G5_gamma
-            del D_fw
+            right_fields = 0.5 * cls._raw_seq_gamma_scalar_fields(
+                raw_seq_prop, D_fw, G5_gamma_stack
+            )
+            derivative[:, mu] += cls._project_gamma_scalars_to_qt(
+                right_fields, phases_3pt, t0
+            )
+            del D_fw, right_fields
 
-        for mu in range(4):
             D_raw_seq = cls._covdev_sym_prop(U_f, raw_seq_prop, mu)
-            for nu in range(4):
-                G5_gamma = contract("ai,ib->ab", G5_local, D_gammas_local[nu])
-                scalar_field = -0.5 * cls._raw_seq_gamma_scalar_field(D_raw_seq, prop_fw, G5_gamma)
-                C3_Tmunu[:, mu, nu] += cls._project_scalar_to_qt(scalar_field, phases_3pt, t0)
-                del scalar_field, G5_gamma
-            del D_raw_seq
-
-        for mu in range(4):
-            for nu in range(mu + 1, 4):
-                C3_Tmunu[:, mu, nu] = 0.5 * (C3_Tmunu[:, mu, nu] + C3_Tmunu[:, nu, mu])
-                C3_Tmunu[:, nu, mu] = C3_Tmunu[:, mu, nu]
-
-        return C3_Tmunu
+            left_fields = -0.5 * cls._raw_seq_gamma_scalar_fields(
+                D_raw_seq, prop_fw, G5_gamma_stack
+            )
+            derivative[:, mu] += cls._project_gamma_scalars_to_qt(
+                left_fields, phases_3pt, t0
+            )
+            del D_raw_seq, left_fields
+        del gamma_ls, G5_local, G5_gamma_stack
+        return np.asarray(local), derivative
 
     def _connected_3pt_one_source(
         self,
@@ -334,6 +330,8 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         prop_fw = None
         C3_chi = None
         C3_Tmunu = None
+        C3_local_bilinear = None
+        C3_derivative_bilinear = None
         phases_3pt = None
         raw_seq_bw = None
         U_f = None
@@ -341,7 +339,34 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         raw_seq_prop_flow = None
         try:
             prop_fw = self._make_source_prop(dirac, U, src_pos)
-            self.contract_proton_2pt(latt_info, prop_fw.copy(), src_pos, tag=c2_tag, interpolator=interpolator)
+            mass, csw, tol, maxiter = self._connected_invPara
+            c2_attrs = {
+                "measurement": "proton_2pt",
+                "config_num": source_job.get("config"),
+                "mass": mass,
+                "csw": csw,
+                "tol": tol,
+                "maxiter": maxiter,
+                "gauge_preprocessing": self.gauge_preprocessing,
+                "t_boundary": latt_info.t_boundary,
+                "source_position": np.asarray(src_pos, dtype=np.int32),
+                "p_2pt": np.asarray(self.pilist, dtype=np.int32),
+                "source_interpolator": interpolator,
+                "sink_interpolator": "all_16_gamma_scan",
+                "gaussian_smearing": self.CG_GaussSmear,
+                "smearing_width": self.width,
+                "source_boost": np.asarray(self.boost_in, dtype=np.int32),
+                "sink_boost": np.asarray(self.boost_out, dtype=np.int32),
+                "dataset_axes": "gamma,p,t",
+            }
+            self.contract_proton_2pt(
+                latt_info,
+                prop_fw.copy(),
+                src_pos,
+                tag=c2_tag,
+                interpolator=interpolator,
+                attrs=c2_attrs,
+            )
 
             qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
             phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, src_pos)
@@ -352,8 +377,16 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
 
             for t_sep in t_separations:
                 Ninsert = int(t_sep) + 2
-                C3_chi = np.zeros((Nflavor, Npol, 1, Nsteps + 1, Nq, Ninsert), dtype=np.complex128)
-                C3_Tmunu = np.zeros((Nflavor, Npol, 1, Nsteps + 1, Nq, 4, 4, Ninsert), dtype=np.complex128)
+                C3_chi = np.zeros((Nflavor, Npol, Nsteps + 1, Nq, Ninsert), dtype=np.complex128)
+                C3_Tmunu = np.zeros((Nflavor, Npol, Nsteps + 1, Nq, 4, 4, Ninsert), dtype=np.complex128)
+                C3_local_bilinear = np.zeros(
+                    (Nflavor, Npol, 16, Nq, Nsteps + 1, Ninsert),
+                    dtype=np.complex128,
+                )
+                C3_derivative_bilinear = np.zeros(
+                    (Nflavor, Npol, 16, 4, Nq, Nsteps + 1, Ninsert),
+                    dtype=np.complex128,
+                )
                 for flavor_idx, flavor in enumerate([1, 2]):
                     flavor_name = "U" if flavor == 1 else "D"
                     mpi_print(latt_info, f"create proton sequential source flavor={flavor_name} t_sep={t_sep}")
@@ -383,24 +416,30 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                                 latt_info,
                                 f"proton EMT contraction flavor={flavor_name} pol={pol} t_sep={t_sep} step={step}",
                             )
-                            chi_t0 = perf_counter()
-                            C3_chi[flavor_idx, pol_idx, 0, step] += self.get_C3_chi_proton(
-                                latt_info,
-                                prop_fw_flow,
-                                raw_seq_prop_flow,
-                                phases_3pt,
-                                t0,
-                            )[..., :Ninsert]
-                            chi_seconds = perf_counter() - chi_t0
-                            tmunu_t0 = perf_counter()
-                            C3_Tmunu[flavor_idx, pol_idx, 0, step] += self.get_C3_Tmunu_symmetrized_proton(
+                            primitive_t0 = perf_counter()
+                            local_step, derivative_step = self.get_C3_primitive_bilinears_proton(
                                 U_f,
                                 prop_fw_flow,
                                 raw_seq_prop_flow,
                                 phases_3pt,
                                 t0,
+                            )
+                            C3_local_bilinear[
+                                flavor_idx, pol_idx, :, :, step
+                            ] += local_step[..., :Ninsert]
+                            C3_derivative_bilinear[
+                                flavor_idx, pol_idx, :, :, :, step
+                            ] += derivative_step[..., :Ninsert]
+                            C3_chi[flavor_idx, pol_idx, step] += local_step[
+                                IDENTITY_GAMMA_POSITION, ..., :Ninsert
+                            ]
+                            tensor_step = symmetric_vector_emt(
+                                derivative_step, gamma_axis=0, derivative_axis=1
+                            )
+                            C3_Tmunu[flavor_idx, pol_idx, step] += np.moveaxis(
+                                tensor_step, (0, 1), (1, 2)
                             )[..., :Ninsert]
-                            tmunu_seconds = perf_counter() - tmunu_t0
+                            primitive_seconds = perf_counter() - primitive_t0
 
                             flow_seconds = 0.0
                             if step < Nsteps:
@@ -422,8 +461,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                                 pol=pol,
                                 t_sep=t_sep,
                                 step=step,
-                                chi_s=chi_seconds,
-                                tmunu_s=tmunu_seconds,
+                                primitive_s=primitive_seconds,
                                 flow_s=flow_seconds,
                             )
 
@@ -438,15 +476,33 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
 
                 attrs = {
                     "measurement": "proton_quark_3pt",
+                    "emt_operator_schema_version": EMT_OPERATOR_SCHEMA_VERSION,
+                    "config_num": source_job.get("config"),
+                    "mass": mass,
+                    "csw": csw,
+                    "tol": tol,
+                    "maxiter": maxiter,
+                    "gauge_preprocessing": self.gauge_preprocessing,
+                    "t_boundary": latt_info.t_boundary,
+                    "source_position": np.asarray(src_pos, dtype=np.int32),
+                    "pf": np.asarray(self.pf, dtype=np.int32),
+                    "qext": np.asarray(self.qlist, dtype=np.int32),
+                    "p_2pt": np.asarray(self.pilist, dtype=np.int32),
+                    "gaussian_smearing": self.CG_GaussSmear,
+                    "smearing_width": self.width,
+                    "source_boost": np.asarray(self.boost_in, dtype=np.int32),
+                    "sink_boost": np.asarray(self.boost_out, dtype=np.int32),
                     "flow_type": self.flow_type,
                     "flow_epsilon": self.flow_epsilon,
                     "flow_steps": self.flow_steps,
                     "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
-                    "t_separations": np.asarray([t_sep], dtype=np.int32),
+                    "t_sep": int(t_sep),
                     "src_t": t0,
                     "time_insertion_range": "0..t_sep+1",
                     "time_insertion_count": Ninsert,
                     "interpolator": interpolator,
+                    "source_interpolator": interpolator,
+                    "sink_interpolator": interpolator,
                     "flavor_axis": "0=U,1=D",
                     "polarization_axis": ",".join(self.pol_list),
                     "n_qext": Nq,
@@ -458,17 +514,27 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                     "nucleon_interpolator_flowed": False,
                     "derivative_convention": "symmetric_covdev_0p5_Dplus_minus_Dminus",
                     "left_derivative_convention": "raw_seq_gamma5_hermiticity",
+                    "C3_chi_axes": "flavor,polarization,flow,q,t",
+                    "primitive_local_axes": "flavor,polarization,gamma,q,flow,t",
+                    "primitive_derivative_axes": "flavor,polarization,gamma,derivative,q,flow,t",
+                    "primitive_derivative_unsymmetrized": True,
+                    "derived_emt_axes": "flavor,polarization,flow,q,mu,nu,t",
                 }
+                attrs.update(basis_attrs())
                 if latt_info.mpi_rank == 0:
                     save_emt_quark_3pt_hdf5(
                         tags[t_sep],
                         C3_chi,
                         C3_Tmunu,
+                        C3_local_bilinear,
+                        C3_derivative_bilinear,
                         momentum_transfer_list=self.qlist,
                         attrs=attrs,
                     )
                 C3_chi = None
                 C3_Tmunu = None
+                C3_local_bilinear = None
+                C3_derivative_bilinear = None
                 self._cleanup_source_objects()
             return {"src_pos": list(src_pos), "tags": tags, "c2_tag": c2_tag}
         finally:
@@ -480,13 +546,14 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 phases_3pt,
                 prop_fw,
             )
-            del C3_chi, C3_Tmunu
+            del C3_chi, C3_Tmunu, C3_local_bilinear, C3_derivative_bilinear
 
     def connected_3pt(self, gauge, invPara, source_jobs, interpolator="5", on_source_done=None):
         """Compute connected proton U/D quark EMT 3pt functions for source jobs."""
         U = gauge
         latt_info = U.latt_info
         mass, csw, tol, maxiter = invPara
+        self._connected_invPara = tuple(invPara)
         multigrid = _parse_mg_block([[8, 8, 4, 4]])
         mpi_print(latt_info, f"Proton EMT multigrid block: {multigrid}")
         dirac = core.getDirac(latt_info, mass, tol, maxiter, 1.0, csw, csw, multigrid)
@@ -515,9 +582,4 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
             self._cleanup_source_objects()
         return results
 
-
-class ProtonGluonEMT(EMTDisconnectedGluon1pt):
-    """Proton workflow alias for the shared flowed gluon EMT 1pt code."""
-
-
-__all__ = ["ProtonQuarkEMT", "ProtonGluonEMT"]
+__all__ = ["ProtonQuarkEMT"]

@@ -51,10 +51,10 @@ fi
 # Paths / environment
 # ----------------------------
 
-software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
+software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m4559/xgao/software_gradientflow}"
 repo_root="${REPO_ROOT:-$software_root/Pyquda_Measurement}"
-quda_prefix="${QUDA_PATH:-$software_root/quda/install}"
-venv_dir="${VENV_DIR:-$software_root/venv}"
+quda_prefix="${QUDA_PATH:-$software_root/quda-develop/install}"
+venv_dir="${VENV_DIR:-$software_root/venv-quda-develop}"
 py_driver="${PYQUDA_DRIVER:-pyquda_main.py}"
 py_args="${PYQUDA_ARGS:---mpi_geometry 2.2.2.2}"
 

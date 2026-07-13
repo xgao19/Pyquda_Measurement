@@ -6,9 +6,11 @@ import numpy as np
 import pytest
 
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
+    emt_tensor_from_derivative_bilinear,
     finalize_emt_quark_1pt_shards,
-    ringed_kinetic_pervec_from_emt,
+    ringed_kinetic_pervec_from_derivative,
 )
+from pyquda_measurement_utils.fermion_bilinear_basis import basis_attrs, basis_metadata
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
     QTMD_LOOP_CONVENTION,
     QTMD_SCHEMA_VERSION,
@@ -42,7 +44,7 @@ def test_base_ranges_and_nondivisible_part_layout():
 
 
 def _common_attrs(configured_n_vec):
-    return {
+    attrs = {
         "measurement": "quark_1pt",
         "output_kind": "emt_quark_1pt",
         "shard_schema": SHARD_SCHEMA,
@@ -52,10 +54,8 @@ def _common_attrs(configured_n_vec):
         "flow_steps": 1,
         "flow_times": np.asarray([0.0, 0.1]),
         "qext": np.asarray([[0, 0, 0, 0], [1, 0, 0, 0]], dtype=np.int32),
-        "pf": np.asarray([0, 0, 0, 0], dtype=np.int32),
-        "p_2pt": np.asarray([[0, 0, 0, 0]], dtype=np.int32),
         "volume_norm": 8,
-        "upper_triangle_only": True,
+        "emt_operator_schema_version": 3,
         "operator_normalization": "unrenormalized_flowed_quark_bilinear",
         "renormalization_applied": False,
         "renormalization_stage": "analysis_stage",
@@ -77,6 +77,8 @@ def _common_attrs(configured_n_vec):
         "hp_ordering": "interleaved_xyzt_binary_projected_to_evenodd",
         "n_vec": configured_n_vec,
     }
+    attrs.update(basis_attrs())
+    return attrs
 
 
 def _write_synthetic_base(shard_dir, tag, base_idx, configured_n_vec):
@@ -86,48 +88,68 @@ def _write_synthetic_base(shard_dir, tag, base_idx, configured_n_vec):
         common.pop("n_vec")
         attrs = shard_part_attrs(common, base_idx, part_idx, hp_start, hp_stop, 2)
         source_idx = base_idx * 2 + hp_start
-        tmunu = np.zeros((1, 4, 4, 2, 2, 3), dtype=np.complex128)
-        for mu in range(4):
-            tmunu[0, mu, mu, 0] = source_idx + mu + 1
-        chi = np.full((1, 2, 2, 2, 3), source_idx + 1, dtype=np.complex128)
+        local = np.full((1, 16, 2, 2, 3), source_idx + 0.5, dtype=np.complex128)
+        derivative = np.zeros((1, 16, 4, 2, 2, 3), dtype=np.complex128)
+        for mu, gamma_position in enumerate((3, 5, 7, 1)):
+            derivative[0, gamma_position, mu, 0] = source_idx + mu + 1
+        norm = np.full((1, 2, 2, 3), source_idx + 1, dtype=np.complex128)
         write_raw_part_hdf5(
             path,
-            {"Tmunu_pervec": tmunu, "CHI_pervec": chi},
+            {
+                "local_bilinear_pervec": local,
+                "derivative_bilinear_pervec": derivative,
+                "flowed_noise_norm_pervec": norm,
+            },
             attrs,
             {
                 "source_index": [source_idx],
                 "base_noise_index": [base_idx],
                 "hp_index": [hp_start],
             },
+            metadata_datasets=basis_metadata(),
         )
 
 
-def test_emt_finalize_streams_shards_and_builds_kinetic_companion(tmp_path):
+def test_emt_finalize_streams_shards_and_embeds_ringed_kinetic(tmp_path):
     tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
-    ringed_tag = str(tmp_path / "FlowedQuarkRinged" / "lat.FlowedQuarkRinged.9.0.sm")
     shard_dir = tmp_path / "EMTc" / "shards"
     _write_synthetic_base(shard_dir, tag, 0, configured_n_vec=1)
     _write_synthetic_base(shard_dir, tag, 1, configured_n_vec=2)
 
-    finalize_emt_quark_1pt_shards(shard_dir, tag, ringed_tag, 2)
+    assert finalize_emt_quark_1pt_shards(shard_dir, tag, 2) == tag + ".h5"
 
-    with h5py.File(tag + ".h5", "r") as emt, h5py.File(ringed_tag + ".h5", "r") as ringed:
-        assert emt["raw/Tmunu_pervec"].shape == (4, 4, 4, 2, 2, 3)
+    with h5py.File(tag + ".h5", "r") as emt:
+        assert emt["raw/local_bilinear_pervec"].shape == (4, 16, 2, 2, 3)
+        assert emt["raw/derivative_bilinear_pervec"].shape == (4, 16, 4, 2, 2, 3)
+        assert "raw/Tmunu_pervec" not in emt
+        assert "raw/CHI_pervec" not in emt
+        assert "avg/CHI" not in emt
+        assert emt["raw/flowed_noise_norm_pervec"].shape == (4, 2, 2, 3)
         np.testing.assert_array_equal(emt["raw/source_index"][()], [0, 1, 2, 3])
         np.testing.assert_array_equal(emt["raw/base_noise_index"][()], [0, 0, 1, 1])
         np.testing.assert_array_equal(emt["raw/hp_index"][()], [0, 1, 0, 1])
-        raw_t = emt["raw/Tmunu_pervec"][()]
-        expected_k = ringed_kinetic_pervec_from_emt(raw_t, 0, 8)
-        np.testing.assert_allclose(ringed["raw/kinetic_pervec"][()], expected_k)
-        np.testing.assert_allclose(ringed["avg/kinetic_spacetime"][()], np.mean(expected_k, axis=(0, -1)))
-        assert "Z_ring_bilinear" not in ringed["avg"]
+        raw_derivative = emt["raw/derivative_bilinear_pervec"][()]
+        raw_t = emt_tensor_from_derivative_bilinear(raw_derivative)
+        expected_k = ringed_kinetic_pervec_from_derivative(raw_derivative, 0, 8)
+        np.testing.assert_allclose(emt["derived/ringed/kinetic_pervec"][()], expected_k)
+        np.testing.assert_allclose(
+            emt["derived/ringed/kinetic_spacetime"][()],
+            np.mean(expected_k, axis=(0, -1)),
+        )
+        assert not emt["derived/ringed"].attrs["ringed_factors_stored"]
         assert emt.attrs["n_base_noise"] == 2
         assert emt.attrs["effective_n_inversions"] == 4
+        assert emt["physical_from_pyquda"].shape == (16, 16)
+        for mu in range(4):
+            for nu in range(mu, 4):
+                np.testing.assert_allclose(
+                    emt[f"avg/Tmunu/T{mu+1}{nu+1}"][()],
+                    np.mean(raw_t[:, mu, nu], axis=0) / 8,
+                )
 
 
 def test_finalize_rejects_partial_base_and_preserves_old_canonical(tmp_path):
     tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
-    ringed_tag = str(tmp_path / "FlowedQuarkRinged" / "lat.FlowedQuarkRinged.9.0.sm")
     Path(tag).parent.mkdir(parents=True)
     with h5py.File(tag + ".h5", "w") as h5:
         h5.attrs["sentinel"] = "old"
@@ -135,8 +157,31 @@ def test_finalize_rejects_partial_base_and_preserves_old_canonical(tmp_path):
     _write_synthetic_base(shard_dir, tag, 0, configured_n_vec=2)
 
     with pytest.raises(ValueError, match="filename coverage mismatch"):
-        finalize_emt_quark_1pt_shards(shard_dir, tag, ringed_tag, 2)
+        finalize_emt_quark_1pt_shards(shard_dir, tag, 2)
 
+    with h5py.File(tag + ".h5", "r") as h5:
+        assert h5.attrs["sentinel"] == "old"
+
+
+def test_emt_finalizer_rejects_old_tmunu_only_shard_schema(tmp_path):
+    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
+    Path(tag).parent.mkdir(parents=True)
+    with h5py.File(tag + ".h5", "w") as h5:
+        h5.attrs["sentinel"] = "old"
+    shard_dir = tmp_path / "EMTc" / "shards"
+    path = shard_part_path(shard_dir, tag, 0, 0, 0, 1)
+    attrs = shard_part_attrs(_common_attrs(1), 0, 0, 0, 1, 1)
+    write_raw_part_hdf5(
+        path,
+        {
+            "Tmunu_pervec": np.zeros((1, 4, 4, 2, 2, 3), dtype=np.complex128),
+            "CHI_pervec": np.zeros((1, 2, 2, 2, 3), dtype=np.complex128),
+        },
+        attrs,
+        {"source_index": [0], "base_noise_index": [0], "hp_index": [0]},
+    )
+    with pytest.raises(ValueError, match="missing metadata dataset|missing raw"):
+        finalize_emt_quark_1pt_shards(shard_dir, tag, 1)
     with h5py.File(tag + ".h5", "r") as h5:
         assert h5.attrs["sentinel"] == "old"
 

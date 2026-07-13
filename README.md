@@ -21,6 +21,12 @@ The actively maintained workflows are:
 - Shared qTMD/PDF disconnected one-point workflows for pion/proton analysis.
 - Existing proton qTMD and pion qTMDWF utilities used as mature references.
 
+Quark EMT production now measures a common complete Dirac basis at every flow
+time: 16 local bilinears and (16\times4) unsymmetrized one-derivative
+bilinears.  The connected and disconnected EMT tensors are derived from the
+same four vector channels, while axial twist-two and local tensor-current
+channels remain available for later analysis without additional inversions.
+
 The most validated runtime targets are currently NERSC Perlmutter with NVIDIA
 GPUs and Aurora with Intel GPU / SYCL QUDA.  The Aurora route uses the PyQUDA
 `develop` branch with the `dpnp` backend.
@@ -48,6 +54,7 @@ pion_EMFF_vibe_develop.py       Pion local-current EMFF contractions.
 pion_EMT_vibe_develop.py        Pion/meson flowed EMT contractions and one-point observables.
 pion_qTMD_vibe_develop.py       Pion qTMD and PDF-style connected contractions.
 Disconnected_1pt_qTMD_vibe_develop.py Shared disconnected qTMD/PDF one-point loops.
+fermion_bilinear_basis.py       Canonical 16-Gamma ordering and physics-basis transform.
 pion_qTMDWF_pyquda.py           Mature pion qTMDWF reference workflow.
 proton_EMT_vibe_develop.py      Proton flowed EMT connected contractions.
 proton_qTMD_pyquda.py           Mature proton qTMD/PDF reference workflow.
@@ -136,23 +143,23 @@ README.md                   Detailed Perlmutter notes.
 Validated shared paths on the current Perlmutter setup:
 
 ```text
-QUDA install:  /global/cfs/cdirs/m3760/xgao/software/quda/install
-Python venv:   /global/cfs/cdirs/m3760/xgao/software/venv
-PyQUDA source: /global/cfs/cdirs/m3760/xgao/software/PyQUDA
-Repo root:     /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement
+QUDA install:  /global/cfs/cdirs/m4559/xgao/software_gradientflow/quda-develop/install
+Python venv:   /global/cfs/cdirs/m4559/xgao/software_gradientflow/venv-quda-develop
+PyQUDA source: /global/cfs/cdirs/m4559/xgao/software_gradientflow/PyQUDA-develop
+Repo root:     /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement
 ```
 
 Activate the environment:
 
 ```bash
-source /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/systems/perlmutter/activate-venv-quda.sh
-export QUDA_PATH=/global/cfs/cdirs/m3760/xgao/software/quda/install
+source /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement/systems/perlmutter/activate-venv-quda.sh
+export QUDA_PATH=/global/cfs/cdirs/m4559/xgao/software_gradientflow/quda-develop/install
 ```
 
 Run the baseline gradient-flow smoke test:
 
 ```bash
-bash /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/systems/perlmutter/check-gradient-flow.sh
+bash /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement/systems/perlmutter/check-gradient-flow.sh
 ```
 
 ## Aurora Runtime
@@ -253,7 +260,8 @@ For pion/meson EMT:
 
 For quark/gluon one-point data:
 
-- Quark 1pt stores stochastic `Tmunu` and `CHI` outputs.
+- Quark 1pt schema v3 stores all 16 local and 64 unsymmetrized derivative
+  primitive bilinears plus an explicitly named flowed-noise norm.
 - Quark 1pt defaults to decomposition-independent full-volume counter-based `Z4` noise.
 - Never seed an ordinary array-backend RNG identically on every MPI rank to
   build a distributed stochastic source.  Equal local shapes then receive
@@ -278,10 +286,10 @@ For quark/gluon one-point data:
   while the saved insertion-time axis remains explicit.
 - A single source-independent EMTc loop file per configuration stores all
   absolute insertion times and is reused for every hadron source time.
-- `CHI` is a scalar trace/noise diagnostic.
-- Every in-repository quark 1pt entry point also writes a kinetic-only
-  `FlowedQuarkRinged` companion from the same EMT stochastic vectors.  It adds
-  no inversions, flow updates, or derivative contractions.
+- The identity local bilinear is stored only once in the 16-Gamma primitive;
+  `flowed_noise_norm` contains only the flowed source norm.
+- EMT-derived ringed kinetic data live under `derived/ringed` in the same EMTc
+  file, so one atomic rename publishes the loop and kinetic data together.
 - The standalone `application/flowed_quark_ringed_norm` workflow remains
   available for dedicated high-statistics and dilution runs.  It uses the same
   base/HP-part shards, base-level sample log, and explicit finalization as
@@ -292,7 +300,7 @@ For quark/gluon one-point data:
 - Production quark 1pt wrappers default to base/HP interval shards.  Completed
   bases are recorded as exact lines in a lightweight text log. An explicit
   destination-side streaming finalizer checks parts while merging and publishes
-  canonical EMTc and FlowedQuarkRinged files only after complete base coverage.
+  one canonical EMTc file only after complete base coverage.
 - Gluon 1pt stores the flowed gluonic EMT building block.
 - Renormalized gradient-flow EMT combinations, vacuum subtractions, and mixing
   coefficients are applied in downstream analysis, not inside these kernels.

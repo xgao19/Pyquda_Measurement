@@ -2,6 +2,8 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+
+from pyquda_measurement_utils.fermion_bilinear_basis import basis_metadata
 import re
 
 
@@ -220,11 +222,23 @@ def _prepare_h5_file(path, attrs=None):
 # -----------------------------------------------------------------------------
 
 # Save quark EMT three-point functions without embedding two-point data.
-def save_emt_quark_3pt_hdf5(tag, C3_chi, C3_Tmunu, momentum_transfer_list=None, attrs=None):
+def save_emt_quark_3pt_hdf5(
+    tag,
+    C3_chi,
+    C3_Tmunu,
+    C3_local_bilinear,
+    C3_derivative_bilinear,
+    momentum_transfer_list=None,
+    attrs=None,
+):
     save_h5 = f"{tag}.h5"
     with _prepare_h5_file(save_h5, attrs) as f:
         f.create_dataset("C3_chi", data=C3_chi)
         f.create_dataset("C3_Tmunu", data=C3_Tmunu)
+        f.create_dataset("C3_local_bilinear", data=C3_local_bilinear)
+        f.create_dataset("C3_derivative_bilinear", data=C3_derivative_bilinear)
+        for name, values in basis_metadata().items():
+            f.create_dataset(name, data=values)
         if momentum_transfer_list is not None:
             f.create_dataset("momentum_transfer_list", data=np.asarray(momentum_transfer_list, dtype=np.int32))
 
@@ -254,7 +268,7 @@ def save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=None):
 # -----------------------------------------------------------------------------
 
 # Save the standard baryon-style two-point function with source-time rolling.
-def save_proton_c2pt_hdf5(corr, tag, gammalist, plist):
+def save_proton_c2pt_hdf5(corr, tag, gammalist, plist, attrs=None):
 
     src_match = None
     for part in tag.split("."):
@@ -268,6 +282,7 @@ def save_proton_c2pt_hdf5(corr, tag, gammalist, plist):
     save_h5 = tag + ".h5"
     ensure_parent_dir(save_h5)
     f = h5py.File(save_h5, 'w')
+    _write_h5_attrs(f, attrs)
     sm = f.create_group("SS")
     for ig, gm in enumerate(gammalist):
         g = sm.create_group(gm)

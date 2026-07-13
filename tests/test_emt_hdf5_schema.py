@@ -16,6 +16,23 @@ from pyquda_measurement_utils.io_corr import (
     save_emt_meson_2pt_hdf5,
     save_emt_quark_3pt_hdf5,
 )
+import pyquda_measurement_utils.pion_EMT_vibe_develop as pion_emt
+
+
+def test_pion_connected_serial_writer_is_root_only(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        pion_emt, "save_emt_quark_3pt_hdf5", lambda *args, **kwargs: calls.append(args)
+    )
+
+    class LatticeInfo:
+        mpi_rank = 1
+
+    pion_emt._save_connected_3pt_rank0(LatticeInfo(), "nonroot")
+    assert calls == []
+    LatticeInfo.mpi_rank = 0
+    pion_emt._save_connected_3pt_rank0(LatticeInfo(), "root")
+    assert calls == [("root",)]
 
 
 def test_emt_gluon_1pt_hdf5_schema_and_upper_triangle(tmp_path):
@@ -57,11 +74,15 @@ def test_emt_meson_2pt_and_quark_3pt_schema(tmp_path):
     c3_tag = str(tmp_path / "EMTquark3pt" / "schema")
     c3_chi = np.zeros((2, 3, 4), dtype=np.complex128)
     c3_tmunu = np.zeros((2, 3, 4, 4, 4), dtype=np.complex128)
+    c3_local = np.zeros((2, 16, 3, 4), dtype=np.complex128)
+    c3_derivative = np.zeros((2, 16, 4, 3, 4), dtype=np.complex128)
     qlist = [[0, 0, 0, 0], [1, 0, 0, 0]]
     save_emt_quark_3pt_hdf5(
         c3_tag,
         c3_chi,
         c3_tmunu,
+        c3_local,
+        c3_derivative,
         momentum_transfer_list=qlist,
         attrs={
             "measurement": "EMT_quark_3pt",
@@ -77,4 +98,34 @@ def test_emt_meson_2pt_and_quark_3pt_schema(tmp_path):
         assert "C2" not in h5
         assert h5["C3_chi"].shape == c3_chi.shape
         assert h5["C3_Tmunu"].shape == c3_tmunu.shape
+        assert h5["C3_local_bilinear"].shape == c3_local.shape
+        assert h5["C3_derivative_bilinear"].shape == c3_derivative.shape
+        assert h5["physical_from_pyquda"].shape == (16, 16)
         np.testing.assert_array_equal(h5["momentum_transfer_list"][...], np.asarray(qlist, dtype=np.int32))
+
+
+def test_proton_per_tsep_schema_has_no_singleton_tsep_axis():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "pyquda_measurement_utils/proton_EMT_vibe_develop.py"
+    ).read_text()
+    assert '"C3_chi_axes": "flavor,polarization,flow,q,t"' in source
+    assert '"derived_emt_axes": "flavor,polarization,flow,q,mu,nu,t"' in source
+    assert '"t_sep": int(t_sep)' in source
+    assert '"t_separations": np.asarray([t_sep]' not in source
+
+
+def test_connected_emt_provenance_fields_are_declared():
+    required = {
+        "config_num", "mass", "csw", "tol", "maxiter",
+        "gauge_preprocessing", "t_boundary", "source_position",
+        "pf", "qext", "p_2pt", "gaussian_smearing", "smearing_width",
+        "source_boost", "sink_boost", "flow_times",
+        "source_interpolator", "sink_interpolator",
+        "primitive_local_axes", "primitive_derivative_axes", "derived_emt_axes",
+    }
+    root = Path(__file__).resolve().parents[1] / "pyquda_measurement_utils"
+    for filename in ("pion_EMT_vibe_develop.py", "proton_EMT_vibe_develop.py"):
+        source = (root / filename).read_text()
+        for key in required:
+            assert f'"{key}"' in source, f"{filename} is missing {key} provenance"

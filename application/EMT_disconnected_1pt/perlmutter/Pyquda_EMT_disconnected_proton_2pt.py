@@ -1,5 +1,6 @@
 import argparse
 import os
+from pathlib import Path
 
 from pyquda import init
 from pyquda_utils import core, io
@@ -39,9 +40,10 @@ conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 
 data_dir = os.environ.get("EMT_1PT_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
+repo_root = Path(__file__).resolve().parents[3]
 gauge_path = os.environ.get(
     "EMT_1PT_GAUGE_PATH",
-    "/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0",
+    str(repo_root / "test_gauge" / "S8T32_wilson_b6.cg.1e-08.0"),
 )
 lat_tag = os.environ.get("EMT_1PT_LAT_TAG", "S8T32")
 src_pos = parse_triplet(os.environ.get("EMT_1PT_SRC_POS", "0.0.0")) + [
@@ -64,6 +66,7 @@ sm_tag = os.environ.get(
 )
 
 parameters = {
+    "config_num": conf,
     "qext": qext,
     "pf": pf,
     "p_2pt": p_2pt,
@@ -79,6 +82,7 @@ parameters = {
     "flow_type": os.environ.get("EMT_1PT_FLOW_TYPE", "wilson"),
     "flow_epsilon": float(os.environ.get("EMT_1PT_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_1PT_FLOW_STEPS", "1")),
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,4)",
 }
 
 c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
@@ -92,7 +96,7 @@ latt_info = gauge.latt_info
 
 mass = float(os.environ.get("EMT_DISC_MASS", os.environ.get("EMT_1PT_MASS", "0.236")))
 csw = float(os.environ.get("EMT_DISC_CSW", os.environ.get("EMT_1PT_CSW", "1.0372")))
-tol = float(os.environ.get("EMT_DISC_TOL", os.environ.get("EMT_1PT_TOL", "1e-15")))
+tol = float(os.environ.get("EMT_DISC_TOL", os.environ.get("EMT_1PT_TOL", "1e-10")))
 maxiter = int(os.environ.get("EMT_DISC_MAXITER", os.environ.get("EMT_1PT_MAXITER", "300")))
 multigrid = parse_mg_block([[8, 8, 4, 4]])
 
@@ -109,4 +113,23 @@ quark_emt.contract_proton_2pt(
     src_pos,
     tag=os.environ.get("EMT_DISC_C2_OUT", c2_tag),
     interpolator=args.interpolator,
+    attrs={
+        "measurement": "proton_2pt",
+        "config_num": conf,
+        "mass": mass,
+        "csw": csw,
+        "tol": tol,
+        "maxiter": maxiter,
+        "gauge_preprocessing": parameters["gauge_preprocessing"],
+        "t_boundary": latt_info.t_boundary,
+        "source_position": src_pos,
+        "p_2pt": p_2pt,
+        "source_interpolator": args.interpolator,
+        "sink_interpolator": "all_16_gamma_scan",
+        "gaussian_smearing": True,
+        "smearing_width": width,
+        "source_boost": boost_in,
+        "sink_boost": boost_out,
+        "dataset_axes": "gamma,p,t",
+    },
 )

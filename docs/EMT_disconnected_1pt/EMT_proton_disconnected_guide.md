@@ -151,13 +151,18 @@ Expected quark output:
 
 ```text
 data/EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5
-raw/Tmunu_pervec
-raw/CHI_pervec
+raw/local_bilinear_pervec
+raw/derivative_bilinear_pervec
+raw/flowed_noise_norm_pervec
 raw/source_index
 raw/base_noise_index
 raw/hp_index
 avg/Tmunu/T11 ... T44
-avg/CHI
+avg/local_bilinear
+avg/derivative_bilinear
+avg/flowed_noise_norm
+derived/ringed/kinetic_pervec
+derived/ringed/kinetic_spacetime
 ```
 
 The quark loop file is source independent and is reused for every proton
@@ -185,15 +190,16 @@ For a two-point source time `t0`, downstream analysis selects
 ```text
 tau_abs = (t0 + tau_rel) mod Nt.
 ```
+The current builder implements this for both quark and gluon loops as
+`roll(time_axis, -t0)` before any C3 product or ensemble subtraction.
 
 The canonical EMTc file has no source-position tag because the same loop is
 reused for every `t0` on that configuration.
 
-The saved quark loop is an unringed flowed bilinear.  The same run writes a
-kinetic-only `FlowedQuarkRinged` companion extracted from the identical raw
-EMT vectors.  It contains no per-configuration ringed factor: compute that
-factor in analysis only after averaging its `avg/kinetic_spacetime` over the
-gauge ensemble.
+The saved quark loop is an unringed flowed bilinear.  The same EMTc embeds
+kinetic data under `derived/ringed`, extracted from the identical raw EMT
+vectors.  It contains no per-configuration ringed factor: compute that factor
+only after averaging `derived/ringed/kinetic_spacetime` over the ensemble.
 
 ### Step 2: Gluon EMT 1pt
 
@@ -268,7 +274,10 @@ multiple configurations are provided.
 The quark merger builds cumulative loop averages:
 
 ```text
-Lbar_N = mean(raw/Tmunu_pervec[:N], axis=0) / volume_norm
+B_N[nu,mu] = mean(
+    raw/derivative_bilinear_pervec[:N,gamma_nu,mu], axis=0
+) / volume_norm
+Lbar_N[mu,nu] = (B_N[mu,nu] + B_N[nu,mu]) / 2
 N = 1, ..., effective_n_inversions
 ```
 
@@ -348,7 +357,7 @@ EMT_1PT_GAUGE_PATH
 EMT_1PT_MPI_GEOMETRY
 EMT_1PT_QMAX
 EMT_1PT_FLOW_STEPS
-EMT_1PT_SM_TAG
+EMT_1PT_SETUP_TAG
 ```
 
 Configuration identity is deliberately not an environment variable.  Pass
@@ -386,7 +395,7 @@ EMT_DISC_3PT_OUT
 Default loop smearing tag:
 
 ```text
-EMT_1PT_SM_TAG = 1HYP_GSRC_W1_k0
+EMT_1PT_SETUP_TAG = 1HYP
 ```
 
 Default proton C2 smearing tag:

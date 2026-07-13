@@ -2,10 +2,21 @@ import argparse
 import json
 import os
 from pathlib import Path
+import sys
 
 import h5py
 import numpy as np
 
+APPLICATION_ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY_ROOT = APPLICATION_ROOT.parent
+for module_root in (REPOSITORY_ROOT, APPLICATION_ROOT):
+    if str(module_root) not in sys.path:
+        sys.path.insert(0, str(module_root))
+
+from analysis_helper.emt_disconnected_analysis import (
+    read_gluon_loop,
+    read_quark_loop,
+)
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     validate_quark_gluon_loop_axes,
 )
@@ -39,7 +50,7 @@ def cfg_output_tag(configs):
 
 
 def default_loop_sm_tag():
-    return os.environ.get("EMT_1PT_SM_TAG", "1HYP_GSRC_W1_k0")
+    return os.environ.get("EMT_1PT_SETUP_TAG", "1HYP")
 
 
 def default_c2_sm_tag(interpolator):
@@ -83,46 +94,6 @@ def read_c2(path, gamma_label, momentum_label, t_separations):
     if np.any(t_separations < 0) or np.any(t_separations >= c2_t.shape[0]):
         raise ValueError(f"Requested t_separations {t_separations.tolist()} outside C2 length {c2_t.shape[0]}")
     return c2_t[t_separations], c2_t
-
-
-def read_quark_loop(path):
-    with h5py.File(path, "r") as h5:
-        raw = h5["raw/Tmunu_pervec"][...]
-        volume_norm = h5.attrs.get("volume_norm")
-        if volume_norm is None:
-            raise KeyError(f"{path} is missing attrs/volume_norm")
-        n_eff_attr = int(h5.attrs.get("effective_n_inversions", raw.shape[0]))
-        if n_eff_attr != raw.shape[0]:
-            raise ValueError(f"{path} has effective_n_inversions={n_eff_attr}, raw source axis={raw.shape[0]}")
-        source_index = h5["raw/source_index"][...] if "raw/source_index" in h5 else np.arange(raw.shape[0], dtype=np.int32)
-        base_noise_index = h5["raw/base_noise_index"][...] if "raw/base_noise_index" in h5 else np.zeros(raw.shape[0], dtype=np.int32)
-        hp_index = h5["raw/hp_index"][...] if "raw/hp_index" in h5 else np.zeros(raw.shape[0], dtype=np.int32)
-        qext = np.asarray(h5.attrs.get("qext", np.zeros((raw.shape[3], 4), dtype=np.int32)), dtype=np.int32)
-        flow_times = np.asarray(h5.attrs.get("flow_times", np.arange(raw.shape[4])), dtype=np.float64)
-
-    counts = np.arange(1, raw.shape[0] + 1, dtype=np.int32)
-    cumulative = np.cumsum(raw, axis=0) / counts[:, None, None, None, None, None]
-    cumulative = cumulative / float(volume_norm)
-    bookkeeping = {
-        "source_index": source_index,
-        "base_noise_index": base_noise_index,
-        "hp_index": hp_index,
-    }
-    return cumulative, counts, bookkeeping, qext, flow_times
-
-
-def read_gluon_loop(path):
-    with h5py.File(path, "r") as h5:
-        sample = h5["Tmunu/T11"][...]
-        loop = np.zeros((4, 4) + sample.shape, dtype=sample.dtype)
-        for mu in range(4):
-            for nu in range(mu, 4):
-                data = h5[f"Tmunu/T{mu + 1}{nu + 1}"][...]
-                loop[mu, nu] = data
-                loop[nu, mu] = data
-        qext = np.asarray(h5.attrs.get("qext", np.zeros((sample.shape[0], 4), dtype=np.int32)), dtype=np.int32)
-        flow_times = np.asarray(h5.attrs.get("flow_times", np.arange(sample.shape[1])), dtype=np.float64)
-    return loop, qext, flow_times
 
 
 def zero_momentum_index(qext):
@@ -209,8 +180,12 @@ gluon_qext_list = []
 gluon_flow_time_list = []
 for c2_path, quark_path, gluon_path in zip(c2_paths, quark_paths, gluon_paths):
     c2_tseps, c2_t = read_c2(c2_path, c2_gamma, c2_momentum, t_separations)
-    quark_loop, source_count, source_bookkeeping, qext, quark_flow_times = read_quark_loop(quark_path)
-    gluon_loop, gluon_qext, gluon_flow_times = read_gluon_loop(gluon_path)
+    quark_loop, source_count, source_bookkeeping, qext, quark_flow_times = read_quark_loop(
+        quark_path, src_pos[3]
+    )
+    gluon_loop, gluon_qext, gluon_flow_times = read_gluon_loop(
+        gluon_path, src_pos[3]
+    )
     c2_selected.append(c2_tseps)
     c2_full.append(c2_t)
     quark_loops.append(quark_loop)
@@ -284,6 +259,10 @@ with h5py.File(output, "w") as h5:
     h5.attrs["qext"] = qext
     h5.attrs["quark_flow_times"] = quark_flow_times
     h5.attrs["gluon_flow_times"] = gluon_flow_times
+    h5.attrs["input_loop_time_convention"] = "absolute_lattice_time"
+    h5.attrs["output_loop_time_convention"] = "source_relative_time"
+    h5.attrs["source_t"] = int(src_pos[3])
+    h5.attrs["absolute_to_relative_mapping"] = "roll(time_axis,-source_t)"
     h5.create_dataset("C2", data=c2_selected)
     h5.create_dataset("C2_full_time", data=c2_full)
 

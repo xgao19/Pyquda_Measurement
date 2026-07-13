@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
+  echo "Usage: $0 --config_num CFG" >&2
+  exit 2
+fi
+config_num="$2"
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 measurement_root="$(cd "$script_dir/../../.." && pwd)"
 
@@ -16,7 +22,6 @@ export MPICH_GPU_SUPPORT_ENABLED="${MPICH_GPU_SUPPORT_ENABLED:-1}"
 
 export EMT_PROTON_DATA_DIR="${EMT_PROTON_DATA_DIR:-$script_dir/data}"
 export EMT_PROTON_GAUGE_PATH="${EMT_PROTON_GAUGE_PATH:-$measurement_root/test_gauge/S8T32_wilson_b6.cg.1e-08.0}"
-export EMT_PROTON_CONFIG_NUM="${EMT_PROTON_CONFIG_NUM:-0}"
 export EMT_PROTON_LAT_TAG="${EMT_PROTON_LAT_TAG:-S8T32}"
 export EMT_PROTON_MPI_GEOMETRY="${EMT_PROTON_MPI_GEOMETRY:-1.1.1.2}"
 export EMT_PROTON_QMAX="${EMT_PROTON_QMAX:-0}"
@@ -33,12 +38,12 @@ mkdir -p "$QUDA_RESOURCE_PATH" "$EMT_PROTON_DATA_DIR"
 echo "Running proton quark EMT 3pt"
 echo "  EMT_PROTON_GAUGE_PATH=$EMT_PROTON_GAUGE_PATH"
 echo "  EMT_PROTON_DATA_DIR=$EMT_PROTON_DATA_DIR"
-echo "  EMT_PROTON_CONFIG_NUM=$EMT_PROTON_CONFIG_NUM"
+echo "  config_num=$config_num"
 echo "  EMT_PROTON_MPI_GEOMETRY=$EMT_PROTON_MPI_GEOMETRY"
 echo "  EMT_PROTON_LAT_TAG=$EMT_PROTON_LAT_TAG"
 echo "  EMT_PROTON_GAUSS_SMEAR=$EMT_PROTON_GAUSS_SMEAR"
 echo "  QUDA_RESOURCE_PATH=$QUDA_RESOURCE_PATH"
 
 python -u "$script_dir/Pyquda_EMT_proton_quark_3pt.py" \
-  --config_num "$EMT_PROTON_CONFIG_NUM" \
+  --config_num "$config_num" \
   --mpi_geometry "$EMT_PROTON_MPI_GEOMETRY"

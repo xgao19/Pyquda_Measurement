@@ -35,15 +35,15 @@ The working stack that was tested on Perlmutter is:
 
 The QUDA install prefix is:
 
-- `/global/cfs/cdirs/m3760/xgao/software/quda/install`
+- `/global/cfs/cdirs/m4559/xgao/software_gradientflow/quda-develop/install`
 
 The shared Python environment is:
 
-- `/global/cfs/cdirs/m3760/xgao/software/venv`
+- `/global/cfs/cdirs/m4559/xgao/software_gradientflow/venv-quda-develop`
 
 The PyQUDA checkout is expected at:
 
-- `/global/cfs/cdirs/m3760/xgao/software/PyQUDA`
+- `/global/cfs/cdirs/m4559/xgao/software_gradientflow/PyQUDA-develop`
 
 ## Python requirements
 
@@ -61,17 +61,17 @@ validated environment:
 Install them with:
 
 ```bash
-source /global/cfs/cdirs/m3760/xgao/software/venv/bin/activate
-python -m pip install -r /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/systems/perlmutter/requirements.txt
+source /global/cfs/cdirs/m4559/xgao/software_gradientflow/venv-quda-develop/bin/activate
+python -m pip install -r /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement/systems/perlmutter/requirements.txt
 ```
 
 If you need the full PyQUDA editable install, use:
 
 ```bash
-export QUDA_PATH=/global/cfs/cdirs/m3760/xgao/software/quda/install
-cd /global/cfs/cdirs/m3760/xgao/software/PyQUDA/pyquda_core
+export QUDA_PATH=/global/cfs/cdirs/m4559/xgao/software_gradientflow/quda-develop/install
+cd /global/cfs/cdirs/m4559/xgao/software_gradientflow/PyQUDA-develop/pyquda_core
 python -m pip install -e .
-cd /global/cfs/cdirs/m3760/xgao/software/PyQUDA
+cd /global/cfs/cdirs/m4559/xgao/software_gradientflow/PyQUDA-develop
 python -m pip install -e .
 ```
 
@@ -80,7 +80,7 @@ python -m pip install -e .
 The easiest way to set up the runtime environment is:
 
 ```bash
-source /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/systems/perlmutter/activate-venv-quda.sh
+source /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement/systems/perlmutter/activate-venv-quda.sh
 ```
 
 That helper:
@@ -107,14 +107,14 @@ The bundled smoke test uses the local NERSC gauge file:
 Run it with:
 
 ```bash
-bash /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/systems/perlmutter/check-gradient-flow.sh
+bash /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement/systems/perlmutter/check-gradient-flow.sh
 ```
 
 If you already have the environment loaded, you can run the Python entry
 directly:
 
 ```bash
-python /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/systems/perlmutter/check-gradient-flow.py
+python /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement/systems/perlmutter/check-gradient-flow.py
 ```
 
 It checks:
@@ -136,7 +136,7 @@ You can override them without editing the script, for example:
 
 ```bash
 GRID_SIZE=1,1,1,1 FLOW_STEPS=2 FLOW_EPSILON=0.005 \
-  bash /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/systems/perlmutter/check-gradient-flow.sh
+  bash /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement/systems/perlmutter/check-gradient-flow.sh
 ```
 
 ## Batch jobs
@@ -162,7 +162,7 @@ For example:
 
 ```bash
 PYQUDA_DRIVER=pyquda_main.py PYQUDA_ARGS="--mpi_geometry 2.2.2.2" \
-  sbatch /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/systems/perlmutter/submit_batch_template.sh
+  sbatch /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement/systems/perlmutter/submit_batch_template.sh
 ```
 
 ## Environment variables

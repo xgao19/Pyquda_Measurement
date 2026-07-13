@@ -134,13 +134,17 @@ python tests/run_smoke_tests.py
 - The physical disconnected correlator requires ensemble subtraction:
   `<C2 L> - <C2><L>`.  A single-configuration product is only an unsubtracted
   diagnostic proxy.
-- Quark EMT 1pt writes a kinetic-only `FlowedQuarkRinged` companion from the
-  same raw zero-momentum diagonal tensor; this adds no solves or derivatives.
-  `CHI` remains only a scalar/noise diagnostic.  Compute the physical ringed
-  factor after ensemble-averaging the kinetic expectation value.
+- Quark EMT now stores the complete 16 local plus `16x4` unsymmetrized
+  derivative basis; derive the old EMT from vector channels.  Raw PyQUDA `Y5`
+  and `T5` need minus signs for uniform `gamma_mu gamma5`, and raw tensor masks
+  are `[gamma_mu,gamma_nu]/2` without `i`; use the stored basis transform.
+- EMT operator schema v3 stores the identity only in the 16-Gamma local basis,
+  names the separate source norm `flowed_noise_norm`, and embeds the kinetic
+  data under `derived/ringed` in EMTc.  Compute physical ringed factors only
+  after ensemble-averaging the kinetic expectation value.
 - Production quark EMT 1pt is base-oriented: base-internal part files are only
   checkpoints, a base is complete only after all HP vectors validate, and an
-  explicit streaming finalizer publishes canonical EMTc/ringed files.
+  explicit streaming finalizer publishes one canonical EMTc file.
 
 ## qTMD Conventions And Pitfalls
 

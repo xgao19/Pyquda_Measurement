@@ -1,29 +1,17 @@
 import numpy as np
 
 from pyquda_utils import core, gamma
+from pyquda_measurement_utils.fermion_bilinear_basis import (
+    GAMMA_LABELS,
+    PYQUDA_GAMMA_IDS,
+    gamma_stack as canonical_gamma_stack,
+)
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array
 
 
-my_gammas = ["5", "T", "T5", "X", "X5", "Y", "Y5", "Z", "Z5", "I", "SXT", "SXY", "SXZ", "SYT", "SYZ", "SZT"]
-my_pyquda_gammas = [
-    gamma.gamma(15),
-    gamma.gamma(8),
-    gamma.gamma(7),
-    gamma.gamma(1),
-    gamma.gamma(14),
-    gamma.gamma(2),
-    gamma.gamma(13),
-    gamma.gamma(4),
-    gamma.gamma(11),
-    gamma.gamma(0),
-    gamma.gamma(9),
-    gamma.gamma(3),
-    gamma.gamma(5),
-    gamma.gamma(10),
-    gamma.gamma(6),
-    gamma.gamma(12),
-]
-pyquda_gammas_order = [15, 8, 7, 1, 14, 2, 13, 4, 11, 0, 9, 3, 5, 10, 6, 12]
+my_gammas = list(GAMMA_LABELS)
+pyquda_gammas_order = list(PYQUDA_GAMMA_IDS)
+my_pyquda_gammas = [gamma.gamma(idx) for idx in pyquda_gammas_order]
 G5 = gamma.gamma(15)
 
 
@@ -50,8 +38,7 @@ def _gamma_on_backend(gamma_like, xp, ref_arr):
 
 
 def gamma_stack(reference_array):
-    xp = _get_xp_from_array(reference_array)
-    return xp.stack([_gamma_on_backend(gamma_matrix, xp, reference_array) for gamma_matrix in my_pyquda_gammas])
+    return canonical_gamma_stack(reference_array)
 
 
 def gamma_from_label(label):

@@ -90,8 +90,8 @@ After this step, the code evaluates the sink-summed three-point function as
             O_g(x) S_q(x, x0) Gamma_src
         ].
 
-This is the formula implemented by ``get_C3_chi`` and
-``get_C3_Tmunu_symmetrized``.
+Production evaluates this formula through the shared primitive-bilinear
+kernel, then derives ``C3_chi`` and ``C3_Tmunu`` from those primitives.
 
 Connected quark EMT insertion
 -----------------------------
@@ -144,8 +144,8 @@ Stochastic quark one-point contraction
 The quark one-point part estimates traces with random noise.  For a Z_n noise
 field ``xi`` and solution ``eta = D^{-1} xi``, the code measures
 
-    CHI[0](q, t) = sum_x Phi_q(x) xi^dagger(x) eta(x),
-    CHI[1](q, t) = sum_x Phi_q(x) xi^dagger(x) xi(x),
+    L_I(q,t) = sum_x Phi_q(x) xi^dagger(x) eta(x),
+    N_xi(q,t) = sum_x Phi_q(x) xi^dagger(x) xi(x),
 
 and the flowed quark EMT building block
 
@@ -174,8 +174,8 @@ datasets
 
     avg/Tmunu/T11, avg/Tmunu/T22, avg/Tmunu/T33, avg/Tmunu/T44
 
-at the ``q = 0`` momentum index.  The ``CHI`` datasets are saved as scalar
-trace and stochastic-noise diagnostics; they are not the standard
+at the ``q = 0`` momentum index.  The identity local channel and explicitly
+named ``flowed_noise_norm`` are diagnostics; they are not the standard
 ``bar_chi overleftrightarrow{not D} chi`` normalization by themselves.
 
 Gluon one-point contraction
@@ -280,14 +280,26 @@ from pyquda_measurement_utils.io_corr import (
     save_emt_meson_2pt_hdf5,
 )
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
-    EMTDisconnectedGluon1pt,
     EMTDisconnectedQuark1pt,
+    EMT_OPERATOR_SCHEMA_VERSION,
     _flow_times,
     my_gammas,
+)
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
+from pyquda_measurement_utils.fermion_bilinear_basis import (
+    IDENTITY_GAMMA_POSITION,
+    basis_attrs,
+    symmetric_vector_emt,
 )
 from pyquda_measurement_utils.tools import mpi_print
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_meson_bw_seq_pyquda
+
+
+def _save_connected_3pt_rank0(latt_info, *args, **kwargs):
+    """Keep the serial HDF5 writer completely unopened on non-root ranks."""
+    if latt_info.mpi_rank == 0:
+        save_emt_quark_3pt_hdf5(*args, **kwargs)
 
 """
 ================================================================================
@@ -295,6 +307,17 @@ from pyquda_measurement_utils.bw_seq_pyquda import create_meson_bw_seq_pyquda
 ================================================================================
 """
 class QuarkEMT(EMTDisconnectedQuark1pt):
+
+    def __init__(self, parameters):
+        super().__init__(parameters)
+        self.pf = parameters["pf"]
+        self.pilist = parameters["p_2pt"]
+        self.CG_GaussSmear = bool(parameters.get("CG_GaussSmear", False))
+        self.pos_boost = parameters["pos_boost"]
+        self.neg_boost = parameters["neg_boost"]
+        self.width = parameters["width"]
+        self.source_interpolator = parameters.get("source_interpolator", "5")
+        self.sink_interpolator = parameters.get("sink_interpolator", "5")
 
     def _make_meson_source_props(self, dirac, U, src_pos):
         """Build source-smeared point-sink forward/backward meson propagators."""
@@ -335,36 +358,14 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
         return prop_fw_SP, prop_bw_SP
 
     @classmethod
-    def get_C3_chi(
-        cls,
-        U_f: LatticeGauge,
-        prop_fw: LatticePropagator,
-        seq_bw_prop: LatticePropagator,
-        src_gamma,
-        phases_3pt,
-        t0: int,
-    ):
-        """Compute C3_chi with the meson sequential-source layout.
-
-        The ordinary forward propagator is the source-to-insertion line, and the
-        sequential backward propagator is the sink-to-insertion line.  The
-        backward line is formed as
-
-            dst2 = gamma5 * seq_bw_prop^dagger * gamma5
-
-        before tracing with the source interpolator.
-        """
-        dst2 = cls._make_dst2(seq_bw_prop)
-        scalar_field = contract("wtzyxabij,wtzyxbcji,ca->wtzyx", dst2, prop_fw.data, src_gamma)
-        slice_t = core.gatherLattice(
-            contract("qwtzyx,wtzyx->qt", phases_3pt, scalar_field).get(),
-            [1, -1, -1, -1],
-        )
+    def _project_gamma_scalar_fields(cls, scalar_fields, phases_3pt, t0):
+        projected = contract("qwtzyx,gwtzyx->gqt", phases_3pt, scalar_fields)
+        slice_t = core.gatherLattice(array_to_numpy(projected), [2, -1, -1, -1])
         slice_t = getMPIComm().bcast(slice_t, root=0)
-        return np.roll(np.array(slice_t), -t0, axis=-1)
+        return np.roll(np.asarray(slice_t), -t0, axis=-1)
 
     @classmethod
-    def get_C3_Tmunu_symmetrized(
+    def get_C3_primitive_bilinears(
         cls,
         U_f: LatticeGauge,
         prop_fw: LatticePropagator,
@@ -373,57 +374,42 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
         phases_3pt,
         t0: int,
     ):
-        """Compute connected quark EMT 3pt functions in the meson convention."""
-        Nq = len(phases_3pt)
-        Nt = U_f.latt_info.global_size[3]
-        C3_Tmunu = np.zeros((Nq, 4, 4, Nt), dtype=np.complex128)
-
+        """Compute all 16 local and 16x4 one-derivative meson bilinears."""
         dst2 = cls._make_dst2(seq_bw_prop)
-        D_gammas_local = cls._dirac_gammas_for(prop_fw.data)
+        gamma_ls = cls._gamma_stack_for(prop_fw.data)
+        local_fields = contract(
+            "wtzyxabij,gbn,wtzyxncji,ca->gwtzyx",
+            dst2, gamma_ls, prop_fw.data, src_gamma,
+        )
+        local = cls._project_gamma_scalar_fields(local_fields, phases_3pt, t0)
+        del local_fields
 
-        # First derivative term: derivative acts on the forward quark line.
+        derivative = np.zeros(
+            (16, 4, len(phases_3pt), U_f.latt_info.global_size[3]),
+            dtype=np.complex128,
+        )
         for mu in range(4):
             D_fw = cls._covdev_sym_prop(U_f, prop_fw, mu)
-            for nu in range(4):
-                gamma_D_fw = contract("ab,wtzyxbdij->wtzyxadij", D_gammas_local[nu], D_fw.data)
-                scalar_field = 0.5 * contract(
-                    "wtzyxabij,wtzyxbcji,ca->wtzyx",
-                    dst2,
-                    gamma_D_fw,
-                    src_gamma,
-                )
-                slice_t = core.gatherLattice(
-                    contract("qwtzyx,wtzyx->qt", phases_3pt, scalar_field).get(),
-                    [1, -1, -1, -1],
-                )
-                slice_t = getMPIComm().bcast(slice_t, root=0)
-                C3_Tmunu[:, mu, nu] += np.roll(np.array(slice_t), -t0, axis=-1)
+            right_fields = 0.5 * contract(
+                "wtzyxabij,gbn,wtzyxncji,ca->gwtzyx",
+                dst2, gamma_ls, D_fw.data, src_gamma,
+            )
+            derivative[:, mu] += cls._project_gamma_scalar_fields(
+                right_fields, phases_3pt, t0
+            )
+            del right_fields, D_fw
 
-        # Second derivative term: derivative acts on the sequential backward line.
-        for mu in range(4):
             leftD_dst2 = cls._left_covdev_dst2_from_prop(U_f, seq_bw_prop, mu)
-            for nu in range(4):
-                gamma_fw = contract("ab,wtzyxbdij->wtzyxadij", D_gammas_local[nu], prop_fw.data)
-                scalar_field = -0.5 * contract(
-                    "wtzyxabij,wtzyxbcji,ca->wtzyx",
-                    leftD_dst2,
-                    gamma_fw,
-                    src_gamma,
-                )
-                slice_t = core.gatherLattice(
-                    contract("qwtzyx,wtzyx->qt", phases_3pt, scalar_field).get(),
-                    [1, -1, -1, -1],
-                )
-                slice_t = getMPIComm().bcast(slice_t, root=0)
-                C3_Tmunu[:, mu, nu] += np.roll(np.array(slice_t), -t0, axis=-1)
-
-        # Enforce T_{mu nu} = T_{nu mu} at the measured level.
-        for mu in range(4):
-            for nu in range(mu + 1, 4):
-                C3_Tmunu[:, mu, nu] = 0.5 * (C3_Tmunu[:, mu, nu] + C3_Tmunu[:, nu, mu])
-                C3_Tmunu[:, nu, mu] = C3_Tmunu[:, mu, nu]
-
-        return C3_Tmunu
+            left_fields = -0.5 * contract(
+                "wtzyxabij,gbn,wtzyxncji,ca->gwtzyx",
+                leftD_dst2, gamma_ls, prop_fw.data, src_gamma,
+            )
+            derivative[:, mu] += cls._project_gamma_scalar_fields(
+                left_fields, phases_3pt, t0
+            )
+            del left_fields, leftD_dst2
+        del dst2, gamma_ls
+        return np.asarray(local), derivative
 
     def contract_meson_2pt(
         self,
@@ -539,6 +525,12 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
         Nq = len(self.qlist)
         C3_chi = np.zeros((N_ts, Nsteps + 1, Nq, Nt), dtype=np.complex128)
         C3_Tmunu = np.zeros((N_ts, Nsteps + 1, Nq, 4, 4, Nt), dtype=np.complex128)
+        C3_local_bilinear = np.zeros(
+            (N_ts, 16, Nq, Nsteps + 1, Nt), dtype=np.complex128
+        )
+        C3_derivative_bilinear = np.zeros(
+            (N_ts, 16, 4, Nq, Nsteps + 1, Nt), dtype=np.complex128
+        )
 
         mpi_print(latt_info, f"src [{x0},{y0},{z0},{t0}]")
 
@@ -547,9 +539,24 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
 
         c2_attrs = {
             "measurement": "meson_2pt",
+            "config_num": self.config_num,
+            "mass": mass,
+            "csw": csw,
+            "tol": tol,
+            "maxiter": maxiter,
+            "gauge_preprocessing": self.gauge_preprocessing,
+            "t_boundary": latt_info.t_boundary,
+            "source_position": np.asarray(src_pos, dtype=np.int32),
+            "p_2pt": np.asarray(self.pilist, dtype=np.int32),
             "src_t": t0,
             "src_interpolator": src_interpolator,
+            "sink_interpolator": "all_16_gamma_scan",
             "sink_gamma_scan": "all_16",
+            "gaussian_smearing": self.CG_GaussSmear,
+            "smearing_width": self.width,
+            "source_boost": np.asarray(self.pos_boost, dtype=np.int32),
+            "sink_boost": np.asarray(self.neg_boost, dtype=np.int32),
+            "dataset_axes": "gamma,p,t",
         }
         C2 += self.contract_meson_2pt(
             latt_info,
@@ -593,8 +600,18 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
 
             for step in range(Nsteps + 1):
                 mpi_print(latt_info, f"contraction for step {step}")
-                C3_chi[n_ts, step] += self.get_C3_chi(U_f, prop_fw_flow, seq_bw_prop_flow, src_gamma, phases_3pt, t0)
-                C3_Tmunu[n_ts, step] += self.get_C3_Tmunu_symmetrized(U_f, prop_fw_flow, seq_bw_prop_flow, src_gamma, phases_3pt, t0)
+                local_step, derivative_step = self.get_C3_primitive_bilinears(
+                    U_f, prop_fw_flow, seq_bw_prop_flow, src_gamma, phases_3pt, t0
+                )
+                C3_local_bilinear[n_ts, :, :, step] += local_step
+                C3_derivative_bilinear[n_ts, :, :, :, step] += derivative_step
+                C3_chi[n_ts, step] += local_step[IDENTITY_GAMMA_POSITION]
+                tensor_step = symmetric_vector_emt(
+                    derivative_step, gamma_axis=0, derivative_axis=1
+                )
+                C3_Tmunu[n_ts, step] += np.moveaxis(
+                    tensor_step, (0, 1), (1, 2)
+                )
 
                 prop_fw_flow, seq_bw_prop_flow = self._advance_flowed_props(
                     U_f,
@@ -609,6 +626,22 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
 
         attrs = {
             "measurement": "quark_3pt",
+            "emt_operator_schema_version": EMT_OPERATOR_SCHEMA_VERSION,
+            "config_num": self.config_num,
+            "mass": mass,
+            "csw": csw,
+            "tol": tol,
+            "maxiter": maxiter,
+            "gauge_preprocessing": self.gauge_preprocessing,
+            "t_boundary": latt_info.t_boundary,
+            "source_position": np.asarray(src_pos, dtype=np.int32),
+            "pf": np.asarray(self.pf, dtype=np.int32),
+            "qext": np.asarray(self.qlist, dtype=np.int32),
+            "p_2pt": np.asarray(self.pilist, dtype=np.int32),
+            "gaussian_smearing": self.CG_GaussSmear,
+            "smearing_width": self.width,
+            "source_boost": np.asarray(self.pos_boost, dtype=np.int32),
+            "sink_boost": np.asarray(self.neg_boost, dtype=np.int32),
             "spin": spin,
             "flow_type": self.flow_type,
             "flow_epsilon": self.flow_epsilon,
@@ -627,15 +660,21 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             "quark_flow_scope": "inserted_operator_quark_legs_only",
             "hadron_interpolator_flowed": False,
             "derivative_convention": "symmetric_covdev_0p5_Dplus_minus_Dminus",
+            "primitive_local_axes": "tsep,gamma,q,flow,t",
+            "primitive_derivative_axes": "tsep,gamma,derivative,q,flow,t",
+            "primitive_derivative_unsymmetrized": True,
+            "derived_emt_axes": "tsep,flow,q,mu,nu,t",
+            "C3_chi_axes": "tsep,flow,q,t",
         }
-        save_emt_quark_3pt_hdf5(tag, C3_chi, C3_Tmunu, momentum_transfer_list=self.qlist, attrs=attrs)
+        attrs.update(basis_attrs())
+        _save_connected_3pt_rank0(
+            latt_info,
+            tag,
+            C3_chi,
+            C3_Tmunu,
+            C3_local_bilinear,
+            C3_derivative_bilinear,
+            momentum_transfer_list=self.qlist,
+            attrs=attrs,
+        )
         return C2, C3_chi, C3_Tmunu
-
-
-"""
-================================================================================
-                                  GluonEMT
-================================================================================
-"""
-class GluonEMT(EMTDisconnectedGluon1pt):
-    """Backward-compatible alias for the shared gluon EMT 1pt measurement."""

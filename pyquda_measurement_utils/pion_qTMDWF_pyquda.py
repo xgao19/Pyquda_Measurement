@@ -2,14 +2,14 @@ import numpy as np
 
 from pyquda_utils import core, gamma
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
+from pyquda_measurement_utils.fermion_bilinear_basis import GAMMA_LABELS, PYQUDA_GAMMA_IDS
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.tools import _get_xp_from_array, mpi_print, _asarray_on_queue
 
 
-my_gammas = ["5", "T", "T5", "X", "X5", "Y", "Y5", "Z", "Z5", "I", "SXT", "SXY", "SXZ", "SYT", "SYZ", "SZT"]
-#! Add PyQUDA gamma matrices by order
-my_pyquda_gammas = [gamma.gamma(15), gamma.gamma(8), gamma.gamma(7), gamma.gamma(1), gamma.gamma(14), gamma.gamma(2), gamma.gamma(13), gamma.gamma(4), gamma.gamma(11), gamma.gamma(0), gamma.gamma(9), gamma.gamma(3), gamma.gamma(5), gamma.gamma(10), gamma.gamma(6), gamma.gamma(12)]
-pyquda_gammas_order = [15, 8, 7, 1, 14, 2, 13, 4, 11, 0, 9, 3, 5, 10, 6, 12]
+my_gammas = list(GAMMA_LABELS)
+pyquda_gammas_order = list(PYQUDA_GAMMA_IDS)
+my_pyquda_gammas = [gamma.gamma(idx) for idx in pyquda_gammas_order]
 G5 = gamma.gamma(15)
 
 

@@ -1,5 +1,6 @@
 import argparse
 import os
+from pathlib import Path
 
 from pyquda import init
 from pyquda_utils import io
@@ -24,10 +25,10 @@ def parse_str_list(text):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--config_num", type=int, default=int(os.environ.get("EMT_PROTON_CONFIG_NUM", "0")))
+parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("EMT_PROTON_MPI_GEOMETRY", "1.1.1.1"))
 parser.add_argument("--interpolator", type=str, default=os.environ.get("EMT_PROTON_INTERPOLATOR", "5"))
-args, unknown = parser.parse_known_args()
+args = parser.parse_args()
 
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -35,9 +36,10 @@ mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 # Production knobs: ensemble paths, output tags, source position,
 # momentum grid, sink separations, smearing, and gradient-flow schedule.
 data_dir = os.environ.get("EMT_PROTON_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
+repo_root = Path(__file__).resolve().parents[3]
 gauge_path = os.environ.get(
     "EMT_PROTON_GAUGE_PATH",
-    "/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0",
+    str(repo_root / "test_gauge" / "S8T32_wilson_b6.cg.1e-08.0"),
 )
 lat_tag = os.environ.get("EMT_PROTON_LAT_TAG", "S8T32")
 src_pos = parse_triplet(os.environ.get("EMT_PROTON_SRC_POS", "0.0.0")) + [
@@ -57,6 +59,7 @@ sm_tag = os.environ.get(
 )
 
 parameters = {
+    "config_num": conf,
     "qext": qext,
     "pf": pf,
     "p_2pt": qext,
@@ -73,6 +76,7 @@ parameters = {
     "flow_type": os.environ.get("EMT_PROTON_FLOW_TYPE", "wilson"),
     "flow_epsilon": float(os.environ.get("EMT_PROTON_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_PROTON_FLOW_STEPS", "1")),
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,4)",
 }
 
 c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
@@ -96,7 +100,7 @@ gauge.latt_info.t_boundary = -1
 invPara = [
     float(os.environ.get("EMT_PROTON_MASS", "0.236")),
     float(os.environ.get("EMT_PROTON_CSW", "1.0372")),
-    float(os.environ.get("EMT_PROTON_TOL", "1e-15")),
+    float(os.environ.get("EMT_PROTON_TOL", "1e-10")),
     int(os.environ.get("EMT_PROTON_MAXITER", "300")),
 ]
 

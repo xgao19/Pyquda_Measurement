@@ -24,8 +24,8 @@ rm -rf include
 # ----------------------------
 
 # Adjust these paths if you move the repository or want a different install.
-software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
-quda_src="${QUDA_SRC:-$software_root/quda}"
+software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m4559/xgao/software_gradientflow}"
+quda_src="${QUDA_SRC:-$software_root/quda-develop}"
 prefix="${QUDA_PREFIX:-$quda_src/install}"
 
 # ----------------------------

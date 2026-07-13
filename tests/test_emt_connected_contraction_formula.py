@@ -1,5 +1,12 @@
 import numpy as np
 
+from pyquda_measurement_utils.fermion_bilinear_basis import (
+    IDENTITY_GAMMA_POSITION,
+    VECTOR_GAMMA_POSITIONS,
+    gamma_matrices_numpy,
+    symmetric_vector_emt,
+)
+
 
 def _c3_chi_formula(dst2, prop_fw, src_gamma):
     return np.einsum("tabij,tbcji,ca->t", dst2, prop_fw, src_gamma, optimize=True)
@@ -73,3 +80,74 @@ def test_emt_tmunu_symmetrization_keeps_upper_and_lower_triangle_equal():
     for mu in range(4):
         for nu in range(4):
             np.testing.assert_allclose(c3[:, mu, nu], c3[:, nu, mu])
+
+
+def test_pion_batch_primitive_vector_channels_reproduce_old_formula():
+    rng = np.random.default_rng(991)
+    shape = (3, 4, 4, 2, 2)
+    dst2 = rng.normal(size=shape) + 1j * rng.normal(size=shape)
+    prop_fw = rng.normal(size=shape) + 1j * rng.normal(size=shape)
+    src_gamma = rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+    gammas = gamma_matrices_numpy()
+    derivative = np.zeros((16, 4, shape[0]), dtype=np.complex128)
+    for mu in range(4):
+        d_fw = rng.normal(size=shape) + 1j * rng.normal(size=shape)
+        left_d = rng.normal(size=shape) + 1j * rng.normal(size=shape)
+        derivative[:, mu] = (
+            0.5 * np.einsum(
+                "tabij,gbn,tncji,ca->gt",
+                dst2, gammas, d_fw, src_gamma, optimize=True,
+            )
+            - 0.5 * np.einsum(
+                "tabij,gbn,tncji,ca->gt",
+                left_d, gammas, prop_fw, src_gamma, optimize=True,
+            )
+        )
+        for nu, gamma_position in enumerate(VECTOR_GAMMA_POSITIONS):
+            expected = _c3_tmunu_formula(
+                dst2, prop_fw, left_d, d_fw, gammas[gamma_position], src_gamma
+            )
+            np.testing.assert_allclose(
+                derivative[gamma_position, mu], expected, rtol=1e-13, atol=1e-13
+            )
+
+    tensor = symmetric_vector_emt(derivative, gamma_axis=0, derivative_axis=1)
+    np.testing.assert_allclose(tensor, tensor.swapaxes(0, 1), rtol=0, atol=0)
+
+
+def test_proton_batch_primitive_identity_and_vector_channels_match_old_contractions():
+    rng = np.random.default_rng(992)
+    raw_seq = rng.normal(size=(3, 4, 4, 2, 2)) + 1j * rng.normal(
+        size=(3, 4, 4, 2, 2)
+    )
+    prop = rng.normal(size=(3, 4, 4, 2, 2)) + 1j * rng.normal(
+        size=(3, 4, 4, 2, 2)
+    )
+    gammas = gamma_matrices_numpy()
+    gamma5 = gammas[0]
+    g5_gammas = np.einsum("ai,gib->gab", gamma5, gammas)
+    spin_trace = np.einsum("tajfc,tbjfc->tab", raw_seq.conj(), prop)
+    batch = np.einsum("tab,gab->gt", spin_trace, g5_gammas)
+
+    old_identity = np.einsum("tajfc,tijfc,ai->t", raw_seq.conj(), prop, gamma5)
+    np.testing.assert_allclose(
+        batch[IDENTITY_GAMMA_POSITION], old_identity, rtol=1e-13, atol=1e-13
+    )
+    for gamma_position in VECTOR_GAMMA_POSITIONS:
+        old = np.einsum(
+            "tajfc,tbjfc,ab->t",
+            raw_seq.conj(), prop, gamma5 @ gammas[gamma_position],
+        )
+        np.testing.assert_allclose(batch[gamma_position], old, rtol=1e-13, atol=1e-13)
+
+
+def test_disconnected_batch_primitive_vector_channels_match_old_gamma_loop():
+    rng = np.random.default_rng(993)
+    xi = rng.normal(size=(5, 4, 3)) + 1j * rng.normal(size=(5, 4, 3))
+    shifted_eta = rng.normal(size=(5, 4, 3)) + 1j * rng.normal(size=(5, 4, 3))
+    gammas = gamma_matrices_numpy()
+    batch = np.einsum("tia,gij,tja->gt", xi.conj(), gammas, shifted_eta)
+    for gamma_position in VECTOR_GAMMA_POSITIONS:
+        inserted = np.einsum("ij,tja->tia", gammas[gamma_position], shifted_eta)
+        old = np.einsum("tia,tia->t", xi.conj(), inserted)
+        np.testing.assert_allclose(batch[gamma_position], old, rtol=1e-13, atol=1e-13)

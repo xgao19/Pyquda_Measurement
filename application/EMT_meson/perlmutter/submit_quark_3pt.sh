@@ -13,11 +13,17 @@
 
 set -euo pipefail
 
+if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
+  echo "Usage: sbatch $0 --config_num CFG" >&2
+  exit 2
+fi
+config_num="$2"
+
 # Perlmutter job wrapper for the quark EMT connected 3pt measurement.
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 emt_root="$(cd "$script_dir/.." && pwd)"
-software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
+software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m4559/xgao/software_gradientflow}"
 measurement_root="${REPO_ROOT:-$software_root/Pyquda_Measurement}"
 
 cd "$script_dir"
@@ -37,7 +43,7 @@ fi
 
 source "$measurement_root/systems/perlmutter/activate-venv-quda.sh"
 
-export QUDA_PATH="${QUDA_PATH:-$software_root/quda/install}"
+export QUDA_PATH="${QUDA_PATH:-$software_root/quda-develop/install}"
 export QUDA_ENABLE_TUNING="${QUDA_ENABLE_TUNING:-1}"
 export QUDA_ENABLE_MPS="${QUDA_ENABLE_MPS:-1}"
 export QUDA_RESOURCE_PATH="${QUDA_RESOURCE_PATH:-$script_dir/.quda-cache}"
@@ -47,7 +53,6 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-8}}"
 export MPICH_GPU_SUPPORT_ENABLED="${MPICH_GPU_SUPPORT_ENABLED:-1}"
 export EMT_DATA_DIR="${EMT_DATA_DIR:-$emt_root/data}"
 export EMT_GAUGE_PATH="${EMT_GAUGE_PATH:?Set EMT_GAUGE_PATH to the input gauge file before submitting}"
-export EMT_3PT_OUT="${EMT_3PT_OUT:-$EMT_DATA_DIR/EMT3pt}"
 export PYTHONPATH="$measurement_root${PYTHONPATH:+:$PYTHONPATH}"
 
 mkdir -p "$QUDA_RESOURCE_PATH" "$CUPY_CACHE_DIR" "$EMT_DATA_DIR"
@@ -61,7 +66,6 @@ echo "CUPY_CACHE_DIR=$CUPY_CACHE_DIR"
 echo "OMP_NUM_THREADS=$OMP_NUM_THREADS"
 
 main="Pyquda_EMT_quark_3pt.py"
-config_num="${EMT_CONFIG_NUM:-1050}"
 mpi_geometry="${EMT_MPI_GEOMETRY:-2.2.2.4}"
 
 srun --mpi=cray_shasta -n "${SLURM_NTASKS:-32}" \

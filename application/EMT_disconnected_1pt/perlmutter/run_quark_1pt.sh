@@ -8,13 +8,13 @@ fi
 config_num="$2"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
+software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m4559/xgao/software_gradientflow}"
 measurement_root="${MEASUREMENT_ROOT:-$software_root/Pyquda_Measurement}"
 
 cd "$script_dir"
 source "$measurement_root/systems/perlmutter/activate-venv-quda.sh"
 
-export QUDA_PATH="${QUDA_PATH:-$software_root/quda/install}"
+export QUDA_PATH="${QUDA_PATH:-$software_root/quda-develop/install}"
 export QUDA_ENABLE_TUNING="${QUDA_ENABLE_TUNING:-0}"
 export QUDA_ENABLE_MPS="${QUDA_ENABLE_MPS:-1}"
 export QUDA_RESOURCE_PATH="${QUDA_RESOURCE_PATH:-$script_dir/.quda-cache/quark_1pt}"

@@ -8,7 +8,7 @@ fi
 configs="$2"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
+software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m4559/xgao/software_gradientflow}"
 measurement_root="${MEASUREMENT_ROOT:-$software_root/Pyquda_Measurement}"
 
 cd "$script_dir"

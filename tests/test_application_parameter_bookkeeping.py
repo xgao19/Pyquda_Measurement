@@ -172,6 +172,71 @@ def test_disconnected_configuration_is_required_cli_only():
     assert "EMT_DISC_CONFIGS" not in _source(build)
 
 
+def test_connected_emt_configuration_is_required_cli_only():
+    scripts = [
+        "application/EMT_meson/perlmutter/Pyquda_EMT_quark_3pt.py",
+        "application/EMT_proton/perlmutter/Pyquda_EMT_proton_quark_3pt.py",
+        "application/EMT_proton/Aurora/Pyquda_EMT_proton_quark_3pt.py",
+    ]
+    for relpath in scripts:
+        arguments = _parser_arguments(relpath)
+        assert _keyword_constant(arguments["--config_num"], "required") is True
+        source = _source(relpath)
+        assert "parse_known_args" not in source
+        assert "CONFIG_NUM" not in source
+
+
+def test_emt_removed_entrypoints_and_aliases_stay_removed():
+    removed = [
+        "application/EMT_meson/frontier/Pyquda_EMT_quark_3pt.py",
+        "application/EMT_meson/frontier/submit_quark_3pt.sh",
+        "application/EMT_proton/perlmutter/Pyquda_EMT_proton_quark_1pt.py",
+        "application/EMT_proton/perlmutter/run_proton_quark_1pt.sh",
+        "application/EMT_proton/perlmutter/submit_proton_quark_1pt.sh",
+    ]
+    assert all(not (REPO_ROOT / relpath).exists() for relpath in removed)
+    assert "class GluonEMT" not in _source("pyquda_measurement_utils/pion_EMT_vibe_develop.py")
+    assert "class ProtonGluonEMT" not in _source("pyquda_measurement_utils/proton_EMT_vibe_develop.py")
+
+
+def test_active_perlmutter_emt_defaults_use_current_software_tree():
+    paths = list((REPO_ROOT / "application").glob("EMT_*/perlmutter/*"))
+    paths.append(REPO_ROOT / "systems/perlmutter/activate-venv-quda.sh")
+    for path in paths:
+        if path.is_file() and path.suffix in {".py", ".sh", ""}:
+            source = path.read_text()
+            assert "/global/cfs/cdirs/m3760" not in source
+    activation = _source("systems/perlmutter/activate-venv-quda.sh")
+    assert "venv-quda-develop" in activation
+    assert "quda-develop/install" in activation
+
+
+def test_pion_connected_driver_has_no_shared_output_override():
+    source = _source("application/EMT_meson/perlmutter/Pyquda_EMT_quark_3pt.py")
+    assert "EMT_3PT_OUT" not in source
+    assert "EMT_2PT_OUT" not in source
+    assert "get_emt_quark_3pt_file_tag" in source
+    assert 'os.environ.get("EMT_LAT_TAG", "S8T32")' in source
+    assert "1e-10" in source
+
+
+def test_connected_emt_shell_wrappers_require_named_configuration():
+    wrappers = [
+        "application/EMT_meson/perlmutter/run_quark_3pt.sh",
+        "application/EMT_meson/perlmutter/submit_quark_3pt.sh",
+        "application/EMT_proton/perlmutter/run_proton_quark_3pt.sh",
+        "application/EMT_proton/perlmutter/submit_proton_quark_3pt.sh",
+        "application/EMT_proton/Aurora/run_proton_quark_3pt.sh",
+        "application/EMT_proton/Aurora/submit_or_run_interactive.sh",
+    ]
+    for relpath in wrappers:
+        result = subprocess.run(
+            ["bash", str(REPO_ROOT / relpath)], capture_output=True, text=True
+        )
+        assert result.returncode == 2
+        assert "--config_num" in result.stderr
+
+
 def test_disconnected_shell_wrappers_reject_missing_or_unknown_configuration():
     wrappers = [
         "application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh",

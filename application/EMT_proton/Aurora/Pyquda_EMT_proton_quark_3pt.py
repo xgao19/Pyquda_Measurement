@@ -24,10 +24,10 @@ def parse_str_list(text):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--config_num", type=int, default=int(os.environ.get("EMT_PROTON_CONFIG_NUM", "0")))
+parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("EMT_PROTON_MPI_GEOMETRY", "1.1.1.2"))
 parser.add_argument("--interpolator", type=str, default=os.environ.get("EMT_PROTON_INTERPOLATOR", "5"))
-args, unknown = parser.parse_known_args()
+args = parser.parse_args()
 
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -57,6 +57,7 @@ sm_tag = os.environ.get(
 )
 
 parameters = {
+    "config_num": conf,
     "qext": qext,
     "pf": pf,
     "p_2pt": qext,
@@ -73,6 +74,7 @@ parameters = {
     "flow_type": os.environ.get("EMT_PROTON_FLOW_TYPE", "wilson"),
     "flow_epsilon": float(os.environ.get("EMT_PROTON_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_PROTON_FLOW_STEPS", "1")),
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,project=-1)",
 }
 
 c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)

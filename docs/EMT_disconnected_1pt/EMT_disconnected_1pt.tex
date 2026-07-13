@@ -178,9 +178,32 @@ combined with counter-noise production data.
 
 \subsection{Quark EMT Operator Implemented in Code}
 
-The quark EMT kernel in the one-point code is the local bilinear with a
-covariant derivative acting on the solution vector \(\eta\).  The implemented
-per-source, pre-volume-normalized object is
+The quark one-point kernel now measures the complete sixteen-element PyQUDA
+Dirac basis \(\Gamma_A\).  For each source it saves the local and
+one-derivative primitive bilinears
+\begin{align}
+  L_A^{(r)}(q,t;\Tf)
+  &=\sum_{\mathbf{x}}\Phi_q(x)\,
+    \xi_r^\dagger(x;\Tf)\Gamma_A\eta_r(x;\Tf),
+  \\
+  L_{A\mu}^{D,(r)}(q,t;\Tf)
+  &=-\frac12\sum_{\mathbf{x}}\Phi_q(x)\,
+    \xi_r^\dagger(x;\Tf)\Gamma_A
+    [D_{+\mu}-D_{-\mu}]\eta_r(x;\Tf).
+  \label{eq:primitive_bilinears}
+\end{align}
+The gamma axis is ordered as
+\begin{verbatim}
+5,T,T5,X,X5,Y,Y5,Z,Z5,I,SXT,SXY,SXZ,SYT,SYZ,SZT
+\end{verbatim}
+and the derivative axis is \code{X,Y,Z,T}.  The sixteen gamma contractions are
+batched after each derivative is constructed, so this extension changes
+contraction and I/O cost but does not add inversions, fermion-flow updates, or
+covariant-derivative applications.
+
+The EMT is a derived vector-channel observable.  Defining
+\(B_{\nu\mu}=L^D_{\gamma_\nu,\mu}\), the previous per-source,
+pre-volume-normalized object remains
 \begin{equation}
   L^{q,(r)}_{\nu\mu}(q,t;\Tf)
   =
@@ -194,17 +217,42 @@ per-source, pre-volume-normalized object is
   \eta_r(x;\Tf).
   \label{eq:quark_loop_raw}
 \end{equation}
-This formula maps directly to
-\code{\_get\_Tmunu\_symmetrized\_P\_Breit\_slice}.  In code:
+It is reconstructed directly from the primitive array.  In code the underlying
+batch contraction is equivalent channel by channel to
 \begin{verbatim}
 tmp = U_f.pure_gauge.covDev(eta, mu) - U_f.pure_gauge.covDev(eta, mu + 4)
-Y = contract("ab,...bc->...ac", D_gammas_local[nu], tmp.data)
-complex_field = contract("...sc,...sc->...", xi.data.conj(), Y)
-Tmunu[nu, mu] += -0.5 * impose_P_Breit_slice(...)
+field_A = contract("...ia,Aij,...ja->A...", xi.data.conj(), gamma_A, tmp.data)
+L_D[:, mu] = -0.5 * project_all_gamma_channels(field_A)
 \end{verbatim}
 The first tensor index is \(\nu\), because the gamma matrix \(\gamma_\nu\) is
 applied after choosing the derivative direction \(\mu\).  This is why the code
 fills \code{Tmunu[nu, mu]} before symmetrization.
+
+The raw matrices deliberately retain the historical PyQUDA bit-mask basis used
+by the qTMD and two-point workflows.  A stored matrix
+\code{physical\_from\_pyquda} defines
+\begin{equation}
+  \Gamma_A^{\mathrm{phys}}
+  =\sum_B C_{AB}\Gamma_B^{\mathrm{raw}}.
+\end{equation}
+With \(\gamma_5=\gamma_1\gamma_2\gamma_3\gamma_4\), the raw and physical axial
+labels agree for \code{X5} and \code{Z5}, while
+\begin{equation}
+  \Gamma_{Y5}^{\mathrm{phys}}=-\Gamma_{Y5}^{\mathrm{raw}},\qquad
+  \Gamma_{T5}^{\mathrm{phys}}=-\Gamma_{T5}^{\mathrm{raw}}.
+\end{equation}
+The six raw tensor matrices satisfy
+\begin{equation}
+  \Gamma_{S\mu\nu}^{\mathrm{raw}}
+  =\gamma_\mu\gamma_\nu
+  =\frac12[\gamma_\mu,\gamma_\nu]
+  \quad (\mu<\nu).
+\end{equation}
+If the Hermitian Euclidean convention
+\(\sigma_{\mu\nu}=\frac{i}{2}[\gamma_\mu,\gamma_\nu]\) is desired, the saved
+tensor channel must be multiplied by \(i\).  Recording this distinction avoids
+silently assigning inconsistent axial signs or tensor phases in later form
+factor analyses.
 
 \subsection{Symmetrization}
 
@@ -232,21 +280,21 @@ For \(N_{\mathrm{eff}}\) effective sources, the averaged quark one-point loop is
   L^{q,(r)}_{\mu\nu}(q,t;\Tf).
   \label{eq:noise_volume_avg}
 \end{equation}
-The code stores both the raw per-source data and the averaged
-volume-normalized data:
+The code stores the raw primitive data and their volume-normalized averages;
+the symmetric EMT is saved only as a small averaged derived view:
 \begin{align}
-  \code{raw/Tmunu\_pervec}
+  \code{raw/derivative\_bilinear\_pervec}
   &\leftrightarrow
-  L^{q,(r)}_{\mu\nu}(q,t;\Tf),
+  L^{D,(r)}_{A\mu}(q,t;\Tf),
   \\
   \code{avg/Tmunu/Tij}
   &\leftrightarrow
   L^q_{ij,\mathrm{avg}}(q,t;\Tf).
 \end{align}
 
-\subsection{\texorpdfstring{\(\chi\)}{CHI} Diagnostics}
+\subsection{Identity Bilinear and Flowed-Noise Norm}
 
-The quark workflow also writes two scalar diagnostics:
+The identity scalar bilinear and the flowed-source norm are
 \begin{align}
   \chi_0^{(r)}(q,t;\Tf)
   &=
@@ -260,22 +308,23 @@ The quark workflow also writes two scalar diagnostics:
   \xi_r^\dagger(x;\Tf)\,\xi_r(x;\Tf).
   \label{eq:chi1}
 \end{align}
-\(\chi_0\) is the stochastic scalar trace estimate.  \(\chi_1\) checks the
-noise normalization.  In code these are the two entries of \code{CHI}:
+\(\chi_0\) is already the identity channel of the complete local basis and is
+not duplicated.  \(\chi_1\) checks the noise normalization.  In code:
 \begin{verbatim}
-dot_xi_eta = contract("etzyxbc,etzyxbc->etzyx", xi.data.conj(), eta.data)
-CHI[0] = impose_P_Breit_slice(U_f, dot_xi_eta, phases_3pt)
+scalar_trace = local_bilinear[gamma_list.index("I")]
 
 dot_xi_xi = contract("etzyxbc,etzyxbc->etzyx", xi.data.conj(), xi.data)
-CHI[1] = impose_P_Breit_slice(U_f, dot_xi_xi, phases_3pt)
+flowed_noise_norm = impose_P_Breit_slice(dot_xi_xi, phases_3pt)
 \end{verbatim}
-The averaged HDF5 dataset \code{avg/CHI} is divided by \(\Vthree\), just like
-the averaged quark EMT datasets.
+Schema version 3 stores only the latter separately as
+\code{raw/flowed\_noise\_norm\_pervec} and
+\code{avg/flowed\_noise\_norm}; both averages use the same \(\Vthree\)
+normalization as the primitive bilinears.
 
 \subsection{Ringed-Fermion Kinetic Normalization}
 
-The raw \code{CHI} datasets are diagnostics, not the ringed-fermion
-normalization itself.  The kinetic observable is already contained in the
+The flowed-noise norm is not the ringed-fermion normalization.  The kinetic
+observable is already contained in the
 zero-momentum diagonal quark EMT components.  For each effective stochastic
 source \(r\), the implementation forms
 \begin{equation}
@@ -291,17 +340,15 @@ source \(r\), the implementation forms
 \end{equation}
 No new inversion, fermion-flow update, covariant derivative, or MPI gather is
 needed: Eq.~\eqref{eq:ringed_building_block} is evaluated directly from the
-already-computed \code{raw/Tmunu\_pervec}.  The momentum list must contain
-exactly one \(q=0\) entry when companion output is enabled.
+four diagonal vector channels of
+\code{raw/derivative\_bilinear\_pervec}.  The momentum list must contain
+exactly one \(q=0\) entry for every EMT quark measurement.
 
-Every repository quark-1pt entry point writes a source-matched companion file
-\begin{verbatim}
-FlowedQuarkRinged/<lat>.FlowedQuarkRinged.<cfg>.<ama>.<sm>.h5
-\end{verbatim}
-containing \code{raw/kinetic\_pervec}, source bookkeeping,
-\code{avg/kinetic\_spacetime}, and \code{flow\_times}.  It deliberately omits
-the two \code{avg/Z\_ring} datasets: a factor computed from a single
-configuration is not the final ensemble normalization.
+Every EMTc stores this data in \code{derived/ringed/kinetic\_pervec} and
+\code{derived/ringed/kinetic\_spacetime}.  Publishing one HDF5 path with one
+atomic rename removes the former two-file failure window.  No ringed factor is
+stored: a factor computed from one configuration is not the final ensemble
+normalization.
 
 For configuration \(c\), the stored spacetime average is
 \begin{equation}
@@ -351,7 +398,7 @@ unflowed observable.  If \(\epsilon=\code{flow\_epsilon}\), then
 The first flow interval is internally split into ten smaller updates:
 \begin{verbatim}
 for step in range(Nsteps + 1):
-    measure Tmunu and CHI
+    measure primitive bilinears and flowed_noise_norm
     if step == 0:
         flow [xi, eta] for 10 substeps of stepsize/10
     elif step < Nsteps:
@@ -360,8 +407,8 @@ for step in range(Nsteps + 1):
 The stochastic source \(\xi\) and solution \(\eta\) are flowed together as one
 \code{MultiField}.  This keeps both fields on the same flowed gauge background.
 After all flow steps are measured, the code extracts
-\code{raw/kinetic\_pervec} algebraically from the stored \(q=0\) diagonal
-tensor entries and writes the kinetic companion on MPI rank zero.
+\code{derived/ringed/kinetic\_pervec} algebraically from the stored \(q=0\)
+vector derivative diagonals in the same EMTc.
 
 \subsection{Four-Dimensional Fermion Flow and the Time-Slice Projector}
 \label{sec:full_volume_flow_source}
@@ -564,23 +611,33 @@ For example, with \(\code{n\_vec}=1\) and
 The production measurement writes validated base/HP shards and the explicit
 finalizer streams them into the canonical file.  The main raw datasets are
 \begin{align}
-  \code{raw/Tmunu\_pervec}
+  \code{raw/local\_bilinear\_pervec}
   &:
-  [N_{\mathrm{eff}},4,4,N_q,N_{\mathrm{steps}}+1,N_t],
+  [N_{\mathrm{eff}},16,N_q,N_{\mathrm{steps}}+1,N_t],
   \\
-  \code{raw/CHI\_pervec}
+  \code{raw/derivative\_bilinear\_pervec}
   &:
-  [N_{\mathrm{eff}},2,N_q,N_{\mathrm{steps}}+1,N_t].
+  [N_{\mathrm{eff}},16,4,N_q,N_{\mathrm{steps}}+1,N_t],
+  \\
+  \code{raw/flowed\_noise\_norm\_pervec}
+  &:
+  [N_{\mathrm{eff}},N_q,N_{\mathrm{steps}}+1,N_t].
 \end{align}
 The averaged datasets are
 \begin{align}
+  \code{avg/local\_bilinear}
+  &:[16,N_q,N_{\mathrm{steps}}+1,N_t],
+  \\
+  \code{avg/derivative\_bilinear}
+  &:[16,4,N_q,N_{\mathrm{steps}}+1,N_t],
+  \\
   \code{avg/Tmunu/T11},\code{T12},\ldots,\code{T44}
   &:
   [N_q,N_{\mathrm{steps}}+1,N_t],
   \\
-  \code{avg/CHI}
+  \code{avg/flowed\_noise\_norm}
   &:
-  [2,N_q,N_{\mathrm{steps}}+1,N_t].
+  [N_q,N_{\mathrm{steps}}+1,N_t].
 \end{align}
 Only \(\mu\leq\nu\) tensor components are written in the averaged
 \code{avg/Tmunu} group.
@@ -591,26 +648,20 @@ The canonical loop file is source independent:
 \end{center}
 It stores every absolute insertion time and is reused for all hadron two-point
 source times on the same configuration.
+Before forming a disconnected three-point product, analysis applies
+\code{roll(time\_axis,-source\_t)} to both quark and gluon loops.  Thus output
+index \(\tau_{\rm rel}\) represents
+\(\tau_{\rm abs}=(t_0+\tau_{\rm rel})\bmod N_t\).
 
-The source-matched kinetic companion is
-\begin{center}
-  \code{FlowedQuarkRinged/<lat>.FlowedQuarkRinged.<cfg>.<ama>.<sm>.h5}.
-\end{center}
-Its kinetic-only schema is
+The embedded kinetic-only schema is
 \begin{verbatim}
-flow_times
-raw/kinetic_pervec
-raw/source_index
-raw/base_noise_index
-raw/hp_index
-raw/spin_index
-raw/color_index
-avg/kinetic_spacetime
+derived/ringed/kinetic_pervec
+derived/ringed/kinetic_spacetime
 \end{verbatim}
-The spin and color indices are \(-1\) because EMT uses full spin--color noise
-rather than point spin--color dilution.  Attributes
-\code{producer=emt\_quark\_1pt}, \code{content=kinetic\_only}, and
-\code{ringed\_factors\_stored=False} distinguish this subset from a full
+EMT uses full spin--color noise rather than point spin--color dilution.
+The group attributes record the unique zero-momentum index, the
+\(-2/\Vthree\) relation, and that ringed factors are not stored.
+\code{ringed\_factors\_stored=False} distinguishes this subset from a full
 standalone output.  The counter-noise configuration, stream, algorithm, HP
 ordering, Dirac parameters, gauge preprocessing, boundary condition, flow
 schedule, and exact EMT-to-kinetic relation are recorded alongside it.
@@ -645,8 +696,8 @@ finalizer runs where all parts have been collected and requires complete
 coverage of bases \(0,\ldots,N_{\mathrm{base}}-1\).  It checks each expected
 part once while streaming raw datasets into a temporary canonical EMTc file, accumulates the
 averages without holding the complete source axis in memory, and derives the
-kinetic companion from the \(q=0\) diagonal tensor.  The completed companion is
-published before the canonical EMTc file, so downstream analysis never sees a
+EMT and embedded kinetic data from the four vector derivative channels.  One
+atomic rename publishes the complete EMTc, so downstream analysis cannot see a
 new loop without its matching kinetic data.  Non-overlapping base ranges may be
 scheduled independently; overlapping jobs are unsupported.
 
@@ -659,8 +710,14 @@ mismatch failures.
 
 The exact quark dataset and attribute names used by downstream scripts are:
 \begin{verbatim}
-raw/Tmunu_pervec
-raw/CHI_pervec
+gamma_list
+gamma_pyquda_ids
+gamma_matrices
+physical_from_pyquda
+derivative_directions
+raw/local_bilinear_pervec
+raw/derivative_bilinear_pervec
+raw/flowed_noise_norm_pervec
 raw/source_index
 raw/base_noise_index
 raw/hp_index
@@ -669,7 +726,11 @@ avg/Tmunu/T12
 avg/Tmunu/T22
 avg/Tmunu/T33
 avg/Tmunu/T44
-avg/CHI
+avg/local_bilinear
+avg/derivative_bilinear
+avg/flowed_noise_norm
+derived/ringed/kinetic_pervec
+derived/ringed/kinetic_spacetime
 noise_scheme
 hp_num_vectors
 effective_n_inversions
@@ -891,7 +952,9 @@ contains a minimal four-step diagnostic workflow:
         three-point objects.
 \end{enumerate}
 
-For the quark loop, the builder reads \code{raw/Tmunu\_pervec} and forms
+For the quark loop, the builder reads
+\code{raw/derivative\_bilinear\_pervec}, reconstructs the symmetric vector EMT,
+and forms
 cumulative stochastic averages
 \begin{equation}
   \overline{L}^{q,N}_{\mu\nu}(q,t;\Tf)
@@ -971,14 +1034,15 @@ signals.  Useful smoke-test checks are:
 \begin{itemize}
   \item the code runs on the intended backend;
   \item \code{flow\_times} contains step \(0\) and the requested flow times;
-  \item \code{upper\_triangle\_only=True};
+  \item \code{derived\_emt\_upper\_triangle\_only=True};
   \item quark raw datasets have the expected
-        \([N_{\mathrm{eff}},4,4,N_q,N_{\mathrm{steps}}+1,N_t]\) and
+        \([N_{\mathrm{eff}},16,N_q,N_{\mathrm{steps}}+1,N_t]\),
+        \([N_{\mathrm{eff}},16,4,N_q,N_{\mathrm{steps}}+1,N_t]\), and
         \([N_{\mathrm{eff}},2,N_q,N_{\mathrm{steps}}+1,N_t]\) shapes;
   \item HP runs have consistent \code{raw/source\_index},
         \code{raw/base\_noise\_index}, and \code{raw/hp\_index};
-  \item gluon datasets contain \code{Tmunu/T11} through \code{T44} but no
-        stochastic \code{raw/Tmunu\_pervec}.
+  \item gluon datasets contain \code{Tmunu/T11} through \code{T44} and no
+        stochastic quark primitive datasets.
 \end{itemize}
 
 \section{Recommended Next Algorithmic Upgrade}

@@ -36,8 +36,18 @@ from pyquda_measurement_utils.disconnected_shards import (
     write_raw_part_hdf5,
 )
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
+from pyquda_measurement_utils.fermion_bilinear_basis import (
+    GAMMA_LABELS,
+    PYQUDA_GAMMA_IDS,
+    VECTOR_GAMMA_POSITIONS,
+    basis_attrs,
+    basis_metadata,
+    gamma_stack,
+    symmetric_vector_emt,
+)
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
+    array_to_numpy,
     effective_n_inversions,
     iter_noise_base_hp_interval,
     normalize_noise_scheme,
@@ -46,11 +56,10 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
 )
 
 _VALID_FLOW_TYPES = {"wilson", "symanzik"}
-my_gammas = ["5", "T", "T5", "X", "X5", "Y", "Y5", "Z", "Z5", "I", "SXT", "SXY", "SXZ", "SYT", "SYZ", "SZT"]
-pyquda_gammas_order = [15, 8, 7, 1, 14, 2, 13, 4, 11, 0, 9, 3, 5, 10, 6, 12]
+EMT_OPERATOR_SCHEMA_VERSION = 3
+my_gammas = list(GAMMA_LABELS)
+pyquda_gammas_order = list(PYQUDA_GAMMA_IDS)
 my_pyquda_gammas = [gamma.gamma(idx) for idx in pyquda_gammas_order]
-D_GAMMA_IDS = [1, 2, 4, 8]
-D_gammas = [gamma.gamma(idx) for idx in D_GAMMA_IDS]
 G5 = gamma.gamma(15)
 
 
@@ -67,12 +76,6 @@ def _array_on_backend(val, ref_arr):
     if hasattr(val, "get"):
         val = val.get()
     return _asarray_on_queue(val, xp, ref_arr)
-
-
-def _gamma_list_on_backend(gamma_list, ref_arr):
-    xp = _get_xp_from_array(ref_arr)
-    gamma_arrays = [_array_on_backend(_gamma_matrix(gamma_item), ref_arr) for gamma_item in gamma_list]
-    return xp.stack(gamma_arrays)
 
 
 def _normalize_flow_type(flow_type: str) -> str:
@@ -95,28 +98,39 @@ def _unique_zero_momentum_index(momentum_list):
     ]
     if len(zero_indices) != 1:
         raise ValueError(
-            "ringed kinetic output requires qext to contain exactly one zero momentum; "
+            "EMT quark 1pt requires qext to contain exactly one zero momentum; "
             f"found {len(zero_indices)}"
         )
     return zero_indices[0]
 
 
-def ringed_kinetic_pervec_from_emt(Tmunu_pervec, zero_momentum_index, spatial_volume):
-    """Extract the ringed kinetic timeslices from raw EMT diagonal components."""
-    tensor = np.asarray(Tmunu_pervec)
-    if tensor.ndim != 6 or tensor.shape[1:3] != (4, 4):
+def emt_tensor_from_derivative_bilinear(derivative_bilinear):
+    """Derive the symmetric vector EMT with shape ``[...,4,4,Nq,Nflow,Nt]``."""
+    return symmetric_vector_emt(derivative_bilinear, gamma_axis=1, derivative_axis=2)
+
+
+def ringed_kinetic_pervec_from_derivative(
+    derivative_bilinear_pervec, zero_momentum_index, spatial_volume
+):
+    """Extract ringed kinetic timeslices from vector derivative diagonals."""
+    derivative = np.asarray(derivative_bilinear_pervec)
+    if derivative.ndim != 6 or derivative.shape[1:3] != (16, 4):
         raise ValueError(
-            "Tmunu_pervec should have shape [N_eff,4,4,Nq,Nflow,Nt], "
-            f"got {tensor.shape}"
+            "derivative_bilinear_pervec should have shape "
+            "[N_eff,16,4,Nq,Nflow,Nt], "
+            f"got {derivative.shape}"
         )
     q0_index = int(zero_momentum_index)
-    if not 0 <= q0_index < tensor.shape[3]:
-        raise ValueError(f"zero_momentum_index {q0_index} outside Nq={tensor.shape[3]}")
+    if not 0 <= q0_index < derivative.shape[3]:
+        raise ValueError(f"zero_momentum_index {q0_index} outside Nq={derivative.shape[3]}")
     spatial_volume = int(spatial_volume)
     if spatial_volume <= 0:
         raise ValueError(f"spatial_volume should be positive, got {spatial_volume}")
 
-    diagonal_sum = sum(tensor[:, mu, mu, q0_index, :, :] for mu in range(4))
+    diagonal_sum = sum(
+        derivative[:, gamma_pos, mu, q0_index, :, :]
+        for mu, gamma_pos in enumerate(VECTOR_GAMMA_POSITIONS)
+    )
     return (-2.0 / spatial_volume) * diagonal_sum
 
 
@@ -137,23 +151,17 @@ class EMTDisconnectedQuark1pt:
 
     def __init__(self, parameters):
         self.qlist = parameters["qext"]
-        self.pf = parameters["pf"]
-        self.pilist = parameters["p_2pt"]
-
-        self.CG_GaussSmear = parameters.get("CG_GaussSmear", False)
-        self.pos_boost = parameters["pos_boost"]
-        self.neg_boost = parameters["neg_boost"]
-        self.width = parameters["width"]
 
         self.flow_type = _normalize_flow_type(parameters["flow_type"])
         self.flow_epsilon = parameters["flow_epsilon"]
         self.flow_steps = parameters["flow_steps"]
         self.config_num = parameters.get("config_num")
+        self.gauge_preprocessing = parameters.get(
+            "gauge_preprocessing", "unspecified"
+        )
         self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
         self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
         self.hp_ordering = parameters.get("hp_ordering", "interleaved_xyz_binary_projected_to_evenodd")
-        self.nc = int(parameters.get("Nc", 3))
-        self.gauge_preprocessing = parameters.get("gauge_preprocessing", "unspecified")
         self.flavor_convention = parameters.get(
             "flavor_convention",
             "single_flavor_trace_for_this_dirac_operator",
@@ -166,11 +174,7 @@ class EMTDisconnectedQuark1pt:
 
     @staticmethod
     def _gamma_stack_for(ref_arr):
-        return _gamma_list_on_backend(my_pyquda_gammas, ref_arr)
-
-    @staticmethod
-    def _dirac_gammas_for(ref_arr):
-        return _gamma_list_on_backend(D_gammas, ref_arr)
+        return gamma_stack(ref_arr)
 
     @classmethod
     def _get_interpolator_gamma_for(cls, interpolator, ref_arr):
@@ -187,51 +191,75 @@ class EMTDisconnectedQuark1pt:
         )
         return getMPIComm().bcast(slice_t, root=0)
 
-    def _get_Tmunu_symmetrized_P_Breit_slice(
+    @staticmethod
+    def _project_gamma_fields(gamma_fields, phases_3pt):
+        """Project ``[gamma,site]`` scalar fields and preserve absolute time."""
+        projected = contract("qwtzyx,gwtzyx->gqt", phases_3pt, gamma_fields)
+        slice_t = core.gatherLattice(array_to_numpy(projected), [2, -1, -1, -1])
+        return getMPIComm().bcast(slice_t, root=0)
+
+    def _get_primitive_bilinears_P_Breit_slice(
         self,
         U_f: LatticeGauge,
         xi: LatticeFermion,
         eta: LatticeFermion,
         phases_3pt,
     ):
-        """Build flowed quark 1pt EMT and scalar diagnostics."""
+        """Build all local/one-derivative bilinears and the flowed-noise norm."""
         Nt = U_f.latt_info.global_size[3]
         Nq = len(phases_3pt)
 
-        CHI = np.zeros([2, Nq, Nt], dtype=np.complex128)
-        dot_xi_eta = contract("etzyxbc,etzyxbc->etzyx", xi.data.conj(), eta.data)
-        CHI[0] = self._impose_P_Breit_slice(dot_xi_eta, phases_3pt)
+        gamma_ls = self._gamma_stack_for(eta.data)
+        local_fields = contract(
+            "wtzyxia,gij,wtzyxja->gwtzyx",
+            xi.data.conj(), gamma_ls, eta.data,
+        )
+        local = np.asarray(self._project_gamma_fields(local_fields, phases_3pt))
+        del local_fields
+
         dot_xi_xi = contract("etzyxbc,etzyxbc->etzyx", xi.data.conj(), xi.data)
-        CHI[1] = self._impose_P_Breit_slice(dot_xi_xi, phases_3pt)
+        flowed_noise_norm = np.asarray(
+            self._impose_P_Breit_slice(dot_xi_xi, phases_3pt)
+        )
+        del dot_xi_xi
 
-        Tmunu = np.zeros([4, 4, Nq, Nt], dtype=np.complex128)
+        derivative = np.zeros([16, 4, Nq, Nt], dtype=np.complex128)
         U_f.gauge_dirac.loadGauge(U_f)
-        D_gammas_local = self._dirac_gammas_for(eta.data)
         for mu in range(4):
-            tmp = U_f.pure_gauge.covDev(eta, mu) - U_f.pure_gauge.covDev(eta, mu + 4)
-            for nu in range(4):
-                Y = contract("ab,...bc->...ac", D_gammas_local[nu], tmp.data)
-                complex_field = contract("...sc,...sc->...", xi.data.conj(), Y)
-                Tmunu[nu, mu] += -0.5 * self._impose_P_Breit_slice(complex_field, phases_3pt)
+            derivative_right = U_f.pure_gauge.covDev(eta, mu)
+            derivative_left = U_f.pure_gauge.covDev(eta, mu + 4)
+            tmp = derivative_right - derivative_left
+            derivative_fields = contract(
+                "wtzyxia,gij,wtzyxja->gwtzyx",
+                xi.data.conj(), gamma_ls, tmp.data,
+            )
+            derivative[:, mu] = -0.5 * np.asarray(
+                self._project_gamma_fields(derivative_fields, phases_3pt)
+            )
+            del derivative_fields, tmp, derivative_right, derivative_left
 
-        for mu in range(4):
-            for nu in range(mu + 1, 4):
-                Tmunu[mu, nu] = (Tmunu[mu, nu] + Tmunu[nu, mu]) / 2
-                Tmunu[nu, mu] = Tmunu[mu, nu]
-
-        return Tmunu, CHI
+        return local, derivative, flowed_noise_norm
 
     def _measure_flowed_source(self, U, xi, eta, phases_3pt):
         n_flow = self.flow_steps + 1
         nt = U.latt_info.global_size[3]
-        tmunu = np.zeros((4, 4, len(self.qlist), n_flow, nt), dtype=np.complex128)
-        chi = np.zeros((2, len(self.qlist), n_flow, nt), dtype=np.complex128)
+        local = np.zeros((16, len(self.qlist), n_flow, nt), dtype=np.complex128)
+        derivative = np.zeros((16, 4, len(self.qlist), n_flow, nt), dtype=np.complex128)
+        flowed_noise_norm = np.zeros(
+            (len(self.qlist), n_flow, nt), dtype=np.complex128
+        )
         U_f = U.copy()
         U_f.setAntiPeriodicT()
         for step in range(n_flow):
-            mpi_print(U_f.latt_info, f"calc Tmunu, step = {step}")
-            tmunu[:, :, :, step], chi[:, :, step] = self._get_Tmunu_symmetrized_P_Breit_slice(
+            mpi_print(U_f.latt_info, f"calc primitive bilinears, step = {step}")
+            (
+                local[:, :, step],
+                derivative[:, :, :, step],
+                flowed_noise_norm[:, step],
+            ) = (
+                self._get_primitive_bilinears_P_Breit_slice(
                 U_f, xi, eta, phases_3pt
+                )
             )
             if step < self.flow_steps:
                 if step == 0:
@@ -240,27 +268,33 @@ class EMTDisconnectedQuark1pt:
                     n_steps, step_size = 1, self.flow_epsilon
                 flowed = U_f.gradientFlow(convert.multiField([xi, eta]), self.flow_type, n_steps, step_size)
                 xi, eta = flowed[0], flowed[1]
-        return tmunu, chi
+        return local, derivative, flowed_noise_norm
 
     def _measurement_attrs(self, latt_info, invPara, randPara, counter_config, counter_stream, n_eff, spatial_volume):
         n_vec, n_zn, _ = randPara
         mass, csw, tol, maxiter = invPara
-        return {
+        attrs = {
             "measurement": "quark_1pt",
+            "emt_operator_schema_version": EMT_OPERATOR_SCHEMA_VERSION,
             "flow_type": self.flow_type,
             "flow_epsilon": self.flow_epsilon,
             "flow_steps": self.flow_steps,
             "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
             "qext": np.asarray(self.qlist, dtype=np.int32),
-            "pf": np.asarray(self.pf, dtype=np.int32),
-            "p_2pt": np.asarray(self.pilist, dtype=np.int32),
             "volume_norm": spatial_volume,
-            "upper_triangle_only": True,
+            "primitive_local_axes": "source,gamma,q,flow,t",
+            "primitive_derivative_axes": "source,gamma,derivative,q,flow,t",
+            "flowed_noise_norm_axes": "source,q,flow,t",
+            "primitive_derivative_unsymmetrized": True,
+            "derived_emt_axes": "source,mu,nu,q,flow,t",
+            "derived_emt_upper_triangle_only": True,
             "operator_normalization": "unrenormalized_flowed_quark_bilinear",
             "renormalization_applied": False,
             "renormalization_stage": "analysis_stage",
             "flavor_convention": self.flavor_convention,
-            "derivative_convention": "Tmunu[nu,mu]=-0.5*xi_dag*gamma_nu*(Dplus_mu-Dminus_mu)*eta; symmetrized",
+            "local_bilinear_convention": "xi_dag*Gamma_A*eta",
+            "derivative_convention": "L_D[A,mu]=-0.5*xi_dag*Gamma_A*(Dplus_mu-Dminus_mu)*eta; unsymmetrized",
+            "emt_derivation": "B[nu,mu]=L_D[gamma_nu,mu]; T=0.5*(B+B_transpose)",
             "mass": mass,
             "csw": csw,
             "tol": tol,
@@ -279,6 +313,8 @@ class EMTDisconnectedQuark1pt:
             "hp_num_vectors": self.hp_num_vectors,
             "hp_ordering": self.hp_ordering,
         }
+        attrs.update(basis_attrs())
+        return attrs
 
     def _measure_base_shards(
         self, U, dirac, invPara, randPara, tag, phases_3pt, attrs,
@@ -296,6 +332,7 @@ class EMTDisconnectedQuark1pt:
         common_attrs["block_interval_solves"] = int(block_interval_solves)
         nt = U.latt_info.global_size[3]
         n_flow = self.flow_steps + 1
+        operator_metadata = basis_metadata()
         comm = getMPIComm()
 
         for base_idx in selected_base_range(n_vec, base_start, base_stop):
@@ -309,8 +346,11 @@ class EMTDisconnectedQuark1pt:
                     common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
                 )
                 raw_shapes = {
-                    "Tmunu_pervec": (count, 4, 4, len(self.qlist), n_flow, nt),
-                    "CHI_pervec": (count, 2, len(self.qlist), n_flow, nt),
+                    "local_bilinear_pervec": (count, 16, len(self.qlist), n_flow, nt),
+                    "derivative_bilinear_pervec": (count, 16, 4, len(self.qlist), n_flow, nt),
+                    "flowed_noise_norm_pervec": (
+                        count, len(self.qlist), n_flow, nt
+                    ),
                     "source_index": (count,),
                     "base_noise_index": (count,),
                     "hp_index": (count,),
@@ -318,8 +358,11 @@ class EMTDisconnectedQuark1pt:
                 bookkeeping = part_source_bookkeeping(
                     base_idx, hp_start, hp_stop, hp_count
                 )
-                tmunu_part = np.zeros(raw_shapes["Tmunu_pervec"], dtype=np.complex128)
-                chi_part = np.zeros(raw_shapes["CHI_pervec"], dtype=np.complex128)
+                local_part = np.zeros(raw_shapes["local_bilinear_pervec"], dtype=np.complex128)
+                derivative_part = np.zeros(raw_shapes["derivative_bilinear_pervec"], dtype=np.complex128)
+                norm_part = np.zeros(
+                    raw_shapes["flowed_noise_norm_pervec"], dtype=np.complex128
+                )
                 for _, _, hp_idx, xi in iter_noise_base_hp_interval(
                     U.latt_info, base_idx, hp_start, hp_stop, n_zn,
                     self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
@@ -330,15 +373,22 @@ class EMTDisconnectedQuark1pt:
                     # The previous source leaves a flowed gauge resident in QUDA.
                     dirac.loadGauge(U)
                     eta = dirac.invert(xi)
-                    tmunu_part[local_idx], chi_part[local_idx] = self._measure_flowed_source(
-                        U, xi, eta, phases_3pt
-                    )
+                    (
+                        local_part[local_idx],
+                        derivative_part[local_idx],
+                        norm_part[local_idx],
+                    ) = self._measure_flowed_source(U, xi, eta, phases_3pt)
                 if U.latt_info.mpi_rank == 0:
                     write_raw_part_hdf5(
                         path,
-                        {"Tmunu_pervec": tmunu_part, "CHI_pervec": chi_part},
+                        {
+                            "local_bilinear_pervec": local_part,
+                            "derivative_bilinear_pervec": derivative_part,
+                            "flowed_noise_norm_pervec": norm_part,
+                        },
                         write_attrs,
                         bookkeeping,
+                        metadata_datasets=operator_metadata,
                     )
                 comm.Barrier()
 
@@ -355,7 +405,6 @@ class EMTDisconnectedQuark1pt:
         invPara,
         randPara,
         tag: str = "",
-        ringed_tag=None,
         shard_dir=None,
         sample_log_file=None,
         base_start=0,
@@ -371,12 +420,7 @@ class EMTDisconnectedQuark1pt:
         global_size = latt_info.global_size
         Ns3 = global_size[0] * global_size[1] * global_size[2]
 
-        if ringed_tag is not None:
-            if not str(ringed_tag).strip():
-                raise ValueError("ringed_tag should be non-empty when ringed kinetic output is enabled")
-            q0_index = _unique_zero_momentum_index(self.qlist)
-        else:
-            q0_index = None
+        _unique_zero_momentum_index(self.qlist)
 
         if self.config_num is None:
             raise ValueError("config_num is required for counter-based disconnected noise")
@@ -518,17 +562,28 @@ def _copy_h5_attrs(obj, attrs):
             obj.attrs[key] = value
 
 
-def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, ringed_tag, n_base_noise):
-    """Validate complete EMT base shards and atomically build canonical outputs."""
+def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
+    """Validate complete EMT base shards and atomically build one EMTc output."""
     n_base_noise = int(n_base_noise)
     manifest = discover_shard_layout(
         shard_dir, canonical_tag, n_base_noise,
-        raw_dataset_names=("Tmunu_pervec", "CHI_pervec"),
+        raw_dataset_names=(
+            "local_bilinear_pervec",
+            "derivative_bilinear_pervec",
+            "flowed_noise_norm_pervec",
+        ),
+        metadata_dataset_names=tuple(basis_metadata()),
     )
     reference_attrs = manifest["reference_attrs"]
-    source_shape = manifest["raw_tails"]["Tmunu_pervec"]
-    chi_shape = manifest["raw_tails"]["CHI_pervec"]
-    all_parts = manifest["parts"]
+    schema_version = int(reference_attrs.get("emt_operator_schema_version", -1))
+    if schema_version != EMT_OPERATOR_SCHEMA_VERSION:
+        raise ValueError(
+            "EMT shards require emt_operator_schema_version="
+            f"{EMT_OPERATOR_SCHEMA_VERSION}; found {schema_version}"
+        )
+    local_shape = manifest["raw_tails"]["local_bilinear_pervec"]
+    derivative_shape = manifest["raw_tails"]["derivative_bilinear_pervec"]
+    norm_shape = manifest["raw_tails"]["flowed_noise_norm_pervec"]
     total_sources = manifest["total_sources"]
     canonical_attrs = {
         key: value for key, value in reference_attrs.items()
@@ -542,87 +597,108 @@ def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, ringed_tag, n_base_n
     })
     q0_index = _unique_zero_momentum_index(canonical_attrs["qext"])
     spatial_volume = int(canonical_attrs["volume_norm"])
-    n_flow = source_shape[-2]
-    nt = source_shape[-1]
+    if local_shape[:1] != (16,) or derivative_shape[:2] != (16, 4):
+        raise ValueError(
+            "EMT primitive shard axes should begin with local[16] and derivative[16,4]"
+        )
+    n_flow = derivative_shape[-2]
+    nt = derivative_shape[-1]
 
     final_path, temp_path = canonical_temp_path(canonical_tag)
-    ringed_path, ringed_temp = canonical_temp_path(ringed_tag)
-    with h5py.File(temp_path, "w") as out, h5py.File(ringed_temp, "w") as ringed:
+    with h5py.File(temp_path, "w") as out:
         _copy_h5_attrs(out, canonical_attrs)
+        for name, values in manifest["metadata"].items():
+            out.create_dataset(name, data=values)
         raw = out.require_group("raw")
-        raw_t = raw.create_dataset("Tmunu_pervec", shape=(total_sources,) + source_shape, dtype=np.complex128)
-        raw_chi = raw.create_dataset("CHI_pervec", shape=(total_sources,) + chi_shape, dtype=np.complex128)
+        raw_local = raw.create_dataset(
+            "local_bilinear_pervec",
+            shape=(total_sources,) + local_shape,
+            dtype=np.complex128,
+        )
+        raw_derivative = raw.create_dataset(
+            "derivative_bilinear_pervec",
+            shape=(total_sources,) + derivative_shape,
+            dtype=np.complex128,
+        )
+        raw_norm = raw.create_dataset(
+            "flowed_noise_norm_pervec",
+            shape=(total_sources,) + norm_shape,
+            dtype=np.complex128,
+        )
         source_datasets = {
             name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
             for name in ("source_index", "base_noise_index", "hp_index")
         }
-        t_sum = np.zeros(source_shape, dtype=np.complex128)
-        chi_sum = np.zeros(chi_shape, dtype=np.complex128)
+        local_sum = np.zeros(local_shape, dtype=np.complex128)
+        derivative_sum = np.zeros(derivative_shape, dtype=np.complex128)
+        t_sum = np.zeros((4, 4) + derivative_shape[2:], dtype=np.complex128)
+        norm_sum = np.zeros(norm_shape, dtype=np.complex128)
 
-        ringed_attrs = dict(canonical_attrs)
-        ringed_attrs.update({
-            "measurement": "flowed_quark_ringed_norm",
-            "producer": "emt_quark_1pt",
-            "content": "kinetic_only",
-            "normalization_scope": "all_flowed_quark_fields",
-            "operator": "bar_chi_overleftrightarrow_Dslash_chi",
-            "Nc": 3,
-            "spin_color_dilution": "none",
-            "spin_color_dilution_factor": 1,
-            "spin_color_trace_factor": 1,
-            "site_noise_scope": "site_spin_color",
-            "kinetic_source": "raw_Tmunu_pervec_zero_momentum_diagonal_trace",
-            "kinetic_relation": "K_pervec=-2*sum_mu(Tmunu_pervec[mu,mu,q0])/spatial_volume",
+        ringed = out.require_group("derived/ringed")
+        ringed_attrs = {
+            "kinetic_pervec_axes": "source,flow,t",
+            "kinetic_spacetime_axes": "flow",
+            "kinetic_source": "raw_derivative_bilinear_pervec_vector_diagonal_at_zero_momentum",
+            "kinetic_relation": "K_pervec=-2*sum_mu(L_D[gamma_mu,mu,q0])/spatial_volume",
             "zero_momentum_index": q0_index,
             "ringed_factors_stored": False,
             "ringed_factor_stage": "ensemble_analysis_from_configuration_averaged_kinetic",
-        })
-        _copy_h5_attrs(ringed, ringed_attrs)
-        ringed.create_dataset("flow_times", data=np.asarray(canonical_attrs["flow_times"], dtype=np.float64))
-        ring_raw = ringed.require_group("raw")
-        ring_k = ring_raw.create_dataset("kinetic_pervec", shape=(total_sources, n_flow, nt), dtype=np.complex128)
-        ring_sources = {
-            name: ring_raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
-            for name in ("source_index", "base_noise_index", "hp_index", "spin_index", "color_index")
         }
+        _copy_h5_attrs(ringed, ringed_attrs)
+        ring_k = ringed.create_dataset(
+            "kinetic_pervec",
+            shape=(total_sources, n_flow, nt),
+            dtype=np.complex128,
+        )
         kinetic_sum = np.zeros(n_flow, dtype=np.complex128)
 
         for part_info, part in iter_validated_shard_parts(manifest):
             start = part_info["output_start"]
             stop = part_info["output_stop"]
-            t_data = part["raw/Tmunu_pervec"][()]
-            chi_data = part["raw/CHI_pervec"][()]
-            raw_t[start:stop] = t_data
-            raw_chi[start:stop] = chi_data
+            local_data = part["raw/local_bilinear_pervec"][()]
+            derivative_data = part["raw/derivative_bilinear_pervec"][()]
+            norm_data = part["raw/flowed_noise_norm_pervec"][()]
+            raw_local[start:stop] = local_data
+            raw_derivative[start:stop] = derivative_data
+            raw_norm[start:stop] = norm_data
+            local_sum += np.sum(local_data, axis=0)
+            derivative_sum += np.sum(derivative_data, axis=0)
+            t_data = emt_tensor_from_derivative_bilinear(derivative_data)
             t_sum += np.sum(t_data, axis=0)
-            chi_sum += np.sum(chi_data, axis=0)
+            norm_sum += np.sum(norm_data, axis=0)
             for name, dataset in source_datasets.items():
                 dataset[start:stop] = part[f"raw/{name}"][()]
-            kinetic = ringed_kinetic_pervec_from_emt(t_data, q0_index, spatial_volume)
+            kinetic = ringed_kinetic_pervec_from_derivative(
+                derivative_data, q0_index, spatial_volume
+            )
             ring_k[start:stop] = kinetic
             kinetic_sum += np.sum(kinetic, axis=(0, -1))
-            for name in ("source_index", "base_noise_index", "hp_index"):
-                ring_sources[name][start:stop] = part[f"raw/{name}"][()]
-            ring_sources["spin_index"][start:stop] = -1
-            ring_sources["color_index"][start:stop] = -1
 
         avg = out.require_group("avg")
-        avg.create_dataset("CHI", data=chi_sum / total_sources / spatial_volume)
+        avg.create_dataset(
+            "local_bilinear", data=local_sum / total_sources / spatial_volume
+        )
+        avg.create_dataset(
+            "derivative_bilinear",
+            data=derivative_sum / total_sources / spatial_volume,
+        )
+        avg.create_dataset(
+            "flowed_noise_norm",
+            data=norm_sum / total_sources / spatial_volume,
+        )
         avg_t = avg.require_group("Tmunu")
         avg_t.attrs["upper_triangle_only"] = True
         t_avg = t_sum / total_sources / spatial_volume
         for mu in range(4):
             for nu in range(mu, 4):
                 avg_t.create_dataset(f"T{mu+1}{nu+1}", data=t_avg[mu, nu])
-        ringed.require_group("avg").create_dataset(
+        ringed.create_dataset(
             "kinetic_spacetime", data=kinetic_sum / total_sources / nt
         )
         out.flush()
-        ringed.flush()
 
-    os.replace(ringed_temp, ringed_path)
     os.replace(temp_path, final_path)
-    return str(final_path), str(ringed_path)
+    return str(final_path)
 
 
 class EMTDisconnectedGluon1pt:
@@ -630,17 +706,14 @@ class EMTDisconnectedGluon1pt:
 
     def __init__(self, parameters):
         self.qlist = parameters["qext"]
-        self.pf = parameters["pf"]
-        self.pilist = parameters["p_2pt"]
-
-        self.pos_boost = parameters["pos_boost"]
-        self.neg_boost = parameters["neg_boost"]
-        self.width = parameters["width"]
 
         self.flow_type = _normalize_flow_type(parameters["flow_type"])
         self.flow_epsilon = parameters["flow_epsilon"]
         self.flow_steps = parameters["flow_steps"]
         self.config_num = parameters.get("config_num")
+        self.gauge_preprocessing = parameters.get(
+            "gauge_preprocessing", "unspecified"
+        )
 
     def _advance_flowed_gauge(self, U_flow, step, stepsize, Nsteps):
         """Advance the flowed gauge field using the gluon-flow schedule."""
@@ -744,11 +817,11 @@ class EMTDisconnectedGluon1pt:
             "flow_steps": self.flow_steps,
             "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
             "qext": np.asarray(self.qlist, dtype=np.int32),
-            "pf": np.asarray(self.pf, dtype=np.int32),
-            "p_2pt": np.asarray(self.pilist, dtype=np.int32),
             "volume_norm": Ns3,
             "upper_triangle_only": True,
             "operator_normalization": "flowed_gluon_bilinear",
+            "gauge_preprocessing": self.gauge_preprocessing,
+            "t_boundary": latt_info.t_boundary,
             "renormalization_applied": False,
             "renormalization_stage": "analysis_stage",
         }
@@ -761,6 +834,7 @@ class EMTDisconnectedGluon1pt:
 __all__ = [
     "EMTDisconnectedQuark1pt",
     "EMTDisconnectedGluon1pt",
+    "EMT_OPERATOR_SCHEMA_VERSION",
     "my_gammas",
     "validate_quark_gluon_loop_axes",
 ]

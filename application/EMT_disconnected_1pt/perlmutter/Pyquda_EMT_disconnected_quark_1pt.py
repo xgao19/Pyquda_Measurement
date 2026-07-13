@@ -1,5 +1,6 @@
 import argparse
 import os
+from pathlib import Path
 
 from pyquda import init
 from pyquda_utils import io
@@ -8,7 +9,6 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import EMTDiscon
 from pyquda_measurement_utils.disconnected_shards import disconnected_sample_log_path
 from pyquda_measurement_utils.io_corr import (
     get_emt_quark_loop_file_tag,
-    get_flowed_quark_ringed_norm_file_tag,
 )
 
 
@@ -23,24 +23,19 @@ mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 # Production knobs: ensemble paths, output tags, momentum grid,
 # gradient-flow schedule, and stochastic estimator.
 data_dir = os.environ.get("EMT_1PT_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
+repo_root = Path(__file__).resolve().parents[3]
 gauge_path = os.environ.get(
     "EMT_1PT_GAUGE_PATH",
-    "/global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0",
+    str(repo_root / "test_gauge" / "S8T32_wilson_b6.cg.1e-08.0"),
 )
 lat_tag = os.environ.get("EMT_1PT_LAT_TAG", "S8T32")
 qmax = int(os.environ.get("EMT_1PT_QMAX", "0"))
 qext = [[x, y, z, 0] for x in range(-qmax, qmax + 1) for y in range(-qmax, qmax + 1) for z in range(-qmax, qmax + 1)]
-sm_tag = os.environ.get("EMT_1PT_SM_TAG", "1HYP_GSRC_W1_k0")
+setup_tag = os.environ.get("EMT_1PT_SETUP_TAG", "1HYP")
 
 parameters = {
     "config_num": conf,
     "qext": qext,
-    "pf": [0, 0, 0, 0],
-    "p_2pt": qext,
-    "CG_GaussSmear": False,
-    "pos_boost": [0, 0, 0],
-    "neg_boost": [0, 0, 0],
-    "width": 1.0,
     "flow_type": os.environ.get("EMT_1PT_FLOW_TYPE", "wilson"),
     "flow_epsilon": float(os.environ.get("EMT_1PT_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_1PT_FLOW_STEPS", "1")),
@@ -52,8 +47,7 @@ parameters = {
         "HYP(1,0.75,0.6,0.3,4)",
     ),
 }
-quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
-ringed_tag = get_flowed_quark_ringed_norm_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
+quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, setup_tag)
 
 init(mpi_geometry, enable_mps=True)
 
@@ -86,7 +80,6 @@ quark_1pt.flowed_fermionic_1pt(
     invPara,
     randPara,
     tag=output_tag,
-    ringed_tag=os.environ.get("EMT_1PT_RINGED_OUT", ringed_tag),
     shard_dir=shard_dir,
     sample_log_file=disconnected_sample_log_path(data_dir, output_tag),
     base_start=base_start,

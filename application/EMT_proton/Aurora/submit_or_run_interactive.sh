@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
+  echo "Usage: $0 --config_num CFG" >&2
+  exit 2
+fi
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$script_dir"
 
@@ -25,6 +30,7 @@ echo "  QUDA_PATH=$QUDA_PATH"
 
 /opt/cray/pals/1.8/bin/mpiexec -n "$EMT_PROTON_NRANKS" -envall \
   bash "$script_dir/run_proton_quark_3pt.sh" \
+  "$@" \
   > "log/smoke_n${EMT_PROTON_NRANKS}.o" \
   2> "log/smoke_n${EMT_PROTON_NRANKS}.e"
 

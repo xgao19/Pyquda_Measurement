@@ -110,6 +110,14 @@ The Dirac gamma matrices relevant for derivative insertions are
 \end{equation}
 The chiral matrix is $\gamma_{5}\leftrightarrow\texttt{gamma(15)}$.
 
+These are raw PyQUDA bit-mask matrices.  The production files store
+\texttt{physical\_from\_pyquda} so that analysis can use a uniform physical
+definition.  With \(\gamma_5=\gamma_1\gamma_2\gamma_3\gamma_4\), raw
+\texttt{X5} and \texttt{Z5} already equal \(\gamma_\mu\gamma_5\), whereas raw
+\texttt{Y5} and \texttt{T5} require a minus sign.  Raw tensor masks equal
+\([\gamma_\mu,\gamma_\nu]/2\); multiply by \(i\) for the Hermitian
+\(i[\gamma_\mu,\gamma_\nu]/2\) convention.
+
 \subsection{Charge Conjugation Matrix}
 
 The charge conjugation matrix in the Euclidean DeGrand--Rossi basis is
@@ -1062,6 +1070,11 @@ After computing the full tensor, explicit symmetrization is enforced:
   C_{3,\,f,\,\nu\mu}^{q} = C_{3,\,f,\,\mu\nu}^{q}.
 \end{equation}
 This guarantees $T_{\mu\nu} = T_{\nu\mu}$ at the level of the measured data.
+The production kernel actually saves all 16 local insertion matrices and all
+\(16\times4\) unsymmetrized one-derivative insertions.  It constructs each
+forward and left-acting derivative once, batches the 16 Gamma contractions,
+and derives the displayed vector EMT from the four vector channels.  Therefore
+the extended basis adds no inversion, flow update, or derivative application.
 
 % ---------------------------------------------------------------------------
 \section{Key Differences from the Meson EMT}
@@ -1194,7 +1207,7 @@ The proton EMT measurement code is organized in the class
 The key methods of \texttt{ProtonQuarkEMT} are:
 
 \medskip\noindent
-\texttt{connected\_3pt(gauge, invPara, src\_pos, t\_separations, spin, tag, ...)}:
+\texttt{connected\_3pt(gauge, invPara, source\_jobs, interpolator, ...)}:
 \begin{itemize}
   \item Builds the Dirac solver and the forward point-source propagator
         (via \texttt{\_make\_source\_prop}).
@@ -1204,34 +1217,18 @@ The key methods of \texttt{ProtonQuarkEMT} are:
   \item Loops over $t_{\text{sep}}$ and flavor, building sequential sources
         via \texttt{create\_bw\_seq\_pyquda}.
   \item Loops over polarization and flow steps, calling
-        \texttt{get\_C3\_chi\_proton} and
-        \texttt{get\_C3\_Tmunu\_symmetrized\_proton} at each step.
+        \texttt{get\_C3\_primitive\_bilinears\_proton} once at each step and
+        deriving both \(C_3^\chi\) and \(C_3^{T_{\mu\nu}}\).
   \item Advances the flow between steps.
   \item Saves results to HDF5.
 \end{itemize}
 
 \medskip\noindent
-\texttt{get\_C3\_chi\_proton(latt\_info, prop\_fw, seq\_data, phases\_3pt, t0)}:
+\texttt{get\_C3\_primitive\_bilinears\_proton(U\_f, prop\_fw, raw\_seq\_prop, phases\_3pt, t0)}:
 \begin{itemize}
-  \item Computes the scalar diagnostic $C_{3}^{\chi}$ by direct einsum contraction.
-\end{itemize}
-
-\medskip\noindent
-\texttt{get\_C3\_Tmunu\_symmetrized\_proton(U\_f, prop\_fw, seq\_data, phases\_3pt, t0)}:
-\begin{itemize}
-  \item Computes the full $4\times 4$ quark EMT three-point function.
-  \item Loops over $\mu,\nu$ to evaluate the first-term (derivative on forward line)
-        and second-term (derivative on sequential line) contributions.
-  \item Symmetrizes the result.
-\end{itemize}
-
-\medskip\noindent
-\texttt{\_covdev\_sym\_seq(U\_f, seq\_data, mu)}:
-\begin{itemize}
-  \item Wraps \texttt{seq\_data} as a \texttt{LatticePropagator}.
-  \item Applies the symmetric covariant derivative using
-        \texttt{\_covdev\_sym\_prop}.
-  \item Returns the derivative data.
+  \item Computes all 16 local and $16\times4$ derivative primitive channels.
+  \item Derives the scalar identity channel and symmetric vector EMT without
+        repeating covariant derivatives.
 \end{itemize}
 
 \medskip\noindent
@@ -1256,10 +1253,14 @@ separately under the \texttt{EMTproton2pt} output tree.
 \toprule
 Dataset & Shape & Description \\
 \midrule
-\texttt{C3\_chi} & \texttt{[Nflavor, Npol, Nts, Nsteps+1, Nq, t\_sep+2]}
+\texttt{C3\_chi} & \texttt{[Nflavor, Npol, Nsteps+1, Nq, t\_sep+2]}
                   & Scalar diagnostic three-point function \\
-\texttt{C3\_Tmunu} & \texttt{[Nflavor, Npol, Nts, Nsteps+1, Nq, 4, 4, t\_sep+2]}
+\texttt{C3\_Tmunu} & \texttt{[Nflavor, Npol, Nsteps+1, Nq, 4, 4, t\_sep+2]}
                     & Quark EMT three-point function \\
+\texttt{C3\_local\_bilinear} & \texttt{[Nflavor, Npol, 16, Nq, Nsteps+1, t\_sep+2]}
+                    & Complete local Dirac basis \\
+\texttt{C3\_derivative\_bilinear} & \texttt{[Nflavor, Npol, 16, 4, Nq, Nsteps+1, t\_sep+2]}
+                    & Unsymmetrized one-derivative basis \\
 \texttt{momentum\_transfer\_list} & \texttt{[Nq, 4]}
                                    & List of momentum transfer vectors \\
 \bottomrule
@@ -1270,16 +1271,17 @@ The dimensions are:
 \begin{itemize}
   \item $N_{\text{flavor}} = 2$: index 0 = up-quark insertion, index 1 = down-quark insertion;
   \item $N_{\text{pol}}$ = number of polarization states from \texttt{pol\_list} (typically 5);
-  \item $N_{\text{ts}}$ = number of source-sink separations;
+  \item one file represents one source--sink separation; \code{t\_sep} is a
+        scalar attribute and there is no singleton separation axis;
   \item $N_{\text{steps}}+1$ = number of flow times (including unflowed);
   \item $N_{q}$ = number of momentum transfers;
   \item $N_{t}$ = temporal lattice extent.
 \end{itemize}
 
-The attributes stored in the HDF5 file include the measurement type, spin,
-flow parameters, source time, interpolator, flavor/polarization axis labels,
-and the selected two-point momentum used for normalization.  Future files also
-record non-destructive convention metadata:
+The attributes store configuration, Dirac parameters, gauge preprocessing,
+temporal boundary, source position, source/sink interpolators, smearing and
+boosts, \(p_f\), \(q\), two-point momenta, flow schedule, scalar \code{t\_sep},
+and explicit dataset-axis labels.  They also record convention metadata:
 \begin{itemize}
   \item \code{operator\_normalization = unringed\_flowed\_bilinear};
   \item \code{ringed\_normalization\_applied = False};
@@ -1298,9 +1300,11 @@ The disconnected (quark loop and gluon) one-point functions are stored separatel
 by the inherited methods:
 
 \begin{itemize}
-  \item Quark 1pt: \texttt{save\_emt\_quark\_1pt\_hdf5} --
-        saves per-noise-vector data (\texttt{raw/Tmunu\_pervec}, \texttt{raw/CHI\_pervec})
-        and noise-averaged data (\texttt{avg/Tmunu/T11}--\texttt{T44}, \texttt{avg/CHI}).
+  \item Quark 1pt: the EMT shard finalizer saves per-noise-vector primitive data
+        (\texttt{raw/local\_bilinear\_pervec},
+        \texttt{raw/derivative\_bilinear\_pervec}, and
+        \texttt{raw/flowed\_noise\_norm\_pervec}) and noise-averaged primitives plus the
+        derived \texttt{avg/Tmunu/T11}--\texttt{T44}.
 
   \item Gluon 1pt: \texttt{save\_emt\_gluon\_1pt\_hdf5} --
         saves momentum-projected gluonic EMT building blocks
@@ -1483,13 +1487,12 @@ documented in the one-point file.  In the current HDF5 convention,
 where the diagonal sum is reconstructed from \code{avg/Tmunu/T11},
 \code{T22}, \code{T33}, and \code{T44}.  The quark 1pt run now performs this
 algebraic extraction from the same stochastic EMT tensor and writes
-\code{raw/kinetic\_pervec}, source bookkeeping,
-\code{avg/kinetic\_spacetime}, and \code{flow\_times} to
-\code{FlowedQuarkRinged/<lat>.FlowedQuarkRinged.<cfg>.<ama>.<sm>.h5}.
+\code{derived/ringed/kinetic\_pervec} and
+\code{derived/ringed/kinetic\_spacetime} into the same EMTc.
 This adds no inversion, flow update, derivative contraction, or gather.
 
-The companion is intentionally kinetic-only and contains no
-configuration-local ringed factors.  Average \code{avg/kinetic\_spacetime}
+The embedded group is intentionally kinetic-only and contains no
+configuration-local ringed factors.  Average \code{derived/ringed/kinetic\_spacetime}
 over gauge configurations first, then evaluate the nonlinear factor; averaging
 the inverses formed on separate configurations is incorrect.  The unflowed
 step \(t=0\) must not be used for ringed normalization because the formula
@@ -1498,7 +1501,7 @@ available for dedicated high-statistics and spin--color-diluted runs, using the
 same base/HP-part files and fingerprinted base-level sample-log model as EMT.
 The production quark one-point wrapper uses base-oriented HP-interval shards;
 an explicit streaming finalizer validates complete base coverage before
-publishing the canonical loop and kinetic companion.
+publishing one canonical EMTc with embedded kinetic data.
 
 For isospin-degenerate light \(u/d\) measurements, the same light-quark ringed
 factor should multiply the connected \(U\) and \(D\) quark EMT observables.  If a
@@ -1560,13 +1563,13 @@ Name & Description & PyQUDA ID \\
 \texttt{"Z"}  & $\gamma_{3}$           & \texttt{gamma(4)}  \\
 \texttt{"SXZ"}& $\sigma_{13}$          & \texttt{gamma(5)}  \\
 \texttt{"SYZ"}& $\sigma_{23}$          & \texttt{gamma(6)}  \\
-\texttt{"T5"} & $\gamma_{4}\gamma_{5}$ & \texttt{gamma(7)}  \\
+\texttt{"T5"} & raw $-\gamma_{4}\gamma_{5}$ & \texttt{gamma(7)}  \\
 \texttt{"T"}  & $\gamma_{4}$           & \texttt{gamma(8)}  \\
 \texttt{"SXT"}& $\sigma_{14}$          & \texttt{gamma(9)}  \\
 \texttt{"SYT"}& $\sigma_{24}$          & \texttt{gamma(10)} \\
 \texttt{"Z5"} & $\gamma_{3}\gamma_{5}$ & \texttt{gamma(11)} \\
 \texttt{"SZT"}& $\sigma_{34}$          & \texttt{gamma(12)} \\
-\texttt{"Y5"} & $\gamma_{2}\gamma_{5}$ & \texttt{gamma(13)} \\
+\texttt{"Y5"} & raw $-\gamma_{2}\gamma_{5}$ & \texttt{gamma(13)} \\
 \texttt{"X5"} & $\gamma_{1}\gamma_{5}$ & \texttt{gamma(14)} \\
 \texttt{"5"}  & $\gamma_{5}$           & \texttt{gamma(15)} \\
 \bottomrule

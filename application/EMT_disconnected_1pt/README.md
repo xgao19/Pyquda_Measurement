@@ -16,8 +16,8 @@ writes only recoverable parts; after every requested base is complete, run:
 bash perlmutter/run_finalize_quark_1pt.sh --config_num 1000
 ```
 
-The finalizer validates every base/HP interval before atomically publishing the
-canonical EMTc and kinetic-only FlowedQuarkRinged files.
+The finalizer validates every base/HP interval before atomically publishing one
+canonical EMTc file, including its embedded ringed kinetic data.
 
 The default smoke-test gauge is:
 
@@ -30,17 +30,17 @@ Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0
 The quark workflow estimates the stochastic loop
 
 ```text
-L_q,munu(q,tau;t_f) = sum_x exp(i q.x) Tr_sc[eta^\dagger(x,t_f) Gamma_munu xi(x,t_f)]
+L_q,munu(q,tau;t_f) = sum_x exp(i q.x) xi^dagger(x,t_f) Gamma_munu eta(x,t_f)
 ```
 
 where `t_f` is the gradient-flow time.  The implementation stores the
 symmetrized upper-triangle components `mu <= nu` of `Tmunu`; the missing lower
 triangle is obtained by symmetry in analysis.
 
-The quark workflow also stores `CHI` as a scalar trace and stochastic-noise
-diagnostic.  In the same run it derives the ringed-fermion kinetic trace from
-the zero-momentum diagonal EMT components and writes a kinetic-only
-`FlowedQuarkRinged` companion.  This reuses the exact EMT stochastic vectors
+The identity scalar bilinear is stored once in the full local Gamma basis.  A
+separate `flowed_noise_norm` dataset stores the flowed stochastic-source norm.
+The same EMTc derives the ringed-fermion kinetic trace from the zero-momentum
+diagonal derivative components under `derived/ringed`.  This reuses the exact EMT stochastic vectors
 and adds no inversion, fermion-flow, derivative, or MPI-gather work.  The
 standalone `application/flowed_quark_ringed_norm` workflow remains available
 for dedicated high-statistics and resumable measurements.
@@ -81,6 +81,12 @@ up to the same kinematic, renormalization, and gradient-flow matching factors
 used for the connected EMT analysis.  Vacuum subtraction must be performed at
 the ensemble-analysis level because the one-point function is hadron
 independent.
+
+The memory-bounded loop readers and absolute-to-source-relative time alignment
+used by `build_3pt` live in `application/analysis_helper`.  Application-level
+data reading and observable assembly are kept there; production measurements,
+operator contractions, and reusable computational infrastructure remain in
+`pyquda_measurement_utils`.
 
 ## Hierarchical Probing
 
@@ -168,55 +174,85 @@ Quark output:
 attrs/
   measurement
   flow_type, flow_epsilon, flow_steps, flow_times
-  qext, pf, p_2pt
+  qext
   volume_norm
-  upper_triangle_only
+  emt_operator_schema_version
+  gamma_basis_schema, gamma_basis_order
   mass, csw, tol, maxiter
   n_vec, n_base_noise, effective_n_inversions
   n_zn, config_num, noise_stream
   noise_generator, noise_counter_order
   noise_scheme, hp_num_vectors, hp_ordering
 
-raw/Tmunu_pervec
-raw/CHI_pervec
+gamma_list, gamma_pyquda_ids, gamma_matrices
+physical_gamma_list, physical_from_pyquda
+derivative_directions
+
+raw/local_bilinear_pervec
+raw/derivative_bilinear_pervec
+raw/flowed_noise_norm_pervec
 raw/source_index
 raw/base_noise_index
 raw/hp_index
 
-avg/CHI
+avg/flowed_noise_norm
+avg/local_bilinear
+avg/derivative_bilinear
 avg/Tmunu/T11, T12, ..., T44
+derived/ringed/kinetic_pervec
+derived/ringed/kinetic_spacetime
 ```
+
+The primitive shapes are
+
+```text
+raw/local_bilinear_pervec      [N_eff,16,Nq,Nflow,Nt]
+raw/derivative_bilinear_pervec [N_eff,16,4,Nq,Nflow,Nt]
+```
+
+They contain the complete PyQUDA bit-mask basis in `gamma_list` order.  The
+stored matrix `physical_from_pyquda` converts raw channels to a convention in
+which every axial channel means `gamma_mu gamma5`; in particular raw `Y5` and
+`T5` acquire a minus sign.  Raw tensor channels are
+`[gamma_mu,gamma_nu]/2`; multiply them by `1j` for the Hermitian tensor
+convention.  Primitive data are unsymmetrized and unrenormalized.
+
+The historical EMT is a derived view.  Select raw vector channels in
+`[X,Y,Z,T]` order and form
+
+```text
+B[nu,mu] = derivative_bilinear[gamma_nu,mu]
+T[mu,nu] = (B[mu,nu] + B[nu,mu]) / 2
+```
+
+Only the ten upper-triangle averaged `Tmunu` datasets are duplicated for direct
+EMT analysis; the large raw symmetric tensor is not stored.
 
 Canonical quark-loop files are source independent and use
 `EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5`.  A single full-time loop file is shared
 by all hadron two-point source times on that configuration.
+`build_3pt` converts both quark and gluon absolute-time loops to source-relative
+time with `roll(time_axis, -source_t)` before constructing C3 or ratios.
 
-The same run also writes
-`FlowedQuarkRinged/<lat>.FlowedQuarkRinged.<cfg>.<ama>.<sm>.h5`.  This companion
-is the kinetic-only subset of the standalone schema:
+The same EMTc contains the kinetic-only derived group:
 
 ```text
-flow_times
-raw/kinetic_pervec
-raw/source_index
-raw/base_noise_index
-raw/hp_index
-raw/spin_index
-raw/color_index
-avg/kinetic_spacetime
+derived/ringed/kinetic_pervec
+derived/ringed/kinetic_spacetime
 ```
 
-It intentionally omits `avg/Z_ring_field_sqrt` and `avg/Z_ring_bilinear`.
-Form the ensemble mean of `avg/kinetic_spacetime` first and apply the ringed
+It intentionally omits the ringed-field and ringed-bilinear factors.
+Form the ensemble mean of `derived/ringed/kinetic_spacetime` first and apply the ringed
 factor formula only afterward; averaging configuration-local inverse factors
 would be biased.  The identity
 
 ```text
-raw/kinetic_pervec = -2/Vs * sum_mu raw/Tmunu_pervec[:,mu,mu,q0,:,:]
+derived/ringed/kinetic_pervec = -2/Vs * sum_mu \
+    raw/derivative_bilinear_pervec[:,gamma_mu,mu,q0,:,:]
 ```
 
 is an exact file-level cross-check.  `qext` must contain exactly one zero
-momentum when companion output is enabled.
+momentum for every EMT quark measurement.
 
 The bookkeeping datasets mean:
 
@@ -234,7 +270,7 @@ attrs/
   measurement
   config_num
   flow_type, flow_epsilon, flow_steps, flow_times
-  qext, pf, p_2pt
+  qext
   volume_norm
   upper_triangle_only
 
@@ -250,7 +286,7 @@ the same configuration.  Shared quark and gluon wrappers both read
 Example:
 
 ```bash
-cd /global/cfs/cdirs/m3760/xgao/software/Pyquda_Measurement/application/EMT_disconnected_1pt/perlmutter
+cd /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement/application/EMT_disconnected_1pt/perlmutter
 
 EMT_1PT_FLOW_STEPS=1 \
 EMT_1PT_QMAX=0 \
