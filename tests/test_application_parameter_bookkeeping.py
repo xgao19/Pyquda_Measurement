@@ -143,6 +143,19 @@ def test_shared_emt_quark_and_gluon_flow_defaults_match():
     assert "EMT_1PT_SRC_T" not in gluon
 
 
+def test_emt_quark_hp_defaults_to_isotropic_four_dimensional_ordering():
+    quark = _source(
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_quark_1pt.py"
+    )
+    wrapper = _source(
+        "application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh"
+    )
+    ordering = "interleaved_xyzt_binary_projected_to_evenodd"
+    assert f'os.environ.get("EMT_1PT_HP_ORDERING", "{ordering}")' in quark
+    assert f'EMT_1PT_HP_ORDERING:-{ordering}' in wrapper
+
+
 def test_disconnected_configuration_is_required_cli_only():
     single_config_scripts = {
         "application/EMT_disconnected_1pt/perlmutter/Pyquda_EMT_disconnected_quark_1pt.py": "EMT_1PT_CONFIG_NUM",
@@ -170,6 +183,25 @@ def test_disconnected_configuration_is_required_cli_only():
     assert "configs = parse_int_list(args.configs)" in _source(build)
     assert "EMT_1PT_CONFIG_NUM" not in _source(build)
     assert "EMT_DISC_CONFIGS" not in _source(build)
+
+
+def test_disconnected_builder_is_quark_only_by_default():
+    build = (
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_build_3pt.py"
+    )
+    arguments = _parser_arguments(build)
+    include_gluon = arguments["--include_gluon"]
+    assert _keyword_constant(include_gluon, "action") == "store_true"
+    source = _source(build)
+    assert "if args.include_gluon" in source
+    assert 'h5.attrs["includes_gluon"] = bool(args.include_gluon)' in source
+
+    wrapper = _source(
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "run_build_disconnected_3pt.sh"
+    )
+    assert "[--include_gluon]" in wrapper
 
 
 def test_connected_emt_configuration_is_required_cli_only():

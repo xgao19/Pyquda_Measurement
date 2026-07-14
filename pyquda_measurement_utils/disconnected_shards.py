@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import errno
 from pathlib import Path
 from uuid import uuid4
 
@@ -30,6 +31,26 @@ _PART_ATTRS = {
     "hp_start",
     "hp_stop_exclusive",
 }
+
+
+def _lock_sample_log(handle):
+    """Lock a sample log on local filesystems or Lustre/DVS."""
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        return "flock"
+    except OSError as error:
+        # Perlmutter DVS returns its internal errno 524 for unsupported flock.
+        if error.errno not in {errno.ENOSYS, errno.EOPNOTSUPP, 524}:
+            raise
+        fcntl.lockf(handle.fileno(), fcntl.LOCK_EX)
+        return "lockf"
+
+
+def _unlock_sample_log(handle, lock_kind):
+    if lock_kind == "flock":
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    else:
+        fcntl.lockf(handle.fileno(), fcntl.LOCK_UN)
 
 
 def selected_base_range(n_base_noise, base_start=0, base_stop=None):
@@ -190,11 +211,11 @@ def prepare_sample_log(path, canonical_tag, attrs, metadata=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     expected_header = sample_log_header(canonical_tag, attrs, metadata)
     with path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        lock_kind = _lock_sample_log(handle)
         try:
             return _read_locked_sample_log(handle, expected_header, path)
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            _unlock_sample_log(handle, lock_kind)
 
 
 def append_completed_base(path, canonical_tag, attrs, base_idx, metadata=None):
@@ -205,7 +226,7 @@ def append_completed_base(path, canonical_tag, attrs, base_idx, metadata=None):
     base_idx = int(base_idx)
     line = f"base{base_idx:06d}"
     with path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        lock_kind = _lock_sample_log(handle)
         try:
             completed = _read_locked_sample_log(handle, expected_header, path)
             if base_idx in completed:
@@ -216,7 +237,7 @@ def append_completed_base(path, canonical_tag, attrs, base_idx, metadata=None):
             os.fsync(handle.fileno())
             return True
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            _unlock_sample_log(handle, lock_kind)
 
 
 def _attr_equal(actual, expected):

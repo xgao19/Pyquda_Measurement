@@ -58,6 +58,19 @@ class PartitionedTinyLatticeInfo(TinyLatticeInfo):
         return coords[mu]
 
 
+class S8LatticeInfo(TinyLatticeInfo):
+    global_size = [8, 8, 8, 8]
+
+
+def _hp_displacement_correlation(latt_info, hp_count, ordering, mu, distance):
+    patterns = np.asarray([
+        hierarchical_probe_pattern(latt_info, hp_idx, ordering)
+        for hp_idx in range(hp_count)
+    ])
+    shifted = np.roll(patterns, -int(distance), axis=int(mu) + 1)
+    return np.mean(patterns * shifted)
+
+
 def test_noise_scheme_and_hp_validation():
     assert normalize_noise_scheme(" ZN ") == "zn"
     assert normalize_noise_scheme("Hierarchical_Probing") == "hierarchical_probing"
@@ -200,6 +213,29 @@ def test_interleaved_xyz_hp_pattern_resolves_spatial_bits_first():
     np.testing.assert_array_equal(pattern_x[0, :, :, :], -pattern_x[1, :, :, :])
     np.testing.assert_array_equal(pattern_y[:, 0, :, :], -pattern_y[:, 1, :, :])
     np.testing.assert_array_equal(pattern_z[:, :, 0, :], -pattern_z[:, :, 1, :])
+
+
+@pytest.mark.parametrize("hp_count,max_cancelled_distance", [(16, 1), (256, 3)])
+def test_interleaved_xyzt_complete_shell_cancels_four_dimensional_neighbors(
+    hp_count, max_cancelled_distance
+):
+    latt_info = S8LatticeInfo()
+    ordering = "interleaved_xyzt_binary_projected_to_evenodd"
+    for mu in range(4):
+        for distance in range(1, max_cancelled_distance + 1):
+            assert _hp_displacement_correlation(
+                latt_info, hp_count, ordering, mu, distance
+            ) == pytest.approx(0.0, abs=1e-15)
+
+
+@pytest.mark.parametrize("hp_count", [16, 256])
+def test_interleaved_xyz_leaves_all_temporal_displacements_uncancelled(hp_count):
+    latt_info = S8LatticeInfo()
+    ordering = "interleaved_xyz_binary_projected_to_evenodd"
+    for distance in range(1, 5):
+        assert _hp_displacement_correlation(
+            latt_info, hp_count, ordering, 3, distance
+        ) == pytest.approx(1.0, abs=1e-15)
 
 
 def test_spin_color_point_dilution_keeps_one_channel():

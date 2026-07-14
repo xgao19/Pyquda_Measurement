@@ -452,3 +452,160 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   and reusable computational infrastructure; application data combination and
   post-processing now have a shared application-level home.
 - Kept the reader formulas, HDF5 schema, chunking, and output axes unchanged.
+
+## 2026-07-14: S8T8 EMT Z2/Z4 and hierarchical-probing benchmark
+
+- Completed six fixed-gauge disconnected EMT measurements at 2048 solves each:
+  Z2/Z4 pure stochastic, HP16, and HP256, using the production spatial HP
+  ordering and the embedded ringed kinetic at `t_f/a^2=0.207936`.
+- Distributed 24 non-overlapping 512-solve chunks over idle login-node GPUs;
+  all jobs, shard validation, and six canonical finalizations completed.
+- Pure Z2 and Z4 had essentially equal endpoint stochastic variance.  At this
+  fixed cost, HP16/pure SEM-squared ratios were 1.49 (Z2) and 1.73 (Z4), while
+  HP256/pure ratios were 16.49 and 4.29; HP256 has only eight randomized bases
+  and therefore a comparatively uncertain variance estimate.
+- Stored the five comparisons, cumulative tables, endpoint summary, and caveat
+  that this one-gauge test is not a physical ensemble determination of Z_chi
+  under `/global/cfs/cdirs/m4559/xgao/runs/TEST/emt_disconnected_z2_z4/results`.
+- The EMT-derived kinetic is positive (`Re K` about 0.436) with the current
+  covariant-derivative convention.  Since the existing standalone factor uses
+  `-2*Nc/((4*pi)^2*t^2*K)`, its sign convention needs a dedicated check before
+  applying a physical ringed normalization; no factor was formed in this test.
+
+## 2026-07-13: S8T8 8192-solve EMT and proton T44 diagnostic
+
+- Added reusable analysis helpers for deterministic time-stratified point
+  sources, the proton `PpUnpol=(I+T)/4` C2 projection, optimized nonzero-q
+  ratios, T44-only disconnected reads, source-translation covariance,
+  jackknife, and two-way source/base bootstrap errors.
+- Corrected the disconnected proton builder to use `(I+T)/4` rather than the
+  source interpolator gamma label as its C2 sink projection, and added an
+  independent `EMT_1PT_QZ_MAX` control for planar momentum grids.
+- Completed 96/96 disconnected chunks for six 8192-solve measurements with
+  nine `q=(qx,qy,0)` momenta and 32/32 connected chunks for 128 point sources
+  at `tsep=2,3,4`; all pre-production smokes and finalizers passed.
+- At fixed 8192-solve cost, pure Z2 and Z4 have equal stochastic efficiency
+  within bootstrap uncertainty.  HP16 remains worse than pure noise, while
+  HP256/pure SEM-squared ratios are about 17.5 (Z2) and 24.4 (Z4), even after
+  increasing HP256 from 8 to 32 complete randomized bases.
+- Wrote nine PNG/PDF figures, complex-valued T44 HDF5/CSV results, and reports
+  under `/global/cfs/cdirs/m4559/xgao/runs/TEST/emt_s8t8_t00_qxy1_8192`.
+  These outputs are bare, unringed, unrenormalized fixed-gauge diagnostics and
+  do not include gauge-ensemble fluctuations.
+
+## 2026-07-14: Diagnose spatial versus four-dimensional HP
+
+- Repeated the Z4 HP16 and HP256 measurements with the isotropic
+  `interleaved_xyzt_binary_projected_to_evenodd` ordering at 8192 solves,
+  matched configuration, stream, base indices, action, flow schedule, and
+  nine-momentum grid to the spatial-ordering benchmark.
+- Verified the standalone ringed and EMT-derived kinetic contractions on the
+  same base and all 16 HP vectors: all `16x2x8` values agree to maximum absolute
+  difference `3.11e-15`, excluding a contraction, sign, or normalization bug.
+- At `t_f/a^2=0.207936`, fixed-cost variance relative to pure Z4 is `0.311`
+  for 4D HP16 and `0.378` for 4D HP256, versus `1.625` and `24.356` for the
+  corresponding spatial orderings.  Paired base bootstraps confirm that the
+  ordering change, not different random sources, drives the improvement.
+- 4D HP16 improves every absolute time slice in this test, with variance ratios
+  `0.382--0.462`.  The spacetime-averaged 4D HP256 result also benefits from
+  cross-time covariance and is not uniformly better than pure Z4 per slice.
+- Added HP-geometry tests showing that isotropic 4D HP16 cancels nearest
+  neighbors in all four directions and 4D HP256 cancels displacements one
+  through three, whereas spatial HP leaves purely temporal displacements
+  completely uncancelled.
+- Stored canonical data, bootstrap tables, figures, implementation crosscheck,
+  and the technical report under
+  `/global/cfs/cdirs/m4559/xgao/runs/TEST/emt_s8t8_t00_qxy1_8192/results/hp_ordering_4d`.
+
+## 2026-07-14: Make isotropic 4D HP the flowed EMT default
+
+- Changed the disconnected EMT library, Perlmutter Python entry point, and
+  shell wrapper default from the time-independent spatial ordering to
+  `interleaved_xyzt_binary_projected_to_evenodd`.
+- Kept spatial and alternative 4D orderings available through explicit
+  `EMT_1PT_HP_ORDERING` selection; qTMD and standalone ringed defaults were
+  already four dimensional and were left unchanged.
+- Updated root/workflow documentation and the HP production example, and added
+  regression coverage for the library, Python, and shell defaults.
+
+## 2026-07-14: Document EMT Gamma basis and raw-bilinear analysis
+
+- Added one analysis-facing reference for the explicit DeGrand--Rossi Gamma
+  matrices, the 16-label PyQUDA bitmask order, axial sign transform, and raw
+  tensor convention shared by connected pion/proton and disconnected EMT.
+- Added executable NumPy/HDF5 examples that reconstruct every symmetric
+  `Tmunu` component from derivative primitives, including the distinct pion,
+  proton, and disconnected dataset-axis orders and spatial-volume convention.
+- Documented how the same primitives produce symmetric axial one-derivative
+  operators and the six local tensor-current channels.
+- Measured current single-file storage weights.  The S8T8 8192-solve EMTc is
+  78.886% raw derivative and 19.722% raw local bilinears; all averaged
+  primitives and `Tmunu` copies together are only 0.014%.  Connected scientific
+  arrays approach the logical `64:16:16:1` derivative/local/Tmunu/chi ratio.
+
+## 2026-07-14: Add the guided disconnected quark EMT workflow
+
+- Reorganized the English application README around an executable sequence: S8T8
+  smoke, shard/finalize checks, equal-solve pure/4D-HP16/4D-HP256 production,
+  complete-base convergence analysis, and optional proton C2/3pt assembly.
+- Added `emt_quark_1pt_convergence.py`, which compares embedded ringed kinetic
+  and one selected symmetric EMT component without loading the full 16x4
+  derivative basis.  It writes cumulative/endpoint CSV tables and headless
+  PNG/PDF figures, and never treats a partial HP prefix as an estimator.
+- Made the disconnected 3pt application quark-only by default so the primary
+  benchmark does not require gluon production. `--include_gluon` retains the
+  explicit advanced quark+gluon build.
+- Recorded the distinction between stochastic fixed-gauge convergence and a
+  gauge-ensemble vacuum-subtracted disconnected observable, together with the
+  sample-log, base-range, time-alignment, and counter-noise pitfalls most
+  likely to affect a first production test.
+
+## 2026-07-14: Add l64 multigrid benchmark controls
+
+- Made the disconnected EMT quark-one-point QUDA multigrid hierarchy an
+  explicit `--mg-block` run parameter.  One or more coarsening levels are
+  stored in shard/canonical provenance and therefore participate in the
+  base-level sample-log fingerprint.
+- Added the external l64c64a076 cfg1050 fixed-gauge test workflow: 16-GPU
+  preflight, three-way
+  MG timing with the first solve excluded, 2048-solve pure/4D-HP16/4D-HP256
+  resume workflows, finalization, and ringed-kinetic/T44 convergence analysis.
+
+## 2026-07-14: Separate l64 strange and light EMT tests
+
+- Cancelled Perlmutter allocation `55900532` before changing the active run
+  tree. Archived the existing `am_q=-0.015` MG results, tuning caches, logs,
+  and three partial HP256 shard parts as the strange-quark test.
+- Recorded that the archived HP256 base is incomplete: its sample log contains
+  no completed-base line, so a future resume recomputes the full base rather
+  than treating the 192-vector prefix as an estimator.
+- Created an independent `am_q=-0.049` light-quark run tree with no inherited
+  HDF5 data, sample log, MG result, runtime log, or QUDA tuning cache.
+- Extended the application guide with ensemble-specific strange/light labels,
+  the transition from S8T8 to `64^4`, a direct-to-l64 path, and the required
+  preflight, fresh MG benchmark, smoke, and timing checks.
+
+## 2026-07-14: Relate the EMT guide to the standalone ringed exercise
+
+- Added an answer-first comparison of the standalone kinetic-only measurement
+  and the full disconnected EMT primitive basis, covering their physics
+  targets, resolved axes, computational work, dilution options, outputs, and
+  intended downstream use.
+- Clarified that the embedded EMT kinetic reuses the same inversion, fermion
+  flow, and derivative applications, while the additional cost comes from the
+  full Gamma contractions, momentum projection, and substantially larger I/O.
+- Marked the historical standalone `.block*.h5` and per-block ringed-factor
+  description as obsolete: current workflows share base/HP-part shards and
+  form physical ringed factors only after the configuration average of `K`.
+
+## 2026-07-14: Add m5208-local EMT run templates
+
+- Created clean strange (`am_q=-0.015`) and light (`am_q=-0.049`) run-script
+  trees under `m5208`, with independent empty data, log, analysis, MG-result,
+  and tuning-cache directories.
+- Added one local software configuration file per template so an existing
+  personal QUDA/PyQUDA environment can be connected without depending on or
+  modifying the repository's `m4559` environment helper.
+- Updated the application examples to use `MEASUREMENT_ROOT`, `m5208` gauge
+  and run paths, and the `m5208_g` GPU account. The allocation requests generic
+  Perlmutter GPU nodes without a memory-capacity constraint.

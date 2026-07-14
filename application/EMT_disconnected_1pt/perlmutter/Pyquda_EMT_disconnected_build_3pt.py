@@ -17,6 +17,7 @@ from analysis_helper.emt_disconnected_analysis import (
     read_gluon_loop,
     read_quark_loop,
 )
+from analysis_helper.emt_proton_t44_analysis import pplus_unpolarized_c2
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     validate_quark_gluon_loop_axes,
 )
@@ -84,12 +85,13 @@ def require_files(paths, label):
         raise FileNotFoundError(f"Missing {label} file(s): {missing}")
 
 
-def read_c2(path, gamma_label, momentum_label, t_separations):
+def read_c2(path, momentum_label, t_separations):
     with h5py.File(path, "r") as h5:
-        dataset = f"SS/{gamma_label}/{momentum_label}"
-        if dataset not in h5:
-            raise KeyError(f"{path} does not contain {dataset}")
-        c2_t = h5[dataset][...]
+        identity = f"SS/I/{momentum_label}"
+        temporal = f"SS/T/{momentum_label}"
+        if identity not in h5 or temporal not in h5:
+            raise KeyError(f"{path} should contain {identity} and {temporal}")
+        c2_t = pplus_unpolarized_c2(h5[identity][...], h5[temporal][...])
     t_separations = np.asarray(t_separations, dtype=np.int32)
     if np.any(t_separations < 0) or np.any(t_separations >= c2_t.shape[0]):
         raise ValueError(f"Requested t_separations {t_separations.tolist()} outside C2 length {c2_t.shape[0]}")
@@ -139,6 +141,11 @@ def write_string_dataset(group, name, values):
 parser = argparse.ArgumentParser()
 parser.add_argument("--configs", type=str, required=True)
 parser.add_argument("--interpolator", type=str, default=os.environ.get("EMT_DISC_INTERPOLATOR", "5"))
+parser.add_argument(
+    "--include_gluon",
+    action="store_true",
+    help="also require and combine canonical gluon loops (quark-only is the default)",
+)
 args = parser.parse_args()
 
 configs = parse_int_list(args.configs)
@@ -150,21 +157,27 @@ src_pos = parse_triplet(os.environ.get("EMT_1PT_SRC_POS", "0.0.0")) + [
     int(os.environ.get("EMT_1PT_SRC_T", "0"))
 ]
 t_separations = parse_int_list(os.environ.get("EMT_DISC_T_SEPS", "2"))
-c2_gamma = os.environ.get("EMT_DISC_C2_GAMMA", args.interpolator)
 c2_momentum = os.environ.get("EMT_DISC_C2_MOMENTUM", "PX0PY0PZ0")
 loop_sm_tag = default_loop_sm_tag()
 c2_sm_tag = default_c2_sm_tag(args.interpolator)
 
 c2_paths = paths_from_env("EMT_DISC_C2_FILES", infer_paths("c2", configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_sm_tag))
 quark_paths = paths_from_env("EMT_DISC_QUARK_1PT_FILES", infer_paths("quark", configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_sm_tag))
-gluon_paths = paths_from_env("EMT_DISC_GLUON_1PT_FILES", infer_paths("gluon", configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_sm_tag))
+gluon_paths = (
+    paths_from_env("EMT_DISC_GLUON_1PT_FILES", infer_paths("gluon", configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_sm_tag))
+    if args.include_gluon
+    else []
+)
 
-if not (len(c2_paths) == len(quark_paths) == len(gluon_paths) == len(configs)):
-    raise ValueError("C2, quark 1pt, gluon 1pt, and config lists must have the same length")
+if not (len(c2_paths) == len(quark_paths) == len(configs)):
+    raise ValueError("C2, quark 1pt, and config lists must have the same length")
+if args.include_gluon and len(gluon_paths) != len(configs):
+    raise ValueError("Gluon 1pt and config lists must have the same length")
 
 require_files(c2_paths, "C2")
 require_files(quark_paths, "quark 1pt")
-require_files(gluon_paths, "gluon 1pt")
+if args.include_gluon:
+    require_files(gluon_paths, "gluon 1pt")
 
 c2_selected = []
 c2_full = []
@@ -178,31 +191,33 @@ qext_list = []
 quark_flow_time_list = []
 gluon_qext_list = []
 gluon_flow_time_list = []
-for c2_path, quark_path, gluon_path in zip(c2_paths, quark_paths, gluon_paths):
-    c2_tseps, c2_t = read_c2(c2_path, c2_gamma, c2_momentum, t_separations)
+for config_index, (c2_path, quark_path) in enumerate(zip(c2_paths, quark_paths)):
+    c2_tseps, c2_t = read_c2(c2_path, c2_momentum, t_separations)
     quark_loop, source_count, source_bookkeeping, qext, quark_flow_times = read_quark_loop(
         quark_path, src_pos[3]
-    )
-    gluon_loop, gluon_qext, gluon_flow_times = read_gluon_loop(
-        gluon_path, src_pos[3]
     )
     c2_selected.append(c2_tseps)
     c2_full.append(c2_t)
     quark_loops.append(quark_loop)
-    gluon_loops.append(gluon_loop)
     source_counts.append(source_count)
     source_indices.append(source_bookkeeping["source_index"])
     base_noise_indices.append(source_bookkeeping["base_noise_index"])
     hp_indices.append(source_bookkeeping["hp_index"])
     qext_list.append(qext)
     quark_flow_time_list.append(quark_flow_times)
-    gluon_qext_list.append(gluon_qext)
-    gluon_flow_time_list.append(gluon_flow_times)
+    if args.include_gluon:
+        gluon_loop, gluon_qext, gluon_flow_times = read_gluon_loop(
+            gluon_paths[config_index], src_pos[3]
+        )
+        gluon_loops.append(gluon_loop)
+        gluon_qext_list.append(gluon_qext)
+        gluon_flow_time_list.append(gluon_flow_times)
 
 c2_selected = np.asarray(c2_selected)
 c2_full = np.asarray(c2_full)
 quark_loops = np.asarray(quark_loops)
-gluon_loops = np.asarray(gluon_loops)
+if args.include_gluon:
+    gluon_loops = np.asarray(gluon_loops)
 source_counts = np.asarray(source_counts)
 source_indices = np.asarray(source_indices)
 base_noise_indices = np.asarray(base_noise_indices)
@@ -213,25 +228,31 @@ if not np.all(source_counts == source_count):
     raise ValueError("All quark 1pt files must use the same cumulative source counts")
 if quark_loops.shape[1] != len(source_count):
     raise ValueError("Unexpected quark source-count axis mismatch")
-for values, label in [
+axis_lists = [
     (qext_list, "quark qext"),
-    (gluon_qext_list, "gluon qext"),
     (quark_flow_time_list, "quark flow times"),
-    (gluon_flow_time_list, "gluon flow times"),
-]:
+]
+if args.include_gluon:
+    axis_lists.extend([
+        (gluon_qext_list, "gluon qext"),
+        (gluon_flow_time_list, "gluon flow times"),
+    ])
+for values, label in axis_lists:
     reference = values[0]
     if any(not np.array_equal(reference, value) for value in values[1:]):
         raise ValueError(f"All input files must use matching {label}")
 qext = qext_list[0]
 quark_flow_times = quark_flow_time_list[0]
-gluon_qext = gluon_qext_list[0]
-gluon_flow_times = gluon_flow_time_list[0]
-validate_quark_gluon_loop_axes(
-    qext, gluon_qext, quark_flow_times, gluon_flow_times
-)
+if args.include_gluon:
+    gluon_qext = gluon_qext_list[0]
+    gluon_flow_times = gluon_flow_time_list[0]
+    validate_quark_gluon_loop_axes(
+        qext, gluon_qext, quark_flow_times, gluon_flow_times
+    )
 
 quark_c3_unsub, quark_c3_disc, quark_ratio = build_quark_products(c2_selected, quark_loops)
-gluon_c3_unsub, gluon_c3_disc, gluon_ratio = build_gluon_products(c2_selected, gluon_loops)
+if args.include_gluon:
+    gluon_c3_unsub, gluon_c3_disc, gluon_ratio = build_gluon_products(c2_selected, gluon_loops)
 
 q0 = zero_momentum_index(qext)
 t44_loop = quark_loops[:, :, 3, 3, q0, 0, :]
@@ -250,15 +271,17 @@ with h5py.File(output, "w") as h5:
     h5.attrs["measurement"] = "proton_emt_disconnected_3pt_test"
     h5.attrs["ncfg"] = len(configs)
     h5.attrs["t_separations"] = np.asarray(t_separations, dtype=np.int32)
-    h5.attrs["c2_gamma"] = c2_gamma
+    h5.attrs["c2_projector"] = "PpUnpol=0.25*(I+T)"
     h5.attrs["c2_momentum"] = c2_momentum
     h5.attrs["quark_has_stochastic_cumulative"] = True
+    h5.attrs["includes_gluon"] = bool(args.include_gluon)
     h5.attrs["vacuum_subtraction"] = "ensemble_only"
     h5.attrs["single_config_is_unsubtracted_proxy_only"] = len(configs) == 1
     h5.attrs["configs"] = np.asarray(configs, dtype=np.int32)
     h5.attrs["qext"] = qext
     h5.attrs["quark_flow_times"] = quark_flow_times
-    h5.attrs["gluon_flow_times"] = gluon_flow_times
+    if args.include_gluon:
+        h5.attrs["gluon_flow_times"] = gluon_flow_times
     h5.attrs["input_loop_time_convention"] = "absolute_lattice_time"
     h5.attrs["output_loop_time_convention"] = "source_relative_time"
     h5.attrs["source_t"] = int(src_pos[3])
@@ -269,7 +292,8 @@ with h5py.File(output, "w") as h5:
     inputs = h5.require_group("inputs")
     write_string_dataset(inputs, "c2_files", c2_paths)
     write_string_dataset(inputs, "quark_1pt_files", quark_paths)
-    write_string_dataset(inputs, "gluon_1pt_files", gluon_paths)
+    if args.include_gluon:
+        write_string_dataset(inputs, "gluon_1pt_files", gluon_paths)
 
     qgrp = h5.require_group("quark")
     qgrp.create_dataset("source_count", data=source_count)
@@ -282,12 +306,13 @@ with h5py.File(output, "w") as h5:
         qgrp.create_dataset("C3_disc_cumulative", data=quark_c3_disc)
         qgrp.create_dataset("R_disc_cumulative", data=quark_ratio)
 
-    ggrp = h5.require_group("gluon")
-    ggrp.create_dataset("loop", data=gluon_loops)
-    ggrp.create_dataset("C3_unsubtracted", data=gluon_c3_unsub)
-    if gluon_c3_disc is not None:
-        ggrp.create_dataset("C3_disc", data=gluon_c3_disc)
-        ggrp.create_dataset("R_disc", data=gluon_ratio)
+    if args.include_gluon:
+        ggrp = h5.require_group("gluon")
+        ggrp.create_dataset("loop", data=gluon_loops)
+        ggrp.create_dataset("C3_unsubtracted", data=gluon_c3_unsub)
+        if gluon_c3_disc is not None:
+            ggrp.create_dataset("C3_disc", data=gluon_c3_disc)
+            ggrp.create_dataset("R_disc", data=gluon_ratio)
 
     summary = h5.require_group("summary")
     summary.create_dataset("quark_source_count", data=source_count)

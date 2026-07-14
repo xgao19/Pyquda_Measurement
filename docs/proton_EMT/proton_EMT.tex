@@ -110,6 +110,17 @@ The Dirac gamma matrices relevant for derivative insertions are
 \end{equation}
 The chiral matrix is $\gamma_{5}\leftrightarrow\texttt{gamma(15)}$.
 
+The explicit representation returned by the current PyQUDA implementation is
+\begin{align}
+\gamma_1&=\begin{pmatrix}0&0&0&i\\0&0&i&0\\0&-i&0&0\\-i&0&0&0\end{pmatrix},&
+\gamma_2&=\begin{pmatrix}0&0&0&-1\\0&0&1&0\\0&1&0&0\\-1&0&0&0\end{pmatrix},\\
+\gamma_3&=\begin{pmatrix}0&0&i&0\\0&0&0&-i\\-i&0&0&0\\0&i&0&0\end{pmatrix},&
+\gamma_4&=\begin{pmatrix}0&0&1&0\\0&0&0&1\\1&0&0&0\\0&1&0&0\end{pmatrix},
+\end{align}
+with $\gamma_5=\operatorname{diag}(1,1,-1,-1)$.  Every connected and
+disconnected EMT file stores these matrices in \code{gamma\_matrices}; the
+shared implementation source is \code{fermion\_bilinear\_basis.py}.
+
 These are raw PyQUDA bit-mask matrices.  The production files store
 \texttt{physical\_from\_pyquda} so that analysis can use a uniform physical
 definition.  With \(\gamma_5=\gamma_1\gamma_2\gamma_3\gamma_4\), raw
@@ -1249,7 +1260,8 @@ their momentum-transfer metadata.  The matching two-point functions are written
 separately under the \texttt{EMTproton2pt} output tree.
 
 \begin{center}
-\begin{tabular}{lll}
+\small
+\begin{tabular}{p{0.30\textwidth}p{0.40\textwidth}p{0.20\textwidth}}
 \toprule
 Dataset & Shape & Description \\
 \midrule
@@ -1266,6 +1278,33 @@ Dataset & Shape & Description \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+The raw derivative primitive reproduces the stored tensor with the following
+axis transformation:
+\begin{verbatim}
+with h5py.File(path, "r") as h5:
+    labels = [x.decode() for x in h5["gamma_list"][...]]
+    vector = [labels.index(x) for x in ("X", "Y", "Z", "T")]
+    D = h5["C3_derivative_bilinear"][...]
+    # D: [flavor,polarization,gamma,derivative,q,flow,t]
+    B = np.take(D, vector, axis=2)
+    T = 0.5 * (B + np.swapaxes(B, 2, 3))
+    T_file = T.transpose(0, 1, 5, 4, 2, 3, 6)
+    np.testing.assert_allclose(T_file, h5["C3_Tmunu"][...])
+\end{verbatim}
+These are connected correlators, so no additional \code{volume\_norm}
+division is made.  The complete physical-basis and tensor-current examples are
+in \code{docs/EMT\_gamma\_and\_raw\_bilinears.md}.
+
+The four main connected arrays have the shape-independent logical payload
+ratio
+\begin{equation}
+\code{C3\_derivative:C3\_local:C3\_Tmunu:C3\_chi}=64:16:16:1,
+\end{equation}
+or 65.98\%, 16.49\%, 16.49\%, and 1.03\% for a large file.  In the measured
+S8T8 one-polarization, nine-momentum, two-flow-time \code{tsep=4} file, HDF5
+metadata changes the complete-file shares to 61.78\%, 15.44\%, 15.44\%, and
+0.97\%; basis datasets use 2.29\% and metadata/overhead uses 4.08\%.
 
 The dimensions are:
 \begin{itemize}
@@ -1330,9 +1369,8 @@ Connected proton three-point file names append the sink kinematics as
 source--sink separation at nine carries the suffix
 \texttt{PX0PY0PZ0dt9.h5}; separations six, nine, and twelve are written as
 three files with suffixes \texttt{dt6.h5}, \texttt{dt9.h5}, and
-\texttt{dt12.h5}.  Each file stores a single-value \texttt{t\_separations}
-attribute and keeps a length-one source--sink-separation axis in
-\texttt{C3\_chi} and \texttt{C3\_Tmunu}.  This prevents runs with different
+\texttt{dt12.h5}.  Each file stores scalar \texttt{t\_sep} metadata and has
+no singleton source--sink-separation dataset axis.  This prevents runs with different
 final momenta or source--sink separations from overwriting one another and
 follows the nucleon TMD output convention.
 

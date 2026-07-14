@@ -89,6 +89,30 @@ def _flow_times(flow_epsilon, flow_steps):
     return np.arange(flow_steps + 1, dtype=np.float64) * float(flow_epsilon)
 
 
+def parse_multigrid_blocks(value):
+    """Parse dot-separated QUDA blocks and semicolon-separated MG levels."""
+    if isinstance(value, str):
+        level_text = [item.strip() for item in value.split(";") if item.strip()]
+        if not level_text:
+            raise ValueError("multigrid block specification is empty")
+        blocks = []
+        for item in level_text:
+            try:
+                block = [int(entry) for entry in item.split(".")]
+            except ValueError as error:
+                raise ValueError(
+                    f"invalid multigrid block {item!r}; expected X.Y.Z.T"
+                ) from error
+            blocks.append(block)
+    else:
+        blocks = [[int(entry) for entry in block] for block in value]
+    if not blocks or any(len(block) != 4 for block in blocks):
+        raise ValueError("each multigrid level must contain four integers")
+    if any(entry <= 0 for block in blocks for entry in block):
+        raise ValueError("multigrid block entries must be positive")
+    return blocks
+
+
 def _unique_zero_momentum_index(momentum_list):
     """Return the unique zero-momentum index or raise a clear error."""
     zero_indices = [
@@ -161,10 +185,15 @@ class EMTDisconnectedQuark1pt:
         )
         self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
         self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
-        self.hp_ordering = parameters.get("hp_ordering", "interleaved_xyz_binary_projected_to_evenodd")
+        self.hp_ordering = parameters.get(
+            "hp_ordering", "interleaved_xyzt_binary_projected_to_evenodd"
+        )
         self.flavor_convention = parameters.get(
             "flavor_convention",
             "single_flavor_trace_for_this_dirac_operator",
+        )
+        self.multigrid_blocks = parse_multigrid_blocks(
+            parameters.get("multigrid", [[8, 8, 4, 4]])
         )
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
 
@@ -299,6 +328,7 @@ class EMTDisconnectedQuark1pt:
             "csw": csw,
             "tol": tol,
             "maxiter": maxiter,
+            "multigrid_blocks": np.asarray(self.multigrid_blocks, dtype=np.int32),
             "gauge_preprocessing": self.gauge_preprocessing,
             "t_boundary": latt_info.t_boundary,
             "n_vec": n_vec,
@@ -457,7 +487,7 @@ class EMTDisconnectedQuark1pt:
             1.0,
             csw,
             csw,
-            [[8, 8, 4, 4]],
+            self.multigrid_blocks,
         )
         dirac.loadGauge(U)
         mpi_print(latt_info, "Multigrid inverter ready.")
@@ -835,6 +865,7 @@ __all__ = [
     "EMTDisconnectedQuark1pt",
     "EMTDisconnectedGluon1pt",
     "EMT_OPERATOR_SCHEMA_VERSION",
+    "parse_multigrid_blocks",
     "my_gammas",
     "validate_quark_gluon_loop_axes",
 ]

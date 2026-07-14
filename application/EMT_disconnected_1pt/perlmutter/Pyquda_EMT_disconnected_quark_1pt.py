@@ -5,7 +5,10 @@ from pathlib import Path
 from pyquda import init
 from pyquda_utils import io
 
-from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import EMTDisconnectedQuark1pt
+from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
+    EMTDisconnectedQuark1pt,
+    parse_multigrid_blocks,
+)
 from pyquda_measurement_utils.disconnected_shards import disconnected_sample_log_path
 from pyquda_measurement_utils.io_corr import (
     get_emt_quark_loop_file_tag,
@@ -15,6 +18,7 @@ from pyquda_measurement_utils.io_corr import (
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("EMT_1PT_MPI_GEOMETRY", "1.1.1.1"))
+parser.add_argument("--mg-block", default="8.8.4.4")
 args = parser.parse_args()
 
 conf = args.config_num
@@ -30,7 +34,8 @@ gauge_path = os.environ.get(
 )
 lat_tag = os.environ.get("EMT_1PT_LAT_TAG", "S8T32")
 qmax = int(os.environ.get("EMT_1PT_QMAX", "0"))
-qext = [[x, y, z, 0] for x in range(-qmax, qmax + 1) for y in range(-qmax, qmax + 1) for z in range(-qmax, qmax + 1)]
+qzmax = int(os.environ.get("EMT_1PT_QZ_MAX", str(qmax)))
+qext = [[x, y, z, 0] for x in range(-qmax, qmax + 1) for y in range(-qmax, qmax + 1) for z in range(-qzmax, qzmax + 1)]
 setup_tag = os.environ.get("EMT_1PT_SETUP_TAG", "1HYP")
 
 parameters = {
@@ -41,11 +46,12 @@ parameters = {
     "flow_steps": int(os.environ.get("EMT_1PT_FLOW_STEPS", "1")),
     "noise_scheme": os.environ.get("EMT_1PT_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("EMT_1PT_HP_NUM_VECTORS", "1")),
-    "hp_ordering": os.environ.get("EMT_1PT_HP_ORDERING", "interleaved_xyz_binary_projected_to_evenodd"),
+    "hp_ordering": os.environ.get("EMT_1PT_HP_ORDERING", "interleaved_xyzt_binary_projected_to_evenodd"),
     "gauge_preprocessing": os.environ.get(
         "EMT_1PT_GAUGE_PREPROCESSING",
         "HYP(1,0.75,0.6,0.3,4)",
     ),
+    "multigrid": parse_multigrid_blocks(args.mg_block),
 }
 quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, setup_tag)
 

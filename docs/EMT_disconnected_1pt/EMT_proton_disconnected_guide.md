@@ -64,14 +64,11 @@ Application directory:
 application/EMT_disconnected_1pt/perlmutter
 ```
 
-Four-step diagnostic scripts:
+Three-step quark-only diagnostic scripts:
 
 ```text
 Pyquda_EMT_disconnected_quark_1pt.py
 run_quark_1pt.sh
-
-Pyquda_EMT_disconnected_gluon_1pt.py
-run_gluon_1pt.sh
 
 Pyquda_EMT_disconnected_proton_2pt.py
 run_proton_2pt.sh
@@ -79,6 +76,10 @@ run_proton_2pt.sh
 Pyquda_EMT_disconnected_build_3pt.py
 run_build_disconnected_3pt.sh
 ```
+
+The builder is quark-only by default.  The separate gluon measurement is an
+advanced optional step and is included only when the builder is called with
+`--include_gluon`.
 
 Shared source code:
 
@@ -140,6 +141,7 @@ Use `N_VEC=2` for the smallest stochastic-source convergence check:
 ```bash
 EMT_1PT_FLOW_STEPS=1 \
 EMT_1PT_QMAX=0 \
+EMT_1PT_QZ_MAX=0 \
 EMT_1PT_N_VEC=2 \
 EMT_1PT_N_ZN=4 \
 EMT_1PT_RAND_SEED=0 \
@@ -190,7 +192,8 @@ For a two-point source time `t0`, downstream analysis selects
 ```text
 tau_abs = (t0 + tau_rel) mod Nt.
 ```
-The current builder implements this for both quark and gluon loops as
+The current builder implements this for the quark loop, and also for the
+optional gluon loop when `--include_gluon` is requested, as
 `roll(time_axis, -t0)` before any C3 product or ensemble subtraction.
 
 The canonical EMTc file has no source-position tag because the same loop is
@@ -201,11 +204,12 @@ kinetic data under `derived/ringed`, extracted from the identical raw EMT
 vectors.  It contains no per-configuration ringed factor: compute that factor
 only after averaging `derived/ringed/kinetic_spacetime` over the ensemble.
 
-### Step 2: Gluon EMT 1pt
+### Optional: Gluon EMT 1pt
 
 ```bash
 EMT_1PT_FLOW_STEPS=1 \
 EMT_1PT_QMAX=0 \
+EMT_1PT_QZ_MAX=0 \
 bash run_gluon_1pt.sh --config_num 1000
 ```
 
@@ -219,11 +223,15 @@ Tmunu/T11 ... T44
 There is no stochastic source axis or hadron source-position tag for the gluon
 loop.  Run the shared `application/EMT_disconnected_1pt/perlmutter/run_gluon_1pt.sh`
 entry; meson/proton-specific gluon wrappers are intentionally not maintained.
+To include it in the final combination, append `--include_gluon` to
+`run_build_disconnected_3pt.sh`. The quark-convergence benchmark does not need
+this step.
 
-### Step 3: Proton C2
+### Step 2: Proton C2
 
 ```bash
 EMT_1PT_QMAX=0 \
+EMT_1PT_QZ_MAX=0 \
 bash run_proton_2pt.sh --config_num 1000
 ```
 
@@ -241,7 +249,7 @@ gamma = 5
 momentum = PX0PY0PZ0
 ```
 
-### Step 4: Build the Disconnected 3pt Diagnostic
+### Step 3: Build the Disconnected 3pt Diagnostic
 
 ```bash
 EMT_DISC_T_SEPS=2 \
@@ -281,9 +289,30 @@ Lbar_N[mu,nu] = (B_N[mu,nu] + B_N[nu,mu]) / 2
 N = 1, ..., effective_n_inversions
 ```
 
-For ringed-fermion normalization, read `avg/kinetic_spacetime` from the
-source-matched companion.  The exact reconstruction below remains a useful
-cross-check:
+The current raw Gamma order is stored in `gamma_list`; do not assume numerical
+PyQUDA-ID order.  The vector positions are currently `[X,Y,Z,T]=[3,5,7,1]`.
+This complete averaged reconstruction is a useful schema check:
+
+```python
+import h5py
+import numpy as np
+
+with h5py.File(loop_file, "r") as h5:
+    labels = [x.decode() for x in h5["gamma_list"][...]]
+    vector = [labels.index(x) for x in ("X", "Y", "Z", "T")]
+    D = h5["avg/derivative_bilinear"][...]
+    B = np.take(D, vector, axis=0)  # [nu,mu,q,flow,t_abs]
+    T = 0.5 * (B + np.swapaxes(B, 0, 1))
+    np.testing.assert_allclose(T[3, 3], h5["avg/Tmunu/T44"][...])
+```
+
+The explicit matrices, physical axial transform, tensor convention, and
+connected pion/proton axis examples are in
+[`docs/EMT_gamma_and_raw_bilinears.md`](../EMT_gamma_and_raw_bilinears.md).
+
+For ringed-fermion normalization, read
+`derived/ringed/kinetic_spacetime` from the same canonical EMTc.  The exact
+reconstruction below remains a useful cross-check:
 
 ```text
 K_code(flow) = -2 * mean_tau_cfg[
@@ -356,6 +385,7 @@ EMT_1PT_DATA_DIR
 EMT_1PT_GAUGE_PATH
 EMT_1PT_MPI_GEOMETRY
 EMT_1PT_QMAX
+EMT_1PT_QZ_MAX
 EMT_1PT_FLOW_STEPS
 EMT_1PT_SETUP_TAG
 ```
@@ -384,13 +414,21 @@ EMT_DISC_WIDTH
 EMT_DISC_BOOST_IN
 EMT_DISC_BOOST_OUT
 EMT_DISC_T_SEPS
-EMT_DISC_C2_GAMMA
 EMT_DISC_C2_MOMENTUM
 EMT_DISC_C2_FILES
 EMT_DISC_QUARK_1PT_FILES
 EMT_DISC_GLUON_1PT_FILES
 EMT_DISC_3PT_OUT
 ```
+
+For the default `PpUnpol` proton projection, the merger constructs
+
+```text
+C2_PpUnpol = 0.25 * (C2_I + C2_T)
+```
+
+from the two stored sink-gamma channels.  The source interpolator label `5`
+must not be reused as a sink projector.
 
 Default loop smearing tag:
 

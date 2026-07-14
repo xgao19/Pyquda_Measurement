@@ -201,6 +201,46 @@ batched after each derivative is constructed, so this extension changes
 contraction and I/O cost but does not add inversions, fermion-flow updates, or
 covariant-derivative applications.
 
+All EMT programs import this basis from
+\code{pyquda\_measurement\_utils/fermion\_bilinear\_basis.py}.  In the
+DeGrand--Rossi representation returned by the current PyQUDA implementation,
+the four Euclidean generators are
+\begin{align}
+\gamma_1&=\begin{pmatrix}0&0&0&i\\0&0&i&0\\0&-i&0&0\\-i&0&0&0\end{pmatrix},&
+\gamma_2&=\begin{pmatrix}0&0&0&-1\\0&0&1&0\\0&1&0&0\\-1&0&0&0\end{pmatrix},\\
+\gamma_3&=\begin{pmatrix}0&0&i&0\\0&0&0&-i\\-i&0&0&0\\0&i&0&0\end{pmatrix},&
+\gamma_4&=\begin{pmatrix}0&0&1&0\\0&0&0&1\\1&0&0&0\\0&1&0&0\end{pmatrix},
+\end{align}
+and
+\begin{equation}
+\gamma_5=\gamma_1\gamma_2\gamma_3\gamma_4
+=\operatorname{diag}(1,1,-1,-1).
+\end{equation}
+The resulting HDF5 Gamma axis is not numerical-ID order:
+\begin{center}
+\small
+\begin{tabular}{ccl@{\qquad}ccl}
+\toprule
+Index & Label & Raw matrix & Index & Label & Raw matrix \\
+\midrule
+0 & \code{5}   & $\gamma_5$                 & 8  & \code{Z5}  & $\gamma_3\gamma_5$ \\
+1 & \code{T}   & $\gamma_4$                 & 9  & \code{I}   & $\mathbf 1$ \\
+2 & \code{T5}  & $-\gamma_4\gamma_5$        & 10 & \code{SXT} & $\gamma_1\gamma_4$ \\
+3 & \code{X}   & $\gamma_1$                 & 11 & \code{SXY} & $\gamma_1\gamma_2$ \\
+4 & \code{X5}  & $\gamma_1\gamma_5$         & 12 & \code{SXZ} & $\gamma_1\gamma_3$ \\
+5 & \code{Y}   & $\gamma_2$                 & 13 & \code{SYT} & $\gamma_2\gamma_4$ \\
+6 & \code{Y5}  & $-\gamma_2\gamma_5$        & 14 & \code{SYZ} & $\gamma_2\gamma_3$ \\
+7 & \code{Z}   & $\gamma_3$                 & 15 & \code{SZT} & $\gamma_3\gamma_4$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+The corresponding PyQUDA IDs are
+\begin{equation}
+[15,8,7,1,14,2,13,4,11,0,9,3,5,10,6,12].
+\end{equation}
+The numerical matrices themselves are stored in \code{gamma\_matrices}; an
+analysis should read the file metadata rather than reproduce the table by hand.
+
 The EMT is a derived vector-channel observable.  Defining
 \(B_{\nu\mu}=L^D_{\gamma_\nu,\mu}\), the previous per-source,
 pre-volume-normalized object remains
@@ -666,6 +706,75 @@ standalone output.  The counter-noise configuration, stream, algorithm, HP
 ordering, Dirac parameters, gauge preprocessing, boundary condition, flow
 schedule, and exact EMT-to-kinetic relation are recorded alongside it.
 
+\subsection{Raw-Bilinear Analysis Example}
+
+The vector channels occur at Gamma positions
+\begin{equation}
+  (X,Y,Z,T)=(3,5,7,1).
+\end{equation}
+For the already averaged and volume-normalized primitive, every EMT component
+can be reconstructed without reading the large source axis:
+\begin{verbatim}
+import h5py
+import numpy as np
+
+with h5py.File(path, "r") as h5:
+    labels = [x.decode() for x in h5["gamma_list"][...]]
+    vector = [labels.index(x) for x in ("X", "Y", "Z", "T")]
+    D = h5["avg/derivative_bilinear"][...]
+    # B axes are [nu,mu,q,flow,t_abs].
+    B = np.take(D, vector, axis=0)
+    T = 0.5 * (B + np.swapaxes(B, 0, 1))
+    np.testing.assert_allclose(T[3,3], h5["avg/Tmunu/T44"][...])
+\end{verbatim}
+Here \code{T[mu,nu]} has axes \code{[q,flow,t\_abs]} after the two tensor
+indices.  The division by \code{volume\_norm} must not be repeated because it
+is already included in \code{avg/derivative\_bilinear}.  For stochastic-error
+analysis, read \code{raw/derivative\_bilinear\_pervec} in source blocks,
+construct the same symmetric tensor, and divide the accumulated mean by
+\code{volume\_norm}.  Complete HP vectors belonging to one base must be
+averaged before treating bases as independent samples.
+
+The same raw basis also supports other observables.  First apply
+\code{physical\_from\_pyquda} on the Gamma axis.  Symmetrizing the physical
+\code{X5,Y5,Z5,T5} derivative channels yields
+\begin{equation}
+A_{\mu\nu}=\frac12\left(
+L^D_{\gamma_\mu\gamma_5,\nu}
++L^D_{\gamma_\nu\gamma_5,\mu}\right).
+\end{equation}
+Selecting the six local tensor channels gives the raw tensor currents; multiply
+by $i$ only for the Hermitian $i[\gamma_\mu,\gamma_\nu]/2$ convention.  A
+complete portable example, including connected pion and proton axis orders, is
+in \code{docs/EMT\_gamma\_and\_raw\_bilinears.md}.
+
+\subsection{Storage Weight of One Canonical EMTc}
+
+All large arrays are uncompressed.  Ignoring the small averaged and metadata
+datasets, the source-scaling payload has the ratio
+\begin{equation}
+\code{derivative:local:flowed\_noise\_norm}=64:16:1.
+\end{equation}
+The embedded ringed kinetic adds one $q=0$ channel, or $1/N_q$ unit on this
+scale.  In the measured S8T8 file with $N_{\rm eff}=8192$, $N_q=9$, two
+flow times, and $N_t=8$, the complete file is 1,531,264,312 bytes:
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Part & Bytes & Complete-file share \\
+\midrule
+\code{raw/derivative\_bilinear\_pervec} & 1,207,959,552 & 78.886\% \\
+\code{raw/local\_bilinear\_pervec} & 301,989,888 & 19.722\% \\
+\code{raw/flowed\_noise\_norm\_pervec} & 18,874,368 & 1.233\% \\
+\code{derived/ringed/kinetic\_pervec} & 2,097,152 & 0.137\% \\
+All averaged primitives and ten \code{Tmunu} datasets & 209,664 & 0.014\% \\
+Bookkeeping, basis metadata, and HDF5 overhead & remainder & 0.008\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+Thus the 64 per-vector derivative channels determine the file size; the ten
+convenience \code{avg/Tmunu} datasets are negligible.
+
 \subsection{Base-Oriented Production, Checkpoints, and Finalization}
 
 The production wrapper has a single shard output path; there is no monolithic
@@ -745,7 +854,7 @@ Attribute & Meaning \\
 \code{measurement} & \code{quark\_1pt}. \\
 \code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{flow\_times}
 & Gradient-flow schedule. \\
-\code{qext}, \code{pf}, \code{p\_2pt}
+\code{qext}
 & Momentum labels used by downstream analysis. \\
 \code{volume\_norm}
 & \(\Vthree\), the spatial-volume normalization. \\

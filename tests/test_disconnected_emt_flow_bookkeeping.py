@@ -9,6 +9,7 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     _normalize_flow_type,
     _unique_zero_momentum_index,
     emt_tensor_from_derivative_bilinear,
+    parse_multigrid_blocks,
     ringed_kinetic_pervec_from_derivative,
     validate_quark_gluon_loop_axes,
 )
@@ -17,6 +18,7 @@ from pyquda_measurement_utils.fermion_bilinear_basis import gamma_matrices_numpy
 from pyquda_measurement_utils.disconnected_shards import (
     append_completed_base,
     prepare_sample_log,
+    sample_log_fingerprint,
 )
 
 
@@ -33,6 +35,44 @@ def test_flow_type_normalization_accepts_supported_cases_only():
     except ValueError:
         return
     raise AssertionError("_normalize_flow_type should reject unsupported flow types")
+
+
+def test_multigrid_block_parser_supports_one_and_two_coarsening_levels():
+    assert parse_multigrid_blocks("8.8.4.4") == [[8, 8, 4, 4]]
+    assert parse_multigrid_blocks("4.4.4.4;4.4.4.4") == [
+        [4, 4, 4, 4], [4, 4, 4, 4]
+    ]
+    assert parse_multigrid_blocks([[8, 8, 4, 4]]) == [[8, 8, 4, 4]]
+    for invalid in ("", "4.4.4", "4.4.x.4", "4.4.0.4"):
+        with pytest.raises(ValueError):
+            parse_multigrid_blocks(invalid)
+
+
+def test_multigrid_blocks_are_measurement_identity():
+    common = {
+        "config_num": 7,
+        "qext": [[0, 0, 0, 0]],
+        "flow_type": "wilson",
+        "flow_epsilon": 0.1,
+        "flow_steps": 1,
+    }
+    one = EMTDisconnectedQuark1pt({**common, "multigrid": "4.4.4.4"})
+    two = EMTDisconnectedQuark1pt({
+        **common, "multigrid": "4.4.4.4;4.4.4.4"
+    })
+
+    class Info:
+        t_boundary = -1
+
+    inv = [-0.015, 1.0372, 1e-10, 1000]
+    rand = [8, 4, 0]
+    attrs_one = one._measurement_attrs(Info(), inv, rand, 7, 0, 8, 64**3)
+    attrs_two = two._measurement_attrs(Info(), inv, rand, 7, 0, 8, 64**3)
+    np.testing.assert_array_equal(attrs_one["multigrid_blocks"], [[4, 4, 4, 4]])
+    np.testing.assert_array_equal(
+        attrs_two["multigrid_blocks"], [[4, 4, 4, 4], [4, 4, 4, 4]]
+    )
+    assert sample_log_fingerprint(attrs_one) != sample_log_fingerprint(attrs_two)
 
 
 def test_ringed_kinetic_is_extracted_from_vector_derivative_diagonal():
@@ -72,6 +112,16 @@ def test_ringed_zero_momentum_should_be_unique():
             assert "exactly one zero momentum" in str(err)
         else:
             raise AssertionError("ringed output should reject missing or duplicate zero momentum")
+
+
+def test_emt_default_hp_ordering_is_isotropic_four_dimensional():
+    measurement = EMTDisconnectedQuark1pt({
+        "qext": [[0, 0, 0, 0]],
+        "flow_type": "wilson",
+        "flow_epsilon": 0.1,
+        "flow_steps": 1,
+    })
+    assert measurement.hp_ordering == "interleaved_xyzt_binary_projected_to_evenodd"
 
 
 def test_ringed_zero_momentum_validation_precedes_inverter_setup():

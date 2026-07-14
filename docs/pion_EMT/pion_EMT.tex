@@ -150,14 +150,25 @@ and the contraction is computed as
 
 The implementation scans all 16 gamma structures for the sink while keeping $\Gamma_{\text{src}}$ fixed. The 16 gamma matrices (in \code{my\_gammas}) are:
 
+They are the shared DeGrand--Rossi matrices from
+\code{fermion\_bilinear\_basis.py}:
+\begin{align}
+\gamma_1&=\begin{pmatrix}0&0&0&i\\0&0&i&0\\0&-i&0&0\\-i&0&0&0\end{pmatrix},&
+\gamma_2&=\begin{pmatrix}0&0&0&-1\\0&0&1&0\\0&1&0&0\\-1&0&0&0\end{pmatrix},\\
+\gamma_3&=\begin{pmatrix}0&0&i&0\\0&0&0&-i\\-i&0&0&0\\0&i&0&0\end{pmatrix},&
+\gamma_4&=\begin{pmatrix}0&0&1&0\\0&0&0&1\\1&0&0&0\\0&1&0&0\end{pmatrix},
+\end{align}
+with $\gamma_5=\operatorname{diag}(1,1,-1,-1)$.  The HDF5 file stores the
+same numerical matrices in \code{gamma\_matrices}.
+
 {
 \small
 \begin{center}
 \begin{tabular}{ll}
   \code{"5"} = $\gamma_5$, & \code{"T"} = $\gamma_4$, \\
-  \code{"T5"} = $\gamma_4\gamma_5$, & \code{"X"} = $\gamma_1$, \\
+  \code{"T5"} = raw $-\gamma_4\gamma_5$, & \code{"X"} = $\gamma_1$, \\
   \code{"X5"} = $\gamma_1\gamma_5$, & \code{"Y"} = $\gamma_2$, \\
-  \code{"Y5"} = $\gamma_2\gamma_5$, & \code{"Z"} = $\gamma_3$, \\
+  \code{"Y5"} = raw $-\gamma_2\gamma_5$, & \code{"Z"} = $\gamma_3$, \\
   \code{"Z5"} = $\gamma_3\gamma_5$, & \code{"I"} = $\mathbf{1}$, \\
   \code{"SXT"} = $\sigma_{14}$, & \code{"SXY"} = $\sigma_{12}$, \\
   \code{"SXZ"} = $\sigma_{13}$, & \code{"SYT"} = $\sigma_{24}$, \\
@@ -339,7 +350,7 @@ After this sum, explicit symmetrization enforces $T_{\mu\nu} = T_{\nu\mu}$:
     \big).
 \end{equation}
 
-The code in \code{get\_C3\_Tmunu\_symmetrized} implements this as:
+Channel by channel, the batched primitive kernel implements this as:
 
 \begin{verbatim}
 # First term: +1/2 * Tr[dst2 * gamma_nu * (D_mu prop_fw) * Gamma_src]
@@ -487,7 +498,9 @@ After the sequential inversion, the sink-summed three-point function takes the c
       \Big].
 \end{equation}
 
-This is the master formula used by both \code{get\_C3\_chi} and \code{get\_C3\_Tmunu\_symmetrized}.
+This is the master formula used by \code{get\_C3\_primitive\_bilinears}; the
+identity local channel gives \code{C3\_chi}, while the four vector derivative
+channels give \code{C3\_Tmunu}.
 
 
 \subsection{Symmetric Covariant Derivative on a Propagator}
@@ -599,8 +612,10 @@ The \code{connected\_3pt} method orchestrates the full measurement:
     \item Build and invert the meson fixed-sink sequential source (\code{create\_meson\_bw\_seq\_pyquda}).
     \item For each flow step:
     \begin{enumerate}
-      \item Compute $C_3^\chi(q,\tau)$ via \code{get\_C3\_chi}.
-      \item Compute $C_3^{\mu\nu,q}(q,\tau)$ via \code{get\_C3\_Tmunu\_symmetrized}.
+      \item Compute all 16 local and $16\times4$ derivative channels once via
+            \code{get\_C3\_primitive\_bilinears}.
+      \item Derive $C_3^\chi$ from the identity channel and
+            $C_3^{\mu\nu,q}$ from the symmetrized vector derivative channels.
       \item Advance the flowed propagators via \code{\_advance\_flowed\_props}.
     \end{enumerate}
   \end{enumerate}
@@ -623,6 +638,31 @@ The output file (written by \code{save\_emt\_quark\_3pt\_hdf5}) contains:
   \item \code{momentum\_transfer\_list}: list of $[q_x, q_y, q_z, q_t]$ arrays.
   \item HDF5 attributes: \code{measurement}, \code{spin}, \code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{n\_t\_separations}, \code{src\_interpolator}, \code{sink\_interpolator}, \code{contraction\_convention} (``B''), \code{meson\_sign} ($+1$), \code{n\_qext}.
 \end{itemize}
+
+The connected primitive axes differ from the disconnected EMTc axes.  The
+following reconstruction reproduces the stored tensor exactly:
+\begin{verbatim}
+with h5py.File(path, "r") as h5:
+    labels = [x.decode() for x in h5["gamma_list"][...]]
+    vector = [labels.index(x) for x in ("X", "Y", "Z", "T")]
+    D = h5["C3_derivative_bilinear"][...]
+    # D: [tsep,gamma,derivative,q,flow,t]
+    B = np.take(D, vector, axis=1)
+    T = 0.5 * (B + np.swapaxes(B, 1, 2))
+    T_file = T.transpose(0, 4, 3, 1, 2, 5)
+    np.testing.assert_allclose(T_file, h5["C3_Tmunu"][...])
+\end{verbatim}
+No spatial-volume factor is applied here: these are already contracted
+connected correlators.  The exact raw matrices and physical-basis conversion
+are documented in \code{docs/EMT\_gamma\_and\_raw\_bilinears.md}.
+
+The four main connected arrays have logical storage weights
+\begin{equation}
+\code{C3\_derivative:C3\_local:C3\_Tmunu:C3\_chi}=64:16:16:1.
+\end{equation}
+Thus in a large file their shares approach 65.98\%, 16.49\%, 16.49\%, and
+1.03\%, respectively.  Unlike the disconnected canonical file, the connected
+\code{C3\_Tmunu} is a sizable derived copy retained for direct downstream use.
 
 The meson 2pt diagnostic is saved separately by \code{save\_emt\_meson\_2pt\_hdf5} with:
 \begin{itemize}[nosep]

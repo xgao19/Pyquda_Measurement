@@ -86,6 +86,8 @@ python tests/run_smoke_tests.py
   position; source-independent EMT quark-loop tags do not.
 - Quark EMT 3pt files contain only 3pt observables.  Read denominators and full
   momentum coverage from the separate EMT 2pt files.
+- Proton `PpUnpol` two-point projection is `(C2[I] + C2[T])/4`, corresponding
+  to `(1+gamma_4)/4`; the source interpolator label `5` is not a sink projector.
 - Flow schedule is always measure first, then flow: step 0 is unflowed, the
   first interval uses ten `epsilon/10` substeps, and later intervals use one
   `epsilon` step.
@@ -103,6 +105,10 @@ python tests/run_smoke_tests.py
 
 ## EMT Disconnected One-Point Loops
 
+- For the current `l64c64a076` ensemble, `am_q=-0.015` is the strange test mass
+  and `am_q=-0.049` is the light test mass. Keep their data, sample logs, MG
+  benchmarks, and tuning caches in separate run directories; these values are
+  not universal defaults for other ensembles.
 - Never construct a distributed stochastic source by resetting the same
   backend RNG seed on every MPI rank.  Equal local shapes repeat the local
   field; use global-coordinate counter noise for decomposition independence.
@@ -130,6 +136,10 @@ python tests/run_smoke_tests.py
   summed, with the corresponding inversion cost.
 - Spatial HP and 4D HP both multiply a full-volume base source.  Spatial HP has
   time-independent probing signs; it is not a 3D or time-diluted source.
+- Flowed EMT defaults to isotropic 4D
+  `interleaved_xyzt_binary_projected_to_evenodd` HP.  The S8T8 counter-Z4 test
+  found 4D HP16 effective on every time slice, while spatial HP left temporal
+  neighbors uncancelled and increased variance.
 - Only MPI rank 0 should open the serial quark/gluon HDF5 output file.
 - The physical disconnected correlator requires ensemble subtraction:
   `<C2 L> - <C2><L>`.  A single-configuration product is only an unsubtracted

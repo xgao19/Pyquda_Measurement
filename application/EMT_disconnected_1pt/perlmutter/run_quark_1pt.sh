@@ -1,11 +1,36 @@
 #!/bin/bash
 set -euo pipefail
 
-if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
-  echo "Usage: $0 --config_num CFG" >&2
+config_num=""
+mg_block="8.8.4.4"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config_num)
+      [[ -z "$config_num" && $# -ge 2 && "${2:-}" =~ ^[0-9]+$ ]] || {
+        echo "--config_num requires one non-negative integer and may appear once" >&2
+        exit 2
+      }
+      config_num="$2"
+      shift 2
+      ;;
+    --mg-block)
+      [[ $# -ge 2 && -n "${2:-}" ]] || {
+        echo "--mg-block requires a value such as 8.8.4.4" >&2
+        exit 2
+      }
+      mg_block="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+if [[ -z "$config_num" ]]; then
+  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;X.Y.Z.T]]" >&2
   exit 2
 fi
-config_num="$2"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m4559/xgao/software_gradientflow}"
@@ -33,7 +58,7 @@ export EMT_1PT_N_ZN="${EMT_1PT_N_ZN:-4}"
 export EMT_1PT_RAND_SEED="${EMT_1PT_RAND_SEED:-0}"
 export EMT_1PT_NOISE_SCHEME="${EMT_1PT_NOISE_SCHEME:-zn}"
 export EMT_1PT_HP_NUM_VECTORS="${EMT_1PT_HP_NUM_VECTORS:-1}"
-export EMT_1PT_HP_ORDERING="${EMT_1PT_HP_ORDERING:-interleaved_xyz_binary_projected_to_evenodd}"
+export EMT_1PT_HP_ORDERING="${EMT_1PT_HP_ORDERING:-interleaved_xyzt_binary_projected_to_evenodd}"
 export EMT_1PT_BASE_START="${EMT_1PT_BASE_START:-0}"
 export EMT_1PT_BASE_STOP="${EMT_1PT_BASE_STOP:-$EMT_1PT_N_VEC}"
 export EMT_1PT_BLOCK_INTERVAL_SOLVES="${EMT_1PT_BLOCK_INTERVAL_SOLVES:-64}"
@@ -44,4 +69,5 @@ mkdir -p "$QUDA_RESOURCE_PATH" "$CUPY_CACHE_DIR" "$EMT_1PT_DATA_DIR"
 echo "Running disconnected quark EMT 1pt"
 python3 -u "$script_dir/Pyquda_EMT_disconnected_quark_1pt.py" \
   --config_num "$config_num" \
-  --mpi_geometry "$EMT_1PT_MPI_GEOMETRY"
+  --mpi_geometry "$EMT_1PT_MPI_GEOMETRY" \
+  --mg-block "$mg_block"

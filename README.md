@@ -17,7 +17,7 @@ The actively maintained workflows are:
 - Pion electromagnetic form-factor connected measurements.
 - Pion/meson EMT measurements with flowed quark and gluon observables.
 - Proton EMT connected measurements plus shared quark/gluon one-point outputs.
-- Shared EMT disconnected one-point workflows with optional hierarchical probing.
+- A guided EMT disconnected quark one-point workflow for fixed-cost stochastic and 4D hierarchical-probing convergence tests.
 - Shared qTMD/PDF disconnected one-point workflows for pion/proton analysis.
 - Existing proton qTMD and pion qTMDWF utilities used as mature references.
 
@@ -86,7 +86,7 @@ Runnable workflows live under `application/`.
 ```text
 application/EMT_meson/          Pion/meson EMT workflows.
 application/EMT_proton/         Proton EMT workflows.
-application/EMT_disconnected_1pt/ Shared quark/gluon EMT one-point workflows.
+application/EMT_disconnected_1pt/ Guided quark-loop, convergence, and optional proton C2/3pt workflow; gluon is an advanced add-on.
 application/qTMD_disconnected_1pt/ Shared qTMD/PDF one-point workflows.
 application/EMFF_pion/          Pion electromagnetic form factor workflow.
 application/pion_TMD_CG/        Pion qTMD/PDF-style workflow.
@@ -105,9 +105,8 @@ bash application/EMT_meson/perlmutter/run_quark_3pt.sh
 bash application/EMT_proton/perlmutter/run_proton_quark_3pt.sh
 bash application/EMT_proton/perlmutter/run_proton_quark_1pt.sh
 
-# Shared EMT disconnected one-point workflows
+# EMT disconnected quark one-point smoke (see its README for required run parameters)
 bash application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh --config_num 1000
-bash application/EMT_disconnected_1pt/perlmutter/run_gluon_1pt.sh --config_num 1000
 
 # Shared qTMD/PDF disconnected one-point workflow
 bash application/qTMD_disconnected_1pt/perlmutter/run_qTMD_1pt.sh --config_num 1000
@@ -247,6 +246,9 @@ validation runs and larger production-style tests.
 
 The EMT development files include detailed English module docstrings with the
 correlation-function definitions and the contraction formulas used by the code.
+The shared numerical Gamma definition, HDF5 basis transform, raw-bilinear
+analysis recipes, and per-file storage weights are documented in
+[`docs/EMT_gamma_and_raw_bilinears.md`](docs/EMT_gamma_and_raw_bilinears.md).
 
 For pion/meson EMT:
 
@@ -281,6 +283,9 @@ For quark/gluon one-point data:
   `interleaved_xyzt_binary_projected_to_evenodd`,
   `global_xyzt_gray_projected_to_evenodd`, and
   `spatial_xyz_then_t_gray_projected_to_evenodd`.
+- Flowed EMT production defaults to the isotropic 4D
+  `interleaved_xyzt_binary_projected_to_evenodd` ordering; spatial HP must be
+  selected explicitly for diagnostic comparisons.
 - All HP choices multiply a full-volume base source; spatial HP is not time
   dilution.  Four-dimensional fermion flow spreads the flowed fields in time,
   while the saved insertion-time axis remains explicit.

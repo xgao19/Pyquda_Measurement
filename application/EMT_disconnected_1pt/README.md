@@ -1,191 +1,375 @@
-# EMT Disconnected One-Point Workflows
+# EMT Disconnected Quark One-Point Benchmark on Perlmutter
 
-This application measures hadron-independent flowed one-point building blocks
-used for EMT disconnected diagrams.
-The Perlmutter entry points are:
+This application benchmarks stochastic estimators for the flowed quark
+one-point functions used in disconnected energy-momentum-tensor calculations.
+The primary numerical question is how quickly pure stochastic noise, 4D HP16,
+and 4D HP256 converge at the same Dirac-solve cost.
 
-```bash
-bash perlmutter/run_quark_1pt.sh --config_num 1000
-bash perlmutter/run_gluon_1pt.sh --config_num 1000
-```
-
-Quark production runs default to base-oriented shards.  A measurement job
-writes only recoverable parts; after every requested base is complete, run:
-
-```bash
-bash perlmutter/run_finalize_quark_1pt.sh --config_num 1000
-```
-
-The finalizer validates every base/HP interval before atomically publishing one
-canonical EMTc file, including its embedded ringed kinetic data.
-
-The default smoke-test gauge is:
+Two observables from the same canonical `EMTc` file are used for the comparison:
 
 ```text
-Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0
+the embedded ringed-fermion kinetic estimator K
+one selected EMT component, such as T44
 ```
 
-## Observables
+The same inversions, fermion flow, and covariant derivatives produce both
+observables. Comparing them is useful because `K` sums four vector-diagonal
+channels, whereas one `Tmunu` component probes a more specific part of the raw
+bilinear data.
 
-The quark workflow estimates the stochastic loop
+This is a one-gauge stochastic-estimator benchmark. It tests the measurement
+pipeline, source bookkeeping, and convergence at fixed inversion cost. It is
+not a gauge-ensemble determination of a ringed normalization or a physical
+disconnected matrix element.
+
+The main workflow is quark-only. A proton two-point function and a quark
+disconnected three-point building block can be produced as an optional final
+step. Gluon one-point production is not needed for this benchmark.
+
+## Further Reading
+
+This README is the main operational guide. The following repository documents
+provide the physics and convention details used by the code:
 
 ```text
-L_q,munu(q,tau;t_f) = sum_x exp(i q.x) xi^dagger(x,t_f) Gamma_munu eta(x,t_f)
+docs/EMT_disconnected_1pt/EMT_disconnected_1pt.pdf
+  Derives the stochastic flowed quark loop, explains why the source remains
+  full-volume under four-dimensional fermion flow, and documents HP and shard
+  bookkeeping.
+
+docs/EMT_gamma_and_raw_bilinears.md
+  Lists the exact 16-Gamma PyQUDA basis, axial signs, tensor convention, raw
+  HDF5 axes, and examples for reconstructing Tmunu and other bilinears.
+
+docs/EMT_disconnected_1pt/EMT_proton_disconnected_guide.md
+  Gives the proton C2 and disconnected C3 conventions, including
+  source-relative time alignment and ensemble vacuum subtraction.
+
+docs/flowed_quark_ringed_norm/flowed_quark_ringed_norm.md
+  Describes the dedicated standalone ringed-normalization workflow. That
+  workflow remains useful for high-statistics kinetic measurements, but it is
+  not required here because EMTc already contains the kinetic estimator.
 ```
 
-where `t_f` is the gradient-flow time.  The implementation stores the
-symmetrized upper-triangle components `mu <= nu` of `Tmunu`; the missing lower
-triangle is obtained by symmetry in analysis.
+## Relation to the Standalone Ringed-Norm Exercise
 
-The identity scalar bilinear is stored once in the full local Gamma basis.  A
-separate `flowed_noise_norm` dataset stores the flowed stochastic-source norm.
-The same EMTc derives the ringed-fermion kinetic trace from the zero-momentum
-diagonal derivative components under `derived/ringed`.  This reuses the exact EMT stochastic vectors
-and adds no inversion, fermion-flow, derivative, or MPI-gather work.  The
-standalone `application/flowed_quark_ringed_norm` workflow remains available
-for dedicated high-statistics and resumable measurements.
-
-The gluon workflow stores the flowed gluonic EMT building block
+If you previously ran the standalone flowed-quark ringed-norm benchmark, much
+of the stochastic workflow here will look familiar. Both calculations use:
 
 ```text
-L_g,munu(q,t_f) = sum_x exp(i q.x) O_g,munu(x,t_f)
+full-volume counter-based Z4 noise
+the same base-noise and 4D HP bookkeeping
+eta = D^{-1} xi
+the same fermion flow applied to xi and eta
+the same four covariant-derivative directions
+base/HP-part shards and a base-level sample log
+a separate destination-side finalizer
 ```
 
-again with only the upper triangle written.
-
-## Disconnected Diagram Combination
-
-For a hadron two-point function `C2_H(p,t)` and a one-point loop
-`L_munu(q,tau;t_f)`, the disconnected three-point building block is formed in
-analysis as
+The important difference is the observable being measured. The standalone
+workflow is specialized to the one spacetime-averaged kinetic trace needed for
+ringed-field normalization,
 
 ```text
-C3_disc,munu(pf,pi;t,tau;t_f)
-  = < C2_H(pf,t) L_munu(q,tau;t_f) >cfg
-    - < C2_H(pf,t) >cfg < L_munu(q,tau;t_f) >cfg
+K(t_f) = (1 / V4) sum_x
+         <bar_chi(t_f,x) overleftrightarrow_Dslash chi(t_f,x)>.
 ```
 
-with
+The EMT workflow instead keeps a complete time- and momentum-resolved local
+bilinear basis,
 
 ```text
-q = pf - pi
+L_A(q,tau;t_f)       for 16 Gamma_A,
+L^D_A,mu(q,tau;t_f)  for 16 Gamma_A and mu = X,Y,Z,T.
 ```
 
-The corresponding ratio is usually built as
+It uses the vector derivative channels to construct every symmetric `Tmunu`.
+The same stored diagonal channels also give
 
 ```text
-R_disc,munu(t,tau;t_f) = C3_disc,munu(t,tau;t_f) / C2_H(t)
+K_r(t_f,tau) = -2 / Vs * sum_mu
+               L^D_[gamma_mu,mu],r(q=0,t_f,tau),
 ```
 
-up to the same kinematic, renormalization, and gradient-flow matching factors
-used for the connected EMT analysis.  Vacuum subtraction must be performed at
-the ensemble-analysis level because the one-point function is hadron
-independent.
+so the spacetime-averaged kinetic estimator is included without another solve,
+flow, or derivative application. With identical action, flow, source, HP, and
+normalization conventions, this embedded result is a direct cross-check of the
+standalone kinetic contraction.
 
-The memory-bounded loop readers and absolute-to-source-relative time alignment
-used by `build_3pt` live in `application/analysis_helper`.  Application-level
-data reading and observable assembly are kept there; production measurements,
-operator contractions, and reusable computational infrastructure remain in
-`pyquda_measurement_utils`.
+The practical differences are summarized below.
+
+| aspect | standalone ringed norm | disconnected EMT quark 1pt |
+|---|---|---|
+| primary physics target | kinetic expectation `K`, followed by ensemble-level ringed normalization | local and one-derivative quark bilinears, including all `Tmunu` components |
+| resolved variables | flow time, with absolute time retained in raw data and averaged for `K` | Gamma, derivative direction, momentum, flow time, and absolute insertion time |
+| contraction per flow time | four vector-diagonal derivative terms summed directly | 16 local plus `16x4` derivative channels; `Tmunu` and `K` are derived from them |
+| inversion, flow, and derivative count | one inversion and one common flow per source; four derivative directions | the same counts per source; extra work is Gamma contraction, momentum projection, and I/O |
+| spin-color dilution | optional point spin-color dilution with 12 exact channels | not enabled in the current EMT production workflow |
+| canonical output | kinetic-only `FlowedQuarkRinged` file | full primitive `EMTc` file with averaged `Tmunu` and `derived/ringed` kinetic data |
+| typical use | dedicated high-statistics normalization study | reuse one quark loop for several hadron source times and study EMT or other bilinears |
+
+The EMT file is therefore much larger. Its 64 derivative channels dominate
+the storage, while the embedded kinetic data are a small derived view. The
+standalone calculation is preferable when only `K` is needed, particularly
+for dedicated high statistics or point spin-color dilution. The EMT workflow
+is preferable when the inversions should also support `Tmunu`, axial
+one-derivative operators, tensor currents, or later three-point analyses.
+
+There is also one historical interface difference. The earlier standalone
+exercise described fixed-interval `.block*.h5` files and ringed factors formed
+from individual block averages. Those files are no longer the current
+production format. The present standalone and EMT workflows both use
+base/HP-part shards and fingerprinted text sample logs. Their canonical
+per-configuration files contain kinetic measurements, while physical ringed
+factors must be computed only after averaging `K` over gauge configurations:
+
+```text
+average K over configurations first
+then evaluate the nonlinear ringed-normalization formula
+never average configuration- or block-local values of 1/K
+```
+
+This EMT benchmark still compares convergence using the embedded `K`, but it
+does not publish a ringed factor and does not turn a one-gauge stochastic test
+into a normalization measurement.
+
+## Physics Targets
+
+The quark measurement saves the primitive local and one-derivative bilinears
+
+```text
+L_A(q,tau;t_f)       = sum_x exp(i q.x) bar_chi Gamma_A chi
+L^D_A,mu(q,tau;t_f)  = sum_x exp(i q.x)
+                       bar_chi Gamma_A overleftrightarrow_D_mu chi
+```
+
+for all 16 Gamma matrices and four derivative directions. The symmetric quark
+EMT building block is derived from the four vector Gamma channels:
+
+```text
+B[nu,mu] = L^D_[gamma_nu,mu]
+T[mu,nu] = 0.5 * (B[mu,nu] + B[nu,mu])
+```
+
+The benchmark usually examines Euclidean `T44`, often called `T00` after the
+appropriate Euclidean-to-Minkowski interpretation. All stored primitives and
+derived EMT components are bare, unringed, and unrenormalized.
+
+The same EMTc file also contains the ringed-fermion kinetic estimator
+
+```text
+K_r(t_f,tau) = -2 / Vs * sum_mu
+               L^D_[gamma_mu,mu],r(q=0,t_f,tau)
+```
+
+under:
+
+```text
+derived/ringed/kinetic_pervec
+derived/ringed/kinetic_spacetime
+```
+
+The file deliberately does not contain a per-configuration inverse ringed
+factor. A physical factor must be formed from the configuration-averaged
+kinetic expectation value, not by averaging configuration-local values of
+`1/K`.
+
+## Mathematical Problem
+
+For one absolute insertion time `tau`, the flowed stochastic loop has the form
+
+```text
+xi_f  = K(t_f) xi
+eta_f = K(t_f) D^{-1} xi
+
+L_hat(tau,t_f) = xi^dag K^dag P_tau Gamma K D^{-1} xi
+```
+
+and its noise expectation is
+
+```text
+E[L_hat] = Tr[P_tau Gamma K D^{-1} K^dag].
+```
+
+`P_tau` keeps the output resolved in insertion time, so the physical observable
+contains a spatial sum rather than a time trace. The initial noise is still
+nonzero on the full four-dimensional lattice. The fermion-flow kernel spreads
+in all four Euclidean directions with characteristic radius approximately
+`sqrt(8*t_f)`, so restricting the initial source to one time slice would not
+give the same finite-flow estimator.
+
+The default noise is counter-based `Z4`. Each phase is a deterministic function
+of:
+
+```text
+global x,y,z,t
+spin and color
+configuration number
+base-noise index
+noise-stream salt
+```
+
+This makes the global source independent of the MPI decomposition. Do not
+replace it with identical calls to a backend RNG on every rank. Equal local
+lattice shapes and equal seeds can produce repeated rank-local arrays and
+incorrect cross-rank noise correlations. Adding the rank to a conventional
+seed avoids literal repetition for one geometry but still changes the source
+when the MPI decomposition changes.
+
+## Code Estimator
+
+For every effective source, the production code performs:
+
+```text
+1. Build one full-volume counter Z4 source xi.
+2. Solve eta = D^{-1} xi.
+3. Flow xi and eta through the same four-dimensional fermion-flow schedule.
+4. Construct each covariant derivative direction once.
+5. Contract all 16 local and 16x4 derivative Gamma channels.
+6. Project onto the requested spatial momenta at every absolute time.
+7. Write the per-source primitive data to an atomic shard part.
+```
+
+The default flow schedule is:
+
+```text
+flow_type    = wilson
+flow_steps   = 1
+flow_epsilon = 0.207936
+flow_times   = [0, 0.207936]
+```
+
+Thus `flow_index=0` is unflowed and `flow_index=1` is the fixed positive-flow
+entry used in the example convergence analysis.
+
+The measurement requires exactly one `q=0` entry because the embedded kinetic
+estimator is derived from that channel. The examples below use only `q=0` to
+keep the output small.
 
 ## Hierarchical Probing
 
-The quark workflow supports two stochastic-source schemes:
+The workflow supports:
 
 ```text
 EMT_1PT_NOISE_SCHEME=zn
 EMT_1PT_NOISE_SCHEME=hierarchical_probing
 ```
 
-The default base source is full-volume counter-based `Z4` noise.  Its fixed
-hash key contains the global space-time coordinate, spin, color, configuration,
-base-noise index, and `EMT_1PT_RAND_SEED` stream salt, so the global source is
-unchanged when the MPI decomposition changes.  `EMT_1PT_N_ZN` defaults to `4`
-and the stream salt defaults to `0`.
-
-Do not replace this generator with identical calls to `xp.random.seed` on all
-MPI ranks.  Equal-shaped local lattices would receive the same local noise,
-creating artificial cross-rank correlations.  Adding the rank to the seed is
-still decomposition dependent; global-coordinate counters are required for
-production reproducibility.
-
-For hierarchical probing,
+One full-volume random `Z4` source is called a `base`. Pure stochastic noise
+uses one effective vector per base. Hierarchical probing multiplies the same
+random base by a deterministic sequence of HP sign vectors:
 
 ```text
-effective_n_inversions = n_base_noise * hp_num_vectors
+L_base = (1 / N_HP) sum_h L_[base,h]
 ```
 
-where `n_base_noise` is `EMT_1PT_N_VEC` and `hp_num_vectors` is
-`EMT_1PT_HP_NUM_VECTORS`.  `hp_num_vectors` must be a positive power of two.
-
-Site-orderings currently available for quark HP include:
+The solve count is:
 
 ```text
-EMT_1PT_HP_ORDERING=interleaved_xyz_binary_projected_to_evenodd
-EMT_1PT_HP_ORDERING=interleaved_xyzt_binary_projected_to_evenodd
-EMT_1PT_HP_ORDERING=global_xyzt_gray_projected_to_evenodd
-EMT_1PT_HP_ORDERING=spatial_xyz_then_t_gray_projected_to_evenodd
+effective solves = N_VEC * HP_NUM_VECTORS
 ```
 
-The default is `interleaved_xyz_binary_projected_to_evenodd`.  The full-volume
-base noise still has independent counter values at every time coordinate; only
-the optional HP sign pattern is time independent.  The 4D orderings remain
-available for direct variance comparisons.
+where `N_VEC` is the number of randomized bases, not the number of effective
+sources.
 
-No spin-color dilution or time dilution is currently implemented in this
-workflow.
+The three comparison cases are:
 
-## Why the Source Remains Four Dimensional
+| case | noise scheme | `N_HP` | solves per complete base |
+|---|---|---:|---:|
+| pure Z4 | `zn` | 1 | 1 |
+| Z4 + HP16 | `hierarchical_probing` | 16 | 16 |
+| Z4 + HP256 | `hierarchical_probing` | 256 | 256 |
 
-The code flows the noise and solution together,
+The default ordering is:
 
 ```text
-xi_f  = K(t_f) xi
-eta_f = K(t_f) D^{-1} xi
+interleaved_xyzt_binary_projected_to_evenodd
 ```
 
-where `K(t_f)` is the four-dimensional gauge-covariant fermion-flow kernel.
-For the projector `P_tau` onto one absolute insertion time, the estimator is
+It resolves nearby sites in all four Euclidean directions. The HP signs are
+multiplied by a full-volume random base; HP16 and HP256 are not time-diluted
+sources.
+
+Only complete HP bases are independent stochastic estimator units. An HP256
+prefix containing 16, 64, or 128 vectors is a checkpoint, not an additional
+unbiased sample for the uncertainty estimate. Consequently, a 256-solve HP256
+run with one base can test the data path but cannot provide a base-level SEM.
+
+Useful fixed-cost choices are:
+
+| total solves | pure bases | HP16 bases | HP256 bases | interpretation |
+|---:|---:|---:|---:|---|
+| 512 | 512 | 32 | 2 | pipeline and preliminary comparison |
+| 2048 | 2048 | 128 | 8 | initial fixed-gauge comparison |
+| 8192 | 8192 | 512 | 32 | more stable HP256 variance estimate |
+
+## Shards, Sample Log, and Finalization
+
+Production writes base/HP-part shards rather than one monolithic HDF5 file.
+With the default 64-solve part interval, example names are:
 
 ```text
-L_hat(tau,t_f) = xi^dag K^dag P_tau Gamma K D^{-1} xi
-E[L_hat]       = Tr[P_tau Gamma K D^{-1} K^dag].
+<canonical-stem>.base000003.part0000.hp0000-0063.h5
+<canonical-stem>.base000003.part0001.hp0064-0127.h5
 ```
 
-`P_tau` keeps the physical output resolved in time, so the observable still
-sums only over space.  The initial source is nevertheless full-volume because
-fermion flow spreads in all four Euclidean directions with characteristic
-radius about `sqrt(8*t_f)`.  A source restricted to one initial time projector
-generally omits finite-flow contributions.  A complete time-dilution basis
-would remain unbiased after summing every projector, but would require the
-corresponding extra inversions.  The detailed derivation is in
-`docs/EMT_disconnected_1pt/EMT_disconnected_1pt.tex`.
+Each complete part is first written to a temporary file and then atomically
+renamed. After every part of one base has closed successfully, rank 0 appends
+one exact line to:
 
-Spatial HP does not change this conclusion: its sign pattern is independent of
-time, but it still multiplies a full-volume `Z4` base source that is nonzero on
-every time slice.  Isotropic 4D HP also remains full-volume and differs only in
-how probing signs are assigned.
+```text
+<data>/sample_log_disconnected/<canonical-stem>.log
+```
 
-## HDF5 Layout
+For example:
 
-Quark output:
+```text
+# disconnected_sample_log_v1 sha256=<run-fingerprint> canonical=<stem>
+base000000
+base000001
+```
+
+Production resume reads only this text log. A logged base is skipped without
+checking whether its shard files are still present, so completed shards may be
+transferred immediately. An unlogged base is recomputed from its first HP
+vector. Part-level resume inside a base is intentionally not supported.
+
+The finalizer is a separate destination-side operation. It does not read the
+sample log. It validates the complete base/HP layout and metadata while
+streaming all parts into one canonical file:
+
+```text
+EMTc/<lat>.EMTc.<cfg>.<ama>.<setup-tag>.h5
+```
+
+Missing parts, incomplete HP intervals, mixed parameters, or an incompatible
+operator schema cause finalization to fail before publication. An existing
+canonical file is not replaced by an incomplete result.
+
+Nonoverlapping base ranges can be processed by separate jobs. Two jobs must
+not compute the same base range.
+
+## Canonical HDF5 Layout
+
+The finalized quark file contains:
 
 ```text
 attrs/
-  measurement
+  measurement, config_num
+  mass, csw, tol, maxiter
   flow_type, flow_epsilon, flow_steps, flow_times
-  qext
-  volume_norm
+  qext, volume_norm
+  n_zn, noise_stream, noise_generator, noise_counter_order
+  noise_scheme, n_base_noise, hp_num_vectors, hp_ordering
+  effective_n_inversions
   emt_operator_schema_version
   gamma_basis_schema, gamma_basis_order
-  mass, csw, tol, maxiter
-  n_vec, n_base_noise, effective_n_inversions
-  n_zn, config_num, noise_stream
-  noise_generator, noise_counter_order
-  noise_scheme, hp_num_vectors, hp_ordering
 
-gamma_list, gamma_pyquda_ids, gamma_matrices
-physical_gamma_list, physical_from_pyquda
+gamma_list
+gamma_pyquda_ids
+gamma_matrices
+physical_gamma_list
+physical_from_pyquda
 derivative_directions
 
 raw/local_bilinear_pervec
@@ -195,143 +379,632 @@ raw/source_index
 raw/base_noise_index
 raw/hp_index
 
-avg/flowed_noise_norm
 avg/local_bilinear
 avg/derivative_bilinear
-avg/Tmunu/T11, T12, ..., T44
+avg/flowed_noise_norm
+avg/Tmunu/T11 ... T44
+
 derived/ringed/kinetic_pervec
 derived/ringed/kinetic_spacetime
 ```
 
-The primitive shapes are
+The primitive shapes are:
 
 ```text
-raw/local_bilinear_pervec      [N_eff,16,Nq,Nflow,Nt]
-raw/derivative_bilinear_pervec [N_eff,16,4,Nq,Nflow,Nt]
+raw/local_bilinear_pervec      [source,16,q,flow,t_abs]
+raw/derivative_bilinear_pervec [source,16,4,q,flow,t_abs]
+raw/flowed_noise_norm_pervec   [source,q,flow,t_abs]
 ```
-
-They contain the complete PyQUDA bit-mask basis in `gamma_list` order.  The
-stored matrix `physical_from_pyquda` converts raw channels to a convention in
-which every axial channel means `gamma_mu gamma5`; in particular raw `Y5` and
-`T5` acquire a minus sign.  Raw tensor channels are
-`[gamma_mu,gamma_nu]/2`; multiply them by `1j` for the Hermitian tensor
-convention.  Primitive data are unsymmetrized and unrenormalized.
-
-The historical EMT is a derived view.  Select raw vector channels in
-`[X,Y,Z,T]` order and form
-
-```text
-B[nu,mu] = derivative_bilinear[gamma_nu,mu]
-T[mu,nu] = (B[mu,nu] + B[nu,mu]) / 2
-```
-
-Only the ten upper-triangle averaged `Tmunu` datasets are duplicated for direct
-EMT analysis; the large raw symmetric tensor is not stored.
-
-Canonical quark-loop files are source independent and use
-`EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5`.  A single full-time loop file is shared
-by all hadron two-point source times on that configuration.
-`build_3pt` converts both quark and gluon absolute-time loops to source-relative
-time with `roll(time_axis, -source_t)` before constructing C3 or ratios.
-
-The same EMTc contains the kinetic-only derived group:
-
-```text
-derived/ringed/kinetic_pervec
-derived/ringed/kinetic_spacetime
-```
-
-It intentionally omits the ringed-field and ringed-bilinear factors.
-Form the ensemble mean of `derived/ringed/kinetic_spacetime` first and apply the ringed
-factor formula only afterward; averaging configuration-local inverse factors
-would be biased.  The identity
-
-```text
-derived/ringed/kinetic_pervec = -2/Vs * sum_mu \
-    raw/derivative_bilinear_pervec[:,gamma_mu,mu,q0,:,:]
-```
-
-is an exact file-level cross-check.  `qext` must contain exactly one zero
-momentum for every EMT quark measurement.
 
 The bookkeeping datasets mean:
 
 ```text
 source_index      effective source index after HP expansion
-base_noise_index  original stochastic base-noise index
-hp_index          hierarchical-probing vector index for that base noise
+base_noise_index  randomized full-volume source index
+hp_index          HP sign-vector index within that base
 ```
 
-Gluon output:
+The large per-source derivative primitive controls the file size. For the
+current 8192-solve, nine-momentum S8T8 file, the measured complete-file shares
+are approximately:
 
-```text
-EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5
-attrs/
-  measurement
-  config_num
-  flow_type, flow_epsilon, flow_steps, flow_times
-  qext
-  volume_norm
-  upper_triangle_only
+| part | file share |
+|---|---:|
+| `raw/derivative_bilinear_pervec` | 78.886% |
+| `raw/local_bilinear_pervec` | 19.722% |
+| `raw/flowed_noise_norm_pervec` | 1.233% |
+| `derived/ringed/kinetic_pervec` | 0.137% |
+| all averaged primitives and `avg/Tmunu` | 0.014% |
+| metadata, bookkeeping, and HDF5 overhead | 0.008% |
 
-Tmunu/T11, T12, ..., T44
-```
+## Quick Start
 
-The gluon loop is source independent and is reused for every hadron source on
-the same configuration.  Shared quark and gluon wrappers both read
-`EMT_1PT_FLOW_EPSILON`, whose default is `0.207936`.
-
-## Minimal HP Smoke Test
-
-Example:
+First run a two-solve HP smoke test on the repository S8T8 gauge:
 
 ```bash
-cd /global/cfs/cdirs/m4559/xgao/software_gradientflow/Pyquda_Measurement/application/EMT_disconnected_1pt/perlmutter
+ROOT=${MEASUREMENT_ROOT:?Activate your PyQUDA environment and set MEASUREMENT_ROOT}
+APP=$ROOT/application/EMT_disconnected_1pt/perlmutter
+WORK=/global/cfs/cdirs/m5208/xgao/runs/TEST/emt_disconnected_quark_demo
+DATA=$WORK/data
+mkdir -p "$DATA"
 
-EMT_1PT_FLOW_STEPS=1 \
+EMT_1PT_DATA_DIR="$DATA" \
+EMT_1PT_GAUGE_PATH="$ROOT/test_gauge/S8T8_wilson_b6.0" \
+EMT_1PT_LAT_TAG=S8T8 \
+EMT_1PT_SETUP_TAG=smoke_hp2 \
 EMT_1PT_QMAX=0 \
+EMT_1PT_QZ_MAX=0 \
+EMT_1PT_FLOW_STEPS=1 \
 EMT_1PT_N_VEC=1 \
+EMT_1PT_N_ZN=4 \
 EMT_1PT_NOISE_SCHEME=hierarchical_probing \
 EMT_1PT_HP_NUM_VECTORS=2 \
-EMT_1PT_HP_ORDERING=interleaved_xyz_binary_projected_to_evenodd \
-bash run_quark_1pt.sh --config_num 1000
+bash "$APP/run_quark_1pt.sh" --config_num 0 --mg-block 8.8.4.4
 ```
 
-Expected checks:
+`--config_num` is required even for the test gauge. It is part of the
+counter-noise identity and is never inferred from an environment variable.
+
+Expected production files are:
 
 ```text
-attrs/noise_scheme = hierarchical_probing
-attrs/hp_num_vectors = 2
-attrs/effective_n_inversions = 2
-raw/source_index = [0, 1]
-raw/base_noise_index = [0, 0]
-raw/hp_index = [0, 1]
+$DATA/EMTc/shards/
+  S8T8.EMTc.0.0.smoke_hp2.base000000.part0000.hp0000-0001.h5
+
+$DATA/sample_log_disconnected/
+  S8T8.EMTc.0.0.smoke_hp2.log
 ```
 
-## Base Shards And Resume
+The log should contain `base000000`. Running the same command again should skip
+that base without opening its shard HDF5 file.
 
-Production controls are:
+Finalize the smoke output with the same data directory, lattice tag, setup tag,
+configuration, and total base count:
+
+```bash
+EMT_1PT_DATA_DIR="$DATA" \
+EMT_1PT_LAT_TAG=S8T8 \
+EMT_1PT_SETUP_TAG=smoke_hp2 \
+EMT_1PT_N_VEC=1 \
+bash "$APP/run_finalize_quark_1pt.sh" --config_num 0
+```
+
+Expected canonical output:
 
 ```text
-EMT_1PT_BASE_START=0
-EMT_1PT_BASE_STOP=EMT_1PT_N_VEC
-EMT_1PT_BLOCK_INTERVAL_SOLVES=64
-EMT_1PT_SHARD_DIR=<data>/EMTc/shards
+$DATA/EMTc/S8T8.EMTc.0.0.smoke_hp2.h5
 ```
 
-Each part is named with its base, part, and half-open HP interval, for example
-`base000003.part0001.hp0064-0127.h5`. After every part of a base is atomically
-written, rank 0 appends `base000003` to
-`<data>/sample_log_disconnected/<canonical-stem>.log`. Resume reads only this
-log and never probes HDF5, so logged shards may already have been transferred.
-An unlogged base is recomputed from its first HP vector. Partial HP parts are
-not independently resumable estimators. Jobs may process non-overlapping base
-ranges in parallel, but overlapping ranges are unsupported.
+Inspect the main metadata and bookkeeping:
 
-There is no monolithic production mode.  Configuration identity is accepted
-only through the required `--config_num` CLI option; it is never inferred from
-an environment variable or silently defaulted to zero.  Small numerical references belong in
-tests. The destination-side finalizer checks schema, metadata, HP coverage and
-bookkeeping once while merging; it does not use the production sample log.
-`config_num` is mandatory and HDF5 provenance stores only
-`noise_stream`, not a duplicate `rand_seed` alias.
+```bash
+H5="$DATA/EMTc/S8T8.EMTc.0.0.smoke_hp2.h5"
+PY=${PYTHON:-python3}
+
+"$PY" - "$H5" <<'PY'
+import sys
+import h5py
+
+with h5py.File(sys.argv[1], "r") as h5:
+    for key in (
+        "config_num", "n_zn", "noise_scheme", "hp_num_vectors",
+        "n_base_noise", "effective_n_inversions", "hp_ordering",
+        "emt_operator_schema_version", "flow_times", "qext",
+    ):
+        print(f"{key}: {h5.attrs[key]}")
+    print("base_noise_index:", h5["raw/base_noise_index"][...])
+    print("hp_index:        ", h5["raw/hp_index"][...])
+    print("kinetic shape:   ", h5["derived/ringed/kinetic_pervec"].shape)
+    print("T44 shape:       ", h5["avg/Tmunu/T44"].shape)
+PY
+```
+
+The smoke output should report:
+
+```text
+n_base_noise           = 1
+hp_num_vectors         = 2
+effective_n_inversions = 2
+base_noise_index       = [0, 0]
+hp_index               = [0, 1]
+```
+
+This smoke test checks the environment, source bookkeeping, shard writer, and
+finalizer. It is too small to compare stochastic convergence.
+
+## Fixed-Cost Benchmark
+
+The following shell function runs one method through the normal production
+wrapper. All methods use the same gauge, configuration, counter stream, Dirac
+parameters, flow schedule, momentum grid, and 4D HP ordering.
+
+```bash
+run_method () {
+  label=$1
+  scheme=$2
+  hp=$3
+  bases=$4
+  EMT_1PT_DATA_DIR="$DATA" \
+  EMT_1PT_GAUGE_PATH="$ROOT/test_gauge/S8T8_wilson_b6.0" \
+  EMT_1PT_LAT_TAG=S8T8 \
+  EMT_1PT_SETUP_TAG="$label" \
+  EMT_1PT_QMAX=0 \
+  EMT_1PT_QZ_MAX=0 \
+  EMT_1PT_FLOW_STEPS=1 \
+  EMT_1PT_N_VEC="$bases" \
+  EMT_1PT_N_ZN=4 \
+  EMT_1PT_RAND_SEED=0 \
+  EMT_1PT_NOISE_SCHEME="$scheme" \
+  EMT_1PT_HP_NUM_VECTORS="$hp" \
+  EMT_1PT_HP_ORDERING=interleaved_xyzt_binary_projected_to_evenodd \
+  bash "$APP/run_quark_1pt.sh" --config_num 0 --mg-block 8.8.4.4
+}
+```
+
+For a 512-solve pilot comparison:
+
+```bash
+run_method benchmark_pure  zn                       1   512
+run_method benchmark_hp16  hierarchical_probing   16    32
+run_method benchmark_hp256 hierarchical_probing  256     2
+```
+
+For a more useful 2048-solve comparison, change the base counts to:
+
+```text
+pure:   2048 bases
+HP16:    128 bases
+HP256:     8 bases
+```
+
+If several GPU jobs share one method, keep `EMT_1PT_N_VEC` equal to the full
+base count in every job and assign nonoverlapping half-open intervals:
+
+```text
+EMT_1PT_BASE_START=<first base>
+EMT_1PT_BASE_STOP=<one past the last base>
+```
+
+For example, two HP16 jobs for 128 total bases may use `[0,64)` and `[64,128)`.
+They may share the same fingerprinted sample log. Overlapping ranges are not a
+supported scheduling mode.
+
+After all bases are complete, finalize each method:
+
+```bash
+finalize_method () {
+  label=$1
+  bases=$2
+  EMT_1PT_DATA_DIR="$DATA" \
+  EMT_1PT_LAT_TAG=S8T8 \
+  EMT_1PT_SETUP_TAG="$label" \
+  EMT_1PT_N_VEC="$bases" \
+  bash "$APP/run_finalize_quark_1pt.sh" --config_num 0
+}
+
+finalize_method benchmark_pure  512
+finalize_method benchmark_hp16   32
+finalize_method benchmark_hp256   2
+```
+
+For the 2048-solve case, use the corresponding base counts instead.
+
+## Convergence Analysis
+
+The analysis helper reads finalized EMTc files and groups all HP vectors of one
+randomized base before computing cumulative statistics. It reads only the one
+or two vector-derivative channels needed for the selected symmetric `Tmunu`;
+it does not load the full 16x4 primitive into memory.
+
+Run:
+
+```bash
+PY=${PYTHON:-python3}
+
+"$PY" "$ROOT/application/analysis_helper/emt_quark_1pt_convergence.py" \
+  --input pure="$DATA/EMTc/S8T8.EMTc.0.0.benchmark_pure.h5" \
+  --input HP16="$DATA/EMTc/S8T8.EMTc.0.0.benchmark_hp16.h5" \
+  --input HP256="$DATA/EMTc/S8T8.EMTc.0.0.benchmark_hp256.h5" \
+  --flow_index 1 \
+  --component T44 \
+  --output_dir "$WORK/analysis"
+```
+
+The outputs are:
+
+```text
+analysis/cumulative_statistics.csv
+analysis/endpoint_summary.csv
+analysis/ringed_kinetic_convergence.png
+analysis/ringed_kinetic_convergence.pdf
+analysis/t44_convergence.png
+analysis/t44_convergence.pdf
+```
+
+Each figure contains:
+
+```text
+top:    cumulative real mean with a one-SEM band
+bottom: SEM / abs(real mean), on a logarithmic scale
+x axis: Dirac solves at complete-base boundaries
+```
+
+Use the same solve cost when comparing methods. For example, HP256 appears only
+at multiples of 256 solves. A smooth-looking partial HP prefix is not a valid
+additional base-level estimator.
+
+Useful diagnostics include:
+
+- whether the cumulative means from all methods approach compatible values;
+- whether the imaginary parts in the CSV are consistent with the expected
+  symmetries and fixed-gauge fluctuations;
+- the relative SEM or SEM-squared ratio at matched solve counts;
+- whether conclusions from the ringed kinetic agree with those from `T44`;
+- how the HP256 uncertainty changes as the number of complete randomized bases
+  increases.
+
+An SEM that temporarily increases does not by itself indicate a code error,
+especially when HP256 has only a few complete bases. Fixed-cost efficiency is
+assessed from variance or SEM squared, not only from how smooth a cumulative
+curve appears.
+
+## From S8T8 to the l64 Ensemble
+
+The S8T8 workflow above is the safest place to learn the source bookkeeping,
+shard layout, finalizer, and complete-base convergence analysis. After it
+works, change the ensemble-dependent inputs rather than copying the S8T8
+physics parameters into a production-size run.
+
+For the current `l64c64a076` ensemble and configuration 1050, the two test
+masses are:
+
+| flavor label | bare mass `am_q` | run directory |
+|---|---:|---|
+| strange | `-0.015` | `EMT_disconnected_1pt_cfg1050_strange_am_m0p015` |
+| light | `-0.049` | `EMT_disconnected_1pt_cfg1050_light_am_m0p049` |
+
+These values are specific to this ensemble. They are not general strange- and
+light-quark defaults and must not be reused for another ensemble without
+checking its tuned action parameters.
+
+The fixed gauge used by both tests is:
+
+```text
+/global/cfs/cdirs/m5208/xgao/ensembles/
+l6464f21b7130m00119m0322a.nersc.cg_high_prec/fixed_GLU/
+l6464f21b7130m00119m0322a.1050.coulomb.1e-14
+```
+
+The prepared run roots are:
+
+```text
+/global/cfs/cdirs/m5208/xgao/runs/l64c64a076/
+  EMT_disconnected_1pt_cfg1050_strange_am_m0p015/
+  EMT_disconnected_1pt_cfg1050_light_am_m0p049/
+```
+
+The strange directory preserves the previous `am_q=-0.015` benchmark, tuning
+cache, logs, and partial HP256 shards. Its base zero is not complete: the
+sample log has no completed-base line, so a resume recomputes that entire base.
+The light directory deliberately starts without HDF5 data, a sample log, MG
+results, or a tuning cache.
+
+Before changing from S8T8 to either l64 test, check every item in this list:
+
+```text
+gauge path and configuration number
+lattice tag and lattice dimensions
+quark flavor label and bare mass
+clover coefficient, tolerance, and maximum iterations
+MPI geometry and local lattice dimensions
+run, data, shard, sample-log, log, and tuning-cache roots
+multigrid hierarchy
+counter stream, total base count, and scheduled base range
+flow schedule, momenta, HYP preprocessing, and operator schema
+```
+
+On four Perlmutter GPU nodes, request and verify the allocation with:
+
+```bash
+salloc -N 4 -q interactive -t 04:00:00 \
+  -C gpu --gpus-per-node=4 -A m5208_g
+
+cd /global/cfs/cdirs/m5208/xgao/runs/l64c64a076/\
+EMT_disconnected_1pt_cfg1050_light_am_m0p049
+cp local_software.example.sh local_software.sh
+# Edit local_software.sh to activate your environment and point to your
+# Pyquda_Measurement checkout and QUDA install.
+./preflight.sh
+```
+
+The intended layout is 16 MPI ranks, four ranks per node, one A100 per rank,
+MPI geometry `2.2.2.2`, and a local lattice of `32^4` per GPU.
+
+It is also valid to skip the S8T8 exercise and begin directly with the l64
+test. In that case, do not skip the following staged checks:
+
+1. Run the 16-rank GPU-binding and local-lattice preflight.
+2. Benchmark `8.8.4.4`, `4.4.4.4`, and `4.4.4.4;4.4.4.4` at the selected mass.
+3. Exclude the first autotuning solve and inspect the later solve times.
+4. Complete one real pure-Z4 base.
+5. Complete one real 4D-HP16 base.
+6. Complete one real 4D-HP256 base.
+7. Inspect timing, convergence, peak memory, shards, and sample logs before
+   starting the full 2048-solve comparison.
+
+Changing the mass changes the Dirac operator and multigrid behavior. Never
+reuse the strange MG result or QUDA tuning cache as the official light
+benchmark. Use completely separate data, sample-log, cache, and result
+directories even though the gauge and configuration are the same.
+
+The first solve includes QUDA autotuning and is a warmup. For subsequent
+performance work, record at least:
+
+```text
+gauge read and HYP preprocessing
+multigrid setup
+Dirac gauge load or restore
+inversion
+fermion flow
+local and derivative bilinear contractions
+HDF5 shard write
+```
+
+The inversion time alone is not the EMT per-source cost. In the initial l64
+strange test, repeated gauge restoration after fermion flow and the 64
+derivative channels were important enough to time separately. Optimize and
+retest this breakdown before committing a long light-quark production run.
+
+## Reconstructing the Embedded Kinetic Estimator
+
+The following file-level check rebuilds the embedded kinetic data from the raw
+vector-diagonal derivative channels:
+
+```python
+import h5py
+import numpy as np
+
+with h5py.File(path, "r") as h5:
+    labels = [value.decode() for value in h5["gamma_list"][...]]
+    vector = [labels.index(label) for label in ("X", "Y", "Z", "T")]
+    qext = np.asarray(h5.attrs["qext"])
+    q0 = np.flatnonzero(np.all(qext[:, :3] == 0, axis=1)).item()
+    derivative = h5["raw/derivative_bilinear_pervec"]
+    diagonal = sum(
+        derivative[:, vector[mu], mu, q0, :, :]
+        for mu in range(4)
+    )
+    expected = -2 * diagonal / h5.attrs["volume_norm"]
+    np.testing.assert_allclose(
+        expected,
+        h5["derived/ringed/kinetic_pervec"],
+    )
+```
+
+To reconstruct every averaged `Tmunu` without loading the source axis:
+
+```python
+with h5py.File(path, "r") as h5:
+    labels = [value.decode() for value in h5["gamma_list"][...]]
+    vector = [labels.index(label) for label in ("X", "Y", "Z", "T")]
+    derivative = h5["avg/derivative_bilinear"][...]
+    B = np.take(derivative, vector, axis=0)  # [nu,mu,q,flow,t_abs]
+    T = 0.5 * (B + np.swapaxes(B, 0, 1))
+    np.testing.assert_allclose(T[3, 3], h5["avg/Tmunu/T44"][...])
+```
+
+`avg/derivative_bilinear` is already averaged over effective sources and
+divided by the spatial volume. Error analysis must instead use the raw source
+axis and form complete base averages first.
+
+## Optional Proton C2 and Quark Disconnected C3
+
+The canonical quark loop is independent of the hadron source position and
+source time. One full-time EMTc file can therefore be reused for several C2
+sources on the same gauge configuration.
+
+Produce one proton C2 with the same gauge and momentum setup:
+
+```bash
+EMT_1PT_DATA_DIR="$DATA" \
+EMT_1PT_GAUGE_PATH="$ROOT/test_gauge/S8T8_wilson_b6.0" \
+EMT_1PT_LAT_TAG=S8T8 \
+EMT_1PT_QMAX=0 \
+EMT_1PT_SRC_POS=0.0.0 \
+EMT_1PT_SRC_T=0 \
+EMT_DISC_P2PT_QMAX=0 \
+bash "$APP/run_proton_2pt.sh" --config_num 0
+```
+
+Then combine the C2 with one canonical quark loop. The builder is quark-only by
+default and does not require a gluon file:
+
+```bash
+EMT_1PT_DATA_DIR="$DATA" \
+EMT_1PT_LAT_TAG=S8T8 \
+EMT_1PT_SETUP_TAG=benchmark_pure \
+EMT_1PT_SRC_POS=0.0.0 \
+EMT_1PT_SRC_T=0 \
+EMT_DISC_T_SEPS=2 \
+bash "$APP/run_build_disconnected_3pt.sh" --configs 0
+```
+
+EMTc stores loops at absolute lattice time. Before forming the product, the
+builder converts them to source-relative time:
+
+```text
+L_rel(tau_rel) = L_abs((source_t + tau_rel) mod Nt)
+```
+
+which is implemented as `roll(time_axis, -source_t)`.
+
+For one configuration, the output is only an unsubtracted `C2 * loop`
+diagnostic. The physical disconnected building block requires a gauge ensemble
+covariance:
+
+```text
+C3_disc = <C2 L>_cfg - <C2>_cfg <L>_cfg.
+```
+
+Run the builder with an explicit configuration list after producing matching
+C2 and EMTc files for every configuration:
+
+```bash
+bash "$APP/run_build_disconnected_3pt.sh" --configs 100,102,104
+```
+
+Stochastic bases on one configuration are not substitutes for independent
+gauge configurations in the vacuum subtraction.
+
+Gluon data can be included later with:
+
+```bash
+bash "$APP/run_build_disconnected_3pt.sh" \
+  --configs 100,102,104 \
+  --include_gluon
+```
+
+That advanced path requires matching canonical gluon files and matching
+momentum and flow-time axes. It is outside the quark estimator benchmark.
+
+## Code Map
+
+The Perlmutter application layer contains:
+
+```text
+run_quark_1pt.sh
+  Activates the current PyQUDA/QUDA environment, supplies stable defaults, and
+  calls the quark production driver.
+
+Pyquda_EMT_disconnected_quark_1pt.py
+  Parses the explicit configuration, constructs qext/flow/noise parameters,
+  reads and preprocesses the gauge, and starts base-range production.
+
+run_finalize_quark_1pt.sh
+Pyquda_EMT_disconnected_finalize_quark_1pt.py
+  Stream shards into one canonical EMTc file.
+
+run_proton_2pt.sh
+Pyquda_EMT_disconnected_proton_2pt.py
+  Optional proton C2 measurement.
+
+run_build_disconnected_3pt.sh
+Pyquda_EMT_disconnected_build_3pt.py
+  Optional quark-only C2/loop combination; gluon is explicitly opt-in.
+```
+
+Shared production implementation:
+
+```text
+pyquda_measurement_utils/Disconnected_1pt_EMT_vibe_develop.py
+  Flowed quark contraction, shard production, and EMTc finalizer.
+
+pyquda_measurement_utils/Disconnected_utils_vibe_develop.py
+  Counter noise, HP sign patterns, and shared disconnected utilities.
+
+pyquda_measurement_utils/disconnected_shards.py
+  Base/HP-part paths, atomic writes, sample log, and finalizer validation.
+
+pyquda_measurement_utils/fermion_bilinear_basis.py
+  Shared 16-Gamma basis and derived-operator helpers.
+```
+
+Analysis implementation:
+
+```text
+application/analysis_helper/emt_quark_1pt_convergence.py
+  Complete-base ringed/Tmunu convergence tables and figures.
+
+application/analysis_helper/emt_disconnected_analysis.py
+  Memory-bounded quark/gluon loop readers and source-time alignment for C3.
+```
+
+The main data flow is:
+
+```text
+shell wrapper
+  -> quark Python driver
+  -> EMTDisconnectedQuark1pt.flowed_fermionic_1pt(...)
+  -> atomic base/HP shards + sample log
+  -> quark finalizer
+  -> canonical EMTc
+  -> convergence helper
+  -> CSV + PNG/PDF
+```
+
+## Reading Exercises
+
+Read the code in this order:
+
+1. `perlmutter/run_quark_1pt.sh`
+2. `perlmutter/Pyquda_EMT_disconnected_quark_1pt.py`
+3. `EMTDisconnectedQuark1pt.flowed_fermionic_1pt()`
+4. the counter-noise and HP iterators in `Disconnected_utils_vibe_develop.py`
+5. the primitive contraction methods in `Disconnected_1pt_EMT_vibe_develop.py`
+6. `finalize_emt_quark_1pt_shards()`
+7. `application/analysis_helper/emt_quark_1pt_convergence.py`
+
+Useful checks:
+
+- Change the smoke from HP2 to HP4 and confirm that `hp_index` becomes
+  `[0,1,2,3]` while `base_noise_index` remains `[0,0,0,0]`.
+- Run pure noise with `N_VEC=4` and confirm that both `source_index` and
+  `base_noise_index` are `[0,1,2,3]`, with `hp_index=0`.
+- Verify that changing `config_num`, `base_noise_index`, or `noise_stream`
+  changes the counter source while rerunning the same tuple reproduces it.
+- Reconstruct `T44` and the ringed kinetic from the raw derivative primitive.
+- Compare ringed and `T44` relative SEM at the same solve count.
+- Repeat one small run with a different valid MPI geometry and verify that the
+  global counter source is unchanged after reassembly.
+- Change the source time in the optional C2 workflow and verify the builder's
+  absolute-to-relative time roll.
+
+## Troubleshooting
+
+If Python cannot import `pyquda`, activate the repository environment and check
+the core packages:
+
+```bash
+source /path/to/your/python-environment/bin/activate
+export MEASUREMENT_ROOT=/path/to/your/Pyquda_Measurement
+python3 -c "import pyquda, cupy, h5py, mpi4py, matplotlib"
+```
+
+If no CUDA device is detected, verify that the process is running on a GPU node
+or GPU-equipped login node and that one MPI rank is assigned to each GPU.
+
+If finalization reports a missing part, compare:
+
+```text
+EMT_1PT_N_VEC
+EMT_1PT_SETUP_TAG
+EMT_1PT_SHARD_DIR
+EMT_1PT_BLOCK_INTERVAL_SOLVES
+the expected base and HP ranges
+```
+
+The finalizer intentionally does not trust the production sample log as proof
+that destination-side shard files exist.
+
+If a production rerun skips a base after its shards were moved, that is the
+expected sample-log behavior. The log is the production-side resume record.
+Use a new setup tag for a genuinely new run, or deliberately repair the log and
+base range only after identifying where the transferred shards are stored.
+
+If a sample-log fingerprint changes, do not mix the runs. Check the
+configuration, counter stream, `Z_n`, HP ordering, flow schedule, Dirac
+parameters, gauge preprocessing, momenta, operator schema, and part interval.
+
+If HP256 seems worse than pure noise, first verify that:
+
+```text
+the ordering is the default four-dimensional xyzt ordering
+every analyzed HP256 unit contains all 256 vectors
+the x axis is solve count rather than source-row count
+the comparison uses the same gauge, configuration, stream, flow, and momenta
+there are enough complete HP256 bases to estimate a variance
+```
+
+The fixed-gauge benchmark measures stochastic convergence only. It does not
+include gauge-ensemble fluctuations, operator mixing, ringed normalization,
+matching, or renormalization.

@@ -5,6 +5,8 @@ import h5py
 import numpy as np
 import pytest
 
+import pyquda_measurement_utils.disconnected_shards as shard_module
+
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     emt_tensor_from_derivative_bilinear,
     finalize_emt_quark_1pt_shards,
@@ -257,6 +259,31 @@ def test_sample_log_header_mismatch_fails_without_hdf5_probe(tmp_path):
     changed["noise_stream"] = 99
     with pytest.raises(ValueError, match="header mismatch"):
         prepare_sample_log(log, tag, changed)
+
+
+def test_sample_log_falls_back_to_posix_lock_when_flock_is_unsupported(
+    tmp_path, monkeypatch
+):
+    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
+    log = tmp_path / "sample.log"
+    attrs = _common_attrs(1)
+    original_lockf = shard_module.fcntl.lockf
+    lockf_calls = []
+
+    def unsupported_flock(*args):
+        raise OSError(524, "DVS does not support flock")
+
+    def recorded_lockf(*args):
+        lockf_calls.append(args[1])
+        return original_lockf(*args)
+
+    monkeypatch.setattr(shard_module.fcntl, "flock", unsupported_flock)
+    monkeypatch.setattr(shard_module.fcntl, "lockf", recorded_lockf)
+    assert prepare_sample_log(log, tag, attrs) == set()
+    assert append_completed_base(log, tag, attrs, 0)
+    assert prepare_sample_log(log, tag, attrs) == {0}
+    assert shard_module.fcntl.LOCK_EX in lockf_calls
+    assert shard_module.fcntl.LOCK_UN in lockf_calls
 
 
 def test_sample_log_parallel_nonoverlapping_base_appends(tmp_path):
