@@ -525,10 +525,30 @@ The code (\code{\_covdev\_sym\_prop}) applies this spin-color component by compo
   for spin in range(4):
       for color in range(3):
           idx = spin * 3 + color
-          Dp = U.pure_gauge.covDev(mf[idx], mu)      # +mu
-          Dm = U.pure_gauge.covDev(mf[idx], mu + 4)   # -mu
+          Dp = gauge_dirac.covDev(mf[idx], mu)       # +mu
+          Dm = gauge_dirac.covDev(mf[idx], mu + 4)   # -mu
           mf_covdev[idx] = 0.5 * (Dp - Dm)
 \end{verbatim}
+
+Here \code{gauge\_dirac} is owned by the caller.  Production enters one
+\code{with U\_f.use()} context per output flow time and reuses that same
+resident flowed gauge for both quark legs and all eight forward/backward
+derivative directions.  This changes only gauge loading: the derivative order,
+signs, Gamma contractions, and saved arrays are unchanged.
+
+The inverter still performs one full gauge load when it constructs the initial
+multigrid hierarchy.  Every later source or fixed-sink sequential inversion
+restores the same original thin gauge with
+\code{thin\_update\_only=True}; near-null vectors and the coarse hierarchy are
+not rebuilt.  The connected workflow remains one branch at a time and does not
+batch different separations or sources.
+
+The one-branch flow still carries 24 full fermion fields.  In the cfg1050
+light-quark $64^4$ smoke with 16 ranks (local volume $32^4$), this existing
+flow exhausted an 80-GB A100 even after the unrelated C2 contraction was
+omitted.  A production setup at that local volume therefore needs a finer MPI
+decomposition or a separate connected-memory optimization; thin restore does
+not reduce the 24-field flow allocation.
 
 \begin{remark}[Sign convention]
 The minus sign between $D_{+}$ and $D_{-}$ in the code, $0.5 \times (D_{+} - D_{-})$, corresponds to the standard lattice symmetric derivative where covDev implements the forward/backward parallel transport without the link division by $2a$. The factor $1/2$ in the formula provides the continuum normalization.

@@ -29,6 +29,12 @@ Defaults:
 Outputs go under `data/`; logs go under `log/`; QUDA tuning/profile files go
 under `.cache/`.
 
+The connected code keeps its existing one-branch execution model. It performs
+one initial full gauge setup, uses thin gauge updates before later source and
+sequential inversions, and shares one flowed-gauge context across all
+covariant derivatives at each output flow time. There is no connected branch
+batch-size option.
+
 For l64 fixed_GLU smoke tests, keep the same scripts and override the ensemble
 settings from the launch environment, for example:
 

@@ -267,6 +267,7 @@ disconnected diagram analysis can combine old and new 1pt data safely.
 """
 
 import numpy as np
+from time import perf_counter
 from opt_einsum import contract
 
 from pyquda import getMPIComm
@@ -291,7 +292,7 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
     basis_attrs,
     symmetric_vector_emt,
 )
-from pyquda_measurement_utils.tools import mpi_print
+from pyquda_measurement_utils.tools import mpi_print, mpi_timer_print
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_meson_bw_seq_pyquda
 
@@ -329,8 +330,12 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             src_fw = boosted_smearing(src_fw, w=self.width, boost=self.pos_boost)
             mpi_print(latt_info, "source smearing ends")
 
-            dirac.loadGauge(U)
+            restore_t0 = perf_counter()
+            dirac.loadGauge(U, thin_update_only=True)
+            mpi_timer_print(latt_info, "pion_emt_source_restore", perf_counter() - restore_t0)
+            invert_t0 = perf_counter()
             prop_fw_SP = core.invertPropagator(dirac, src_fw, 1, 0)
+            mpi_timer_print(latt_info, "pion_emt_source_inversion", perf_counter() - invert_t0)
             prop_bw_SP = prop_fw_SP.copy()
             del src_fw
             return prop_fw_SP, prop_bw_SP
@@ -345,14 +350,22 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             src_bw = boosted_smearing(src_bw, w=self.width, boost=self.neg_boost)
             mpi_print(latt_info, "backward source smearing ends")
 
-            dirac.loadGauge(U)
+            restore_t0 = perf_counter()
+            dirac.loadGauge(U, thin_update_only=True)
+            mpi_timer_print(latt_info, "pion_emt_source_restore", perf_counter() - restore_t0)
+            invert_t0 = perf_counter()
             prop_fw_SP = core.invertPropagator(dirac, src_fw, 1, 0)
             prop_bw_SP = core.invertPropagator(dirac, src_bw, 1, 0)
+            mpi_timer_print(latt_info, "pion_emt_source_inversion", perf_counter() - invert_t0)
             del src_fw, src_bw
             return prop_fw_SP, prop_bw_SP
 
-        dirac.loadGauge(U)
+        restore_t0 = perf_counter()
+        dirac.loadGauge(U, thin_update_only=True)
+        mpi_timer_print(latt_info, "pion_emt_source_restore", perf_counter() - restore_t0)
+        invert_t0 = perf_counter()
         prop_fw_SP = core.invertPropagator(dirac, src_fw, 1, 0)
+        mpi_timer_print(latt_info, "pion_emt_source_inversion", perf_counter() - invert_t0)
         prop_bw_SP = prop_fw_SP.copy()
         del src_fw
         return prop_fw_SP, prop_bw_SP
@@ -368,6 +381,7 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
     def get_C3_primitive_bilinears(
         cls,
         U_f: LatticeGauge,
+        gauge_dirac,
         prop_fw: LatticePropagator,
         seq_bw_prop: LatticePropagator,
         src_gamma,
@@ -389,7 +403,7 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             dtype=np.complex128,
         )
         for mu in range(4):
-            D_fw = cls._covdev_sym_prop(U_f, prop_fw, mu)
+            D_fw = cls._covdev_sym_prop(gauge_dirac, prop_fw, mu)
             right_fields = 0.5 * contract(
                 "wtzyxabij,gbn,wtzyxncji,ca->gwtzyx",
                 dst2, gamma_ls, D_fw.data, src_gamma,
@@ -399,7 +413,9 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             )
             del right_fields, D_fw
 
-            leftD_dst2 = cls._left_covdev_dst2_from_prop(U_f, seq_bw_prop, mu)
+            leftD_dst2 = cls._left_covdev_dst2_from_prop(
+                gauge_dirac, seq_bw_prop, mu
+            )
             left_fields = -0.5 * contract(
                 "wtzyxabij,gbn,wtzyxncji,ca->gwtzyx",
                 leftD_dst2, gamma_ls, prop_fw.data, src_gamma,
@@ -507,6 +523,7 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
         mass, csw, tol, maxiter = invPara
 
         x0, y0, z0, t0 = src_pos
+        total_t0 = perf_counter()
         mpi_print(latt_info, f"t_boundary = {latt_info.t_boundary}")
         dirac = core.getDirac(
             latt_info,
@@ -581,7 +598,13 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
         for n_ts, t_sep in enumerate(t_separations):
             mpi_print(latt_info, f"create sequential source sink_t = {t_sep}")
 
-            dirac.loadGauge(U)
+            restore_t0 = perf_counter()
+            dirac.loadGauge(U, thin_update_only=True)
+            mpi_timer_print(
+                latt_info, "pion_emt_sequential_restore",
+                perf_counter() - restore_t0, t_sep=t_sep,
+            )
+            inversion_t0 = perf_counter()
             seq_bw_prop = create_meson_bw_seq_pyquda(
                 dirac,
                 prop_fw_SS,
@@ -592,6 +615,10 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
                 self.width if self.CG_GaussSmear else None,
                 self.neg_boost if self.CG_GaussSmear else None,
             )
+            mpi_timer_print(
+                latt_info, "pion_emt_sequential_inversion",
+                perf_counter() - inversion_t0, t_sep=t_sep,
+            )
 
             prop_fw_flow = prop_fw_SP.copy()
             seq_bw_prop_flow = seq_bw_prop.copy()
@@ -600,8 +627,15 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
 
             for step in range(Nsteps + 1):
                 mpi_print(latt_info, f"contraction for step {step}")
-                local_step, derivative_step = self.get_C3_primitive_bilinears(
-                    U_f, prop_fw_flow, seq_bw_prop_flow, src_gamma, phases_3pt, t0
+                primitive_t0 = perf_counter()
+                with U_f.use() as gauge_dirac:
+                    local_step, derivative_step = self.get_C3_primitive_bilinears(
+                        U_f, gauge_dirac, prop_fw_flow, seq_bw_prop_flow,
+                        src_gamma, phases_3pt, t0,
+                    )
+                mpi_timer_print(
+                    latt_info, "pion_emt_primitive",
+                    perf_counter() - primitive_t0, t_sep=t_sep, step=step,
                 )
                 C3_local_bilinear[n_ts, :, :, step] += local_step
                 C3_derivative_bilinear[n_ts, :, :, :, step] += derivative_step
@@ -613,6 +647,7 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
                     tensor_step, (0, 1), (1, 2)
                 )
 
+                flow_t0 = perf_counter()
                 prop_fw_flow, seq_bw_prop_flow = self._advance_flowed_props(
                     U_f,
                     prop_fw_flow,
@@ -621,6 +656,11 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
                     stepsize,
                     Nsteps,
                 )
+                if step < Nsteps:
+                    mpi_timer_print(
+                        latt_info, "pion_emt_flow", perf_counter() - flow_t0,
+                        t_sep=t_sep, step=f"{step}_to_{step + 1}",
+                    )
 
             del U_f, prop_fw_flow, seq_bw_prop_flow, seq_bw_prop
 
@@ -676,5 +716,9 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             C3_derivative_bilinear,
             momentum_transfer_list=self.qlist,
             attrs=attrs,
+        )
+        mpi_timer_print(
+            latt_info, "pion_emt_total", perf_counter() - total_t0,
+            source_position=src_pos,
         )
         return C2, C3_chi, C3_Tmunu

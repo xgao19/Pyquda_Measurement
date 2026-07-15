@@ -6,6 +6,11 @@ environment variable. Use `FLOWED_RINGED_BASE_START/STOP`,
 `FLOWED_RINGED_SHARD_DIR`, and `FLOWED_RINGED_BLOCK_INTERVAL_SOLVES` for job
 partitioning and checkpoints.
 
+Pass `--flow-batch-size B` to batch several source/solution pairs in one
+double-precision fermion-flow call. The default is `B=1`; increase it only
+after checking device-memory headroom. The value affects scheduling, not the
+estimator or HDF5 provenance, and there is no automatic OOM fallback.
+
 Finalize with `../finalize_ringed_shards.py`; compute factors from explicit
 canonical configuration files with `../analyze_ringed_ensemble.py`. The
 per-configuration file stores kinetic data only. Full conventions are in

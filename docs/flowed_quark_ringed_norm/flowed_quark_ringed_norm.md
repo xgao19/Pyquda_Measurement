@@ -24,6 +24,38 @@ Point spin-color dilution costs 12 solves per HP pattern. A part boundary never
 splits those 12 projectors. The finalized trace multiplies the raw channel
 average by `spin_color_trace_factor=12`.
 
+## Flow batching and resident gauges
+
+The production API accepts `flow_batch_size`, and the platform drivers expose
+it as `--flow-batch-size`. For a batch of (B) sources, inversions remain
+sequential while QUDA flows
+
+```text
+[xi_1, eta_1, ..., xi_B, eta_B],  eta_b = D^-1 xi_b
+```
+
+in one double-precision call. Each batch restores the unchanged inversion
+gauge once with a thin multigrid update. At each output flow time all sources
+share one loaded flowed-gauge context for the eight forward/backward
+derivatives. Plain undiluted noise may batch across bases; hierarchical
+probing and point spin-color dilution batch only within one base and shard
+part. In all cases, source order and complete-base sample-log semantics remain
+unchanged.
+
+`flow_batch_size=1` is the conservative default. Larger batches can improve
+throughput but scale device memory with the number of flowed fermion fields.
+There is no automatic retry after OOM. Because batching changes only execution
+scheduling, it is intentionally absent from HDF5 attrs and sample-log
+fingerprints.
+
+On the cfg1050 light-quark \(64^4\) benchmark with 16 A100 GPUs, the warmed
+median end-to-end source costs for `B=1,2,4,8` were respectively 5.31, 4.32,
+3.88, and 3.64 seconds, with measured device-memory use of 26.6, 28.7, 34.0,
+and 44.8 GiB/GPU. The measured 80-GB starting point is therefore `B=8`; the
+34.0-GiB `B=4` result is a reasonable 40-GB starting point subject to a local
+smoke test. The default remains `B=1` because these limits are lattice-, MG-,
+and build-dependent.
+
 ## Finalization and ensemble analysis
 
 Measurement jobs write shards only. Transfer the parts, then publish one

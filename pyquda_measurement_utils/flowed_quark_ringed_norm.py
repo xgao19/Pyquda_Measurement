@@ -7,6 +7,8 @@ the same Dirac operator, gauge preprocessing, and flow schedule.
 """
 
 import os
+import operator
+from itertools import islice
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -62,6 +64,32 @@ def normalize_flow_type(flow_type: str) -> str:
 def flow_times(flow_epsilon, flow_steps):
     """Return measure-before-flow output times in lattice units."""
     return np.arange(int(flow_steps) + 1, dtype=np.float64) * float(flow_epsilon)
+
+
+def _positive_flow_batch_size(value):
+    """Return a positive integer source-batch size without float coercion."""
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"flow_batch_size should be a positive integer, got {value!r}")
+    try:
+        result = operator.index(value)
+    except TypeError as error:
+        raise ValueError(
+            f"flow_batch_size should be a positive integer, got {value!r}"
+        ) from error
+    if result <= 0:
+        raise ValueError(f"flow_batch_size should be a positive integer, got {value!r}")
+    return result
+
+
+def _iter_source_batches(source_iterator, batch_size):
+    """Yield bounded source lists while preserving iterator order."""
+    batch_size = _positive_flow_batch_size(batch_size)
+    iterator = iter(source_iterator)
+    while True:
+        batch = list(islice(iterator, batch_size))
+        if not batch:
+            return
+        yield batch
 
 
 def compute_ringed_factors(kinetic_spacetime, flow_time_values, nc=3):
@@ -177,6 +205,7 @@ def _timer_stop(start, *objects):
 def _reset_block_timers(n_flow, flow_steps):
     return {
         "block_start": None,
+        "restore": 0.0,
         "invert": 0.0,
         "contract": np.zeros(n_flow, dtype=np.float64),
         "flow": np.zeros(max(int(flow_steps), 0), dtype=np.float64),
@@ -187,6 +216,14 @@ def _reset_block_timers(n_flow, flow_steps):
 def _print_block_timers(latt_info, block_index, block_start, block_stop, timers, total_seconds):
     source_count = int(block_stop - block_start)
     per_source = total_seconds / source_count if source_count else np.nan
+    mpi_timer_print(
+        latt_info,
+        "ringed_norm_restore",
+        timers["restore"],
+        block=block_index,
+        sources=source_count,
+        per_source=timers["restore"] / source_count if source_count else np.nan,
+    )
     mpi_timer_print(
         latt_info,
         "ringed_norm_block",
@@ -340,12 +377,14 @@ class FlowedQuarkRingedNorm:
         slice_t = getMPIComm().bcast(slice_t, root=0)
         return np.asarray(slice_t[0], dtype=np.complex128)
 
-    def _kinetic_per_time_for_source(self, U_f, xi, eta, q0_phase, spatial_volume):
-        U_f.gauge_dirac.loadGauge(U_f)
+    def _kinetic_per_time_for_source(
+        self, U_f, gauge_dirac, xi, eta, q0_phase, spatial_volume
+    ):
+        """Contract one source using an already resident flowed gauge."""
         gammas = _gamma_stack_on_backend(eta.data)
         local_kinetic = None
         for mu in range(4):
-            tmp = U_f.pure_gauge.covDev(eta, mu) - U_f.pure_gauge.covDev(eta, mu + 4)
+            tmp = gauge_dirac.covDev(eta, mu) - gauge_dirac.covDev(eta, mu + 4)
             gamma_tmp = contract("ab,...bc->...ac", gammas[mu], tmp.data)
             term = contract("...sc,...sc->...", xi.data.conj(), gamma_tmp)
             local_kinetic = term if local_kinetic is None else local_kinetic + term
@@ -354,9 +393,10 @@ class FlowedQuarkRingedNorm:
         per_time = self._project_zero_momentum_per_time(U_f.latt_info, local_kinetic, q0_phase)
         return per_time / spatial_volume
 
-    def _advance_flowed_pair(self, U_f, xi, eta, step):
+    def _advance_flowed_batch(self, U_f, xis, etas, step):
+        """Advance all source pairs in one double-precision flow call."""
         if self.flow_steps <= 0 or step >= self.flow_steps:
-            return xi, eta
+            return None, list(xis), list(etas)
 
         from pyquda_utils import convert
 
@@ -367,15 +407,82 @@ class FlowedQuarkRingedNorm:
             n_steps = 1
             stepsize = self.flow_epsilon
 
-        packed = convert.multiField([xi, eta])
+        fields = []
+        for xi, eta in zip(xis, etas):
+            fields.extend((xi, eta))
+        packed = convert.multiField(fields)
         flowed = U_f.gradientFlow(packed, self.flow_type, n_steps, stepsize)
-        return flowed[0], flowed[1]
+        count = len(xis)
+        return (
+            flowed,
+            [flowed[2 * index] for index in range(count)],
+            [flowed[2 * index + 1] for index in range(count)],
+        )
 
-    def flowed_kinetic_norm(self, gauge, invPara, randPara, tag: str):
-        """Measure selected complete bases into resumable base/HP shard parts."""
+    def _measure_source_batch(
+        self, U, xis, etas, q0_phase, spatial_volume, timers
+    ):
+        """Flow and contract a non-empty source batch in input order."""
+        xis, etas = list(xis), list(etas)
+        if not xis or len(xis) != len(etas):
+            raise ValueError("xis and etas should be non-empty lists of equal length")
+        kinetic = np.zeros(
+            (len(xis), self.flow_steps + 1, U.latt_info.global_size[3]),
+            dtype=np.complex128,
+        )
+        U_f = U.copy()
+        U_f.setAntiPeriodicT()
+        flowed_owner = None
+        for step in range(self.flow_steps + 1):
+            contract_t0 = _timer_start(xis, etas)
+            with U_f.use() as gauge_dirac:
+                for source_idx, (xi, eta) in enumerate(zip(xis, etas)):
+                    kinetic[source_idx, step] = self._kinetic_per_time_for_source(
+                        U_f, gauge_dirac, xi, eta, q0_phase, spatial_volume
+                    )
+            timers["contract"][step] += _timer_stop(contract_t0, xis, etas)
+            if step < self.flow_steps:
+                flow_t0 = _timer_start(xis, etas)
+                flowed_owner, xis, etas = self._advance_flowed_batch(
+                    U_f, xis, etas, step
+                )
+                timers["flow"][step] += _timer_stop(flow_t0, xis, etas)
+        del flowed_owner, U_f
+        return kinetic
+
+    def _invert_and_measure_batch(
+        self, U, dirac, source_records, q0_phase, spatial_volume, timers
+    ):
+        """Restore once, invert sequentially, then flow a source batch."""
+        records = list(source_records)
+        if not records:
+            raise ValueError("source_records should not be empty")
+        restore_t0 = _timer_start(U)
+        dirac.loadGauge(U, thin_update_only=True)
+        timers["restore"] += _timer_stop(restore_t0, U)
+        xis = [record[-1] for record in records]
+        etas = []
+        invert_t0 = _timer_start(xis)
+        for xi in xis:
+            etas.append(dirac.invert(xi))
+        timers["invert"] += _timer_stop(invert_t0, etas)
+        return self._measure_source_batch(
+            U, xis, etas, q0_phase, spatial_volume, timers
+        )
+
+    def flowed_kinetic_norm(
+        self, gauge, invPara, randPara, tag: str, flow_batch_size=1
+    ):
+        """Measure complete bases into shards with optional fermion-flow batching.
+
+        ``flow_batch_size`` is a positive, performance-only scheduling value;
+        it does not enter stochastic identity, sample-log fingerprints, or
+        HDF5 provenance.
+        """
         if not tag:
             raise ValueError("flowed_kinetic_norm requires a non-empty output tag")
 
+        flow_batch_size = _positive_flow_batch_size(flow_batch_size)
         n_vec, n_zn, noise_stream = randPara
         if int(noise_stream) < 0:
             raise ValueError(f"noise stream should be non-negative, got {noise_stream}")
@@ -442,10 +549,90 @@ class FlowedQuarkRingedNorm:
         mpi_print(latt_info, "Flowed-quark ringed normalization inverter ready.")
         q0_phase = phase.MomentumPhase(latt_info).getPhases([[0, 0, 0]], [0, 0, 0, 0])
 
+        pending_bases = []
         for base_idx in selected_bases:
             if base_idx in completed_bases:
-                mpi_print(latt_info, f"Ringed base SKIP from sample log: base{base_idx:06d}")
-                continue
+                mpi_print(
+                    latt_info,
+                    f"Ringed base SKIP from sample log: base{base_idx:06d}",
+                )
+            else:
+                pending_bases.append(base_idx)
+
+        def write_part(base_idx, part_idx, hp_start, hp_stop, kinetic, bookkeeping):
+            path = shard_part_path(
+                shard_dir, tag, base_idx, part_idx, hp_start, hp_stop
+            )
+            write_attrs = shard_part_attrs(
+                common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count,
+                solves_per_hp=solves_per_hp,
+                spin_color_dilution=self.spin_color_dilution,
+            )
+            if latt_info.mpi_rank == 0:
+                write_raw_part_hdf5(
+                    path, {"kinetic_pervec": kinetic}, write_attrs, bookkeeping
+                )
+            comm.Barrier()
+
+        def complete_base(base_idx):
+            if latt_info.mpi_rank == 0:
+                append_completed_base(
+                    self.sample_log_file, tag, common_attrs, base_idx
+                )
+            comm.Barrier()
+
+        if self.noise_scheme != "hierarchical_probing" and self.spin_color_dilution == "none":
+            def pending_plain_sources():
+                for base_idx in pending_bases:
+                    records = iter_noise_base_hp_interval(
+                        latt_info, base_idx, 0, 1, n_zn,
+                        self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
+                        config_num=counter_config, noise_stream=counter_stream,
+                        spin_color_dilution=self.spin_color_dilution,
+                        include_spin_color=True,
+                    )
+                    record = next(records)
+                    try:
+                        next(records)
+                    except StopIteration:
+                        pass
+                    else:
+                        raise RuntimeError(
+                            f"plain ringed base {base_idx} generated multiple sources"
+                        )
+                    yield base_idx, record
+
+            for batch_idx, batch in enumerate(
+                _iter_source_batches(pending_plain_sources(), flow_batch_size)
+            ):
+                batch_bases = [entry[0] for entry in batch]
+                records = [entry[1] for entry in batch]
+                timers = _reset_block_timers(n_flow, self.flow_steps)
+                timers["block_start"] = _timer_start()
+                kinetic = self._invert_and_measure_batch(
+                    U, dirac, records, q0_phase, spatial_volume, timers
+                )
+                write_t0 = _timer_start()
+                for source_offset, base_idx in enumerate(batch_bases):
+                    bookkeeping = part_source_bookkeeping(
+                        base_idx, 0, 1, hp_count,
+                        self.spin_color_dilution, include_spin_color=True,
+                    )
+                    write_part(
+                        base_idx, 0, 0, 1,
+                        kinetic[source_offset:source_offset + 1], bookkeeping,
+                    )
+                timers["write"] = _timer_stop(write_t0)
+                source_indices = [entry[1][0] for entry in batch]
+                _print_block_timers(
+                    latt_info, batch_idx, min(source_indices), max(source_indices) + 1,
+                    timers, _timer_stop(timers["block_start"]),
+                )
+                for base_idx in batch_bases:
+                    complete_base(base_idx)
+            return None
+
+        for base_idx in pending_bases:
             for part_idx, hp_start, hp_stop in base_part_ranges(
                 hp_count, self.block_size, solves_per_hp
             ):
@@ -454,55 +641,41 @@ class FlowedQuarkRingedNorm:
                     self.spin_color_dilution, include_spin_color=True,
                 )
                 count = len(bookkeeping["source_index"])
-                path = shard_part_path(
-                    shard_dir, tag, base_idx, part_idx, hp_start, hp_stop
-                )
-                write_attrs = shard_part_attrs(
-                    common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count,
-                    solves_per_hp=solves_per_hp,
-                    spin_color_dilution=self.spin_color_dilution,
-                )
-
                 kinetic_part = np.zeros((count, n_flow, nt), dtype=np.complex128)
                 timers = _reset_block_timers(n_flow, self.flow_steps)
                 timers["block_start"] = _timer_start()
-                for local_idx, fields in enumerate(iter_noise_base_hp_interval(
+                source_iterator = iter_noise_base_hp_interval(
                     latt_info, base_idx, hp_start, hp_stop, n_zn,
                     self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
                     config_num=counter_config, noise_stream=counter_stream,
                     spin_color_dilution=self.spin_color_dilution,
                     include_spin_color=True,
-                )):
-                    _, _, hp_idx, spin_idx, color_idx, xi = fields
-                    mpi_print(
-                        latt_info,
-                        f"ringed base {base_idx} hp {hp_idx} spin {spin_idx} color {color_idx}",
-                    )
-                    t0 = _timer_start(xi)
-                    # Fermion flow leaves U_f resident; restore the inversion gauge.
-                    dirac.loadGauge(U)
-                    eta = dirac.invert(xi)
-                    timers["invert"] += _timer_stop(t0, eta)
-                    U_f = U.copy()
-                    U_f.setAntiPeriodicT()
-                    for step in range(n_flow):
-                        t0 = _timer_start(xi, eta)
-                        kinetic_part[local_idx, step] = self._kinetic_per_time_for_source(
-                            U_f, xi, eta, q0_phase, spatial_volume
+                )
+                destination_start = 0
+                for batch in _iter_source_batches(source_iterator, flow_batch_size):
+                    for fields in batch:
+                        _, _, hp_idx, spin_idx, color_idx, _ = fields
+                        mpi_print(
+                            latt_info,
+                            f"ringed base {base_idx} hp {hp_idx} "
+                            f"spin {spin_idx} color {color_idx}",
                         )
-                        timers["contract"][step] += _timer_stop(t0, xi, eta)
-                        if step < self.flow_steps:
-                            t0 = _timer_start(xi, eta)
-                            xi, eta = self._advance_flowed_pair(U_f, xi, eta, step)
-                            timers["flow"][step] += _timer_stop(t0, xi, eta)
-                    del U_f, xi, eta
+                    kinetic_batch = self._invert_and_measure_batch(
+                        U, dirac, batch, q0_phase, spatial_volume, timers
+                    )
+                    destination_stop = destination_start + len(batch)
+                    kinetic_part[destination_start:destination_stop] = kinetic_batch
+                    destination_start = destination_stop
+                if destination_start != count:
+                    raise RuntimeError(
+                        f"ringed part expected {count} sources, got {destination_start}"
+                    )
 
                 t0 = _timer_start()
-                if latt_info.mpi_rank == 0:
-                    write_raw_part_hdf5(
-                        path, {"kinetic_pervec": kinetic_part}, write_attrs,
-                        bookkeeping,
-                    )
+                write_part(
+                    base_idx, part_idx, hp_start, hp_stop,
+                    kinetic_part, bookkeeping,
+                )
                 timers["write"] = _timer_stop(t0)
                 _print_block_timers(
                     latt_info, part_idx, int(bookkeeping["source_index"][0]),
@@ -511,11 +684,7 @@ class FlowedQuarkRingedNorm:
                 )
                 comm.Barrier()
 
-            if latt_info.mpi_rank == 0:
-                append_completed_base(
-                    self.sample_log_file, tag, common_attrs, base_idx
-                )
-            comm.Barrier()
+            complete_base(base_idx)
         return None
 
 

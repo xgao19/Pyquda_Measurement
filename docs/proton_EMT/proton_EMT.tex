@@ -1168,6 +1168,22 @@ Thus output index \texttt{step} corresponds to flow time $t_{\text{flow}} =
 \texttt{step = 0}.  The subdivision of the first interval ensures that the initial
 condition of the flow equation is well resolved numerically.
 
+The production implementation keeps the existing one-branch flow
+\([S_{\rm fw},S_{\rm seq}]\), containing the 24 spin--color propagator
+fields.  It does not batch different source positions, separations, flavors,
+or polarizations.  After the initial full gauge and multigrid construction,
+source and sequential inversions restore the unchanged thin gauge with
+\code{thin\_update\_only=True}.  At each flow time a single
+\code{U\_f.use()} context supplies all forward/backward covariant derivatives
+for the two quark legs.  These are performance changes only and leave the
+operator and HDF5 schema unchanged.
+
+The 24-field branch flow remains the dominant memory constraint.  In the
+cfg1050 light-quark $64^4$, 16-rank smoke (local volume $32^4$), the same
+flow allocation exhausted an 80-GB A100.  This requires a finer MPI
+decomposition or a future connected-memory optimization for that setup; it is
+not addressed by thin gauge restore or by the shared derivative context.
+
 \subsection{Flowing Fermion and Gauge Fields Together}
 
 At each flow step, both the forward propagator and the sequential propagator are

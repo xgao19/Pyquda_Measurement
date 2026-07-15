@@ -277,6 +277,30 @@ def test_pion_connected_driver_has_no_shared_output_override():
     assert "1e-10" in source
 
 
+def test_standalone_ringed_exposes_cli_only_flow_batch_size():
+    drivers = [
+        "application/flowed_quark_ringed_norm/perlmutter/Pyquda_flowed_quark_ringed_norm.py",
+        "application/flowed_quark_ringed_norm/Aurora/Pyquda_flowed_quark_ringed_norm.py",
+    ]
+    for relpath in drivers:
+        argument = _parser_arguments(relpath)["--flow-batch-size"]
+        assert _keyword_constant(argument, "default") == 1
+        source = _source(relpath)
+        assert "flow_batch_size=args.flow_batch_size" in source
+        assert "FLOWED_RINGED_FLOW_BATCH" not in source
+
+    wrappers = [
+        "application/flowed_quark_ringed_norm/perlmutter/run_flowed_quark_ringed_norm.sh",
+        "application/flowed_quark_ringed_norm/perlmutter/run_login_smoke.sh",
+        "application/flowed_quark_ringed_norm/Aurora/run_flowed_quark_ringed_norm.sh",
+        "application/flowed_quark_ringed_norm/Aurora/submit_or_run_interactive.sh",
+    ]
+    for relpath in wrappers:
+        source = _source(relpath)
+        assert "--flow-batch-size" in source
+        assert "FLOWED_RINGED_FLOW_BATCH" not in source
+
+
 def test_connected_emt_shell_wrappers_require_named_configuration():
     wrappers = [
         "application/EMT_meson/perlmutter/run_quark_3pt.sh",

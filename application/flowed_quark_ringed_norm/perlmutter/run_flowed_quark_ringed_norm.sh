@@ -1,11 +1,26 @@
 #!/bin/bash
 set -euo pipefail
 
-if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
-  echo "Usage: $0 --config_num CFG" >&2
-  exit 2
-fi
-config_num="$2"
+config_num=""
+flow_batch_size=1
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config_num)
+      [[ -z "$config_num" && $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || {
+        echo "Invalid or repeated --config_num" >&2; exit 2;
+      }
+      config_num="$2"; shift 2 ;;
+    --flow-batch-size)
+      [[ $# -ge 2 && "$2" =~ ^[1-9][0-9]*$ ]] || {
+        echo "--flow-batch-size requires a positive integer" >&2; exit 2;
+      }
+      flow_batch_size="$2"; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+[[ -n "$config_num" ]] || {
+  echo "Usage: $0 --config_num CFG [--flow-batch-size B]" >&2; exit 2;
+}
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
@@ -41,7 +56,9 @@ echo "  FLOWED_RINGED_HP_NUM_VECTORS=${FLOWED_RINGED_HP_NUM_VECTORS:-1}"
 echo "  FLOWED_RINGED_SPIN_COLOR_DILUTION=${FLOWED_RINGED_SPIN_COLOR_DILUTION:-none}"
 echo "  QUDA_RESOURCE_PATH=$QUDA_RESOURCE_PATH"
 echo "  CUPY_CACHE_DIR=$CUPY_CACHE_DIR"
+echo "  flow_batch_size=$flow_batch_size"
 
 python3 -u "$script_dir/Pyquda_flowed_quark_ringed_norm.py" \
   --config_num "$config_num" \
-  --mpi_geometry "$mpi_geometry"
+  --mpi_geometry "$mpi_geometry" \
+  --flow-batch-size "$flow_batch_size"

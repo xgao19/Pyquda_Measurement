@@ -241,7 +241,13 @@ def append_completed_base(path, canonical_tag, attrs, base_idx, metadata=None):
 
 
 def _attr_equal(actual, expected):
-    return np.array_equal(np.asarray(actual), np.asarray(expected))
+    left, right = np.asarray(actual), np.asarray(expected)
+    if left.dtype.kind in "fc" or right.dtype.kind in "fc":
+        try:
+            return np.array_equal(left, right, equal_nan=True)
+        except TypeError:
+            return bool(np.all((left == right) | (np.isnan(left) & np.isnan(right))))
+    return np.array_equal(left, right)
 
 
 def discover_shard_layout(

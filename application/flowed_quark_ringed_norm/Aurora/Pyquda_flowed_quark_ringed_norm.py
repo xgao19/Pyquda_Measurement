@@ -28,7 +28,10 @@ def parse_mg_block(text):
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("FLOWED_RINGED_MPI_GEOMETRY", "1.1.1.2"))
+parser.add_argument("--flow-batch-size", type=int, default=1)
 args = parser.parse_args()
+if args.flow_batch_size <= 0:
+    parser.error("--flow-batch-size must be a positive integer")
 
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -120,6 +123,7 @@ mpi_print(latt_info, f"--hp_num_vectors {parameters['hp_num_vectors']}")
 mpi_print(latt_info, f"--spin_color_dilution {parameters['spin_color_dilution']}")
 mpi_print(latt_info, f"--block_interval_solves {parameters['block_interval_solves']}")
 mpi_print(latt_info, f"--gauge_preprocessing {gauge_preprocessing}")
+mpi_print(latt_info, f"--flow_batch_size {args.flow_batch_size}")
 
 ringed_norm = FlowedQuarkRingedNorm(parameters)
 ringed_norm.flowed_kinetic_norm(
@@ -127,4 +131,5 @@ ringed_norm.flowed_kinetic_norm(
     invPara,
     randPara,
     tag=output_tag,
+    flow_batch_size=args.flow_batch_size,
 )

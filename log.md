@@ -664,3 +664,42 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   comparison passed for all 27 canonical datasets; HP16 was bitwise identical,
   while pure had maximum absolute difference `1.93e-10` and relative L2
   difference `3.76e-12`.
+
+## 2026-07-15: Upgrade connected EMT and standalone ringed flow setup
+
+- Connected pion and proton EMT now keep the initial full gauge/MG setup, use
+  thin updates before later source and sequential inversions, and reuse one
+  caller-owned flowed-gauge context for all eight covariant derivatives at a
+  given flow time. Their existing one-branch `[forward,sequential]` flow is
+  unchanged; no connected branch batching or new public option was added.
+- Standalone ringed normalization gained the CLI/library `flow_batch_size`
+  option with default one. Plain undiluted sources may batch across bases;
+  HP and point spin-color diluted sources remain inside one base/part. Each
+  batch performs one thin restore, sequential inversions, one interleaved
+  double-precision multi-field flow, and one flowed-gauge context per output
+  time. The performance-only batch size is absent from HDF5 provenance and the
+  sample-log fingerprint.
+- Shard metadata comparison now treats matching floating-point NaNs as equal;
+  this is required for standalone multi-part finalization because the
+  undefined flow-zero normalization factor is intentionally stored as NaN.
+- S8T8 reference/candidate comparisons passed for pion C2 and all primitive/
+  derived C3 data, proton `t_sep=2,3,4` with both flavors and two
+  polarizations, and standalone plain, HP16, and point spin-color dilution at
+  `B=1,2,4`. The largest connected relative L2 difference was `1.88e-10`;
+  standalone relative L2 differences stayed below `4.30e-12`. Pion and
+  standalone two-rank checks also passed.
+- The cfg1050 light-quark l64 standalone scan found warmed median costs of
+  5.31, 4.32, 3.88, and 3.64 seconds/source for `B=1,2,4,8`, with measured
+  device memory of 26.6, 28.7, 34.0, and 44.8 GiB/GPU. This supports `B=8`
+  on 80-GB GPUs and `B=4` as a 34.0-GiB starting point that still requires a
+  local smoke on 40-GB GPUs; the default remains one.
+- A persistent gluon gauge-flow context reproduced Wilson/Symanzik outputs
+  exactly for one and ten output steps. After prewarming both paths and five
+  interleaved repetitions, its end-to-end change ranged from a small slowdown
+  to about a 3% speedup and was order dependent. It missed the required 10%
+  threshold, so production gluon code was intentionally left unchanged.
+- The planned l64 connected timing could not be completed at 16 ranks: even
+  after omitting the unchanged C2 contraction, the existing 24-field
+  forward/sequential flow exhausted an 80-GB GPU in both the reference and
+  optimized pion paths. This is an independent connected-memory limitation;
+  S8T8 remains the numerical validation for this change.

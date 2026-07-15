@@ -220,8 +220,16 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
             src = boosted_smearing(src, w=self.width, boost=self.boost_in)
             mpi_print(latt_info, "proton source smearing ends")
 
-        dirac.loadGauge(U)
+        restore_t0 = perf_counter()
+        dirac.loadGauge(U, thin_update_only=True)
+        mpi_timer_print(
+            latt_info, "proton_emt_source_restore", perf_counter() - restore_t0
+        )
+        inversion_t0 = perf_counter()
         prop = core.invertPropagator(dirac, src, 1, 0)
+        mpi_timer_print(
+            latt_info, "proton_emt_source_inversion", perf_counter() - inversion_t0
+        )
         del src
         return prop
 
@@ -271,7 +279,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
 
     @classmethod
     def get_C3_primitive_bilinears_proton(
-        cls, U_f, prop_fw, raw_seq_prop, phases_3pt, t0
+        cls, U_f, gauge_dirac, prop_fw, raw_seq_prop, phases_3pt, t0
     ):
         """Compute all local and one-derivative proton insertion bilinears."""
         gamma_ls = cls._gamma_stack_for(prop_fw.data)
@@ -288,7 +296,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
             dtype=np.complex128,
         )
         for mu in range(4):
-            D_fw = cls._covdev_sym_prop(U_f, prop_fw, mu)
+            D_fw = cls._covdev_sym_prop(gauge_dirac, prop_fw, mu)
             right_fields = 0.5 * cls._raw_seq_gamma_scalar_fields(
                 raw_seq_prop, D_fw, G5_gamma_stack
             )
@@ -297,7 +305,7 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
             )
             del D_fw, right_fields
 
-            D_raw_seq = cls._covdev_sym_prop(U_f, raw_seq_prop, mu)
+            D_raw_seq = cls._covdev_sym_prop(gauge_dirac, raw_seq_prop, mu)
             left_fields = -0.5 * cls._raw_seq_gamma_scalar_fields(
                 D_raw_seq, prop_fw, G5_gamma_stack
             )
@@ -390,7 +398,16 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 for flavor_idx, flavor in enumerate([1, 2]):
                     flavor_name = "U" if flavor == 1 else "D"
                     mpi_print(latt_info, f"create proton sequential source flavor={flavor_name} t_sep={t_sep}")
-                    dirac.loadGauge(U)
+                    restore_t0 = perf_counter()
+                    dirac.loadGauge(U, thin_update_only=True)
+                    mpi_timer_print(
+                        latt_info,
+                        "proton_emt_sequential_restore",
+                        perf_counter() - restore_t0,
+                        flavor=flavor_name,
+                        t_sep=t_sep,
+                    )
+                    inversion_t0 = perf_counter()
                     raw_seq_bw = create_bw_seq_raw_pyquda(
                         dirac,
                         prop_fw.copy(),
@@ -402,6 +419,13 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                         self.pol_list,
                         flavor,
                         interpolator,
+                    )
+                    mpi_timer_print(
+                        latt_info,
+                        "proton_emt_sequential_inversion",
+                        perf_counter() - inversion_t0,
+                        flavor=flavor_name,
+                        t_sep=t_sep,
                     )
 
                     for pol_idx, pol in enumerate(self.pol_list):
@@ -417,13 +441,15 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                                 f"proton EMT contraction flavor={flavor_name} pol={pol} t_sep={t_sep} step={step}",
                             )
                             primitive_t0 = perf_counter()
-                            local_step, derivative_step = self.get_C3_primitive_bilinears_proton(
-                                U_f,
-                                prop_fw_flow,
-                                raw_seq_prop_flow,
-                                phases_3pt,
-                                t0,
-                            )
+                            with U_f.use() as gauge_dirac:
+                                local_step, derivative_step = self.get_C3_primitive_bilinears_proton(
+                                    U_f,
+                                    gauge_dirac,
+                                    prop_fw_flow,
+                                    raw_seq_prop_flow,
+                                    phases_3pt,
+                                    t0,
+                                )
                             C3_local_bilinear[
                                 flavor_idx, pol_idx, :, :, step
                             ] += local_step[..., :Ninsert]

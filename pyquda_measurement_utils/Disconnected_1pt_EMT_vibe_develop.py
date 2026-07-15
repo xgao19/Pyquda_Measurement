@@ -610,17 +610,16 @@ class EMTDisconnectedQuark1pt:
         )
 
     @staticmethod
-    def _covdev_sym_prop(U_f: LatticeGauge, prop: LatticePropagator, mu: int):
-        """Apply the symmetric covariant derivative to a propagator."""
-        U_f.gauge_dirac.loadGauge(U_f)
+    def _covdev_sym_prop(gauge_dirac, prop: LatticePropagator, mu: int):
+        """Apply the symmetric derivative using a caller-owned gauge context."""
         mf = convert.propagatorToMultiFermion(prop)
         mf_covdev = convert.propagatorToMultiFermion(prop)
 
         for spin in range(4):
             for color in range(3):
                 idx = spin * 3 + color
-                Dp = U_f.pure_gauge.covDev(mf[idx], mu)
-                Dm = U_f.pure_gauge.covDev(mf[idx], mu + 4)
+                Dp = gauge_dirac.covDev(mf[idx], mu)
+                Dm = gauge_dirac.covDev(mf[idx], mu + 4)
                 mf_covdev[idx] = 0.5 * (Dp - Dm)
 
         return convert.multiFermionToPropagator(mf_covdev)
@@ -637,9 +636,9 @@ class EMTDisconnectedQuark1pt:
         )
 
     @classmethod
-    def _left_covdev_dst2_from_prop(cls, U_f: LatticeGauge, prop: LatticePropagator, mu: int):
+    def _left_covdev_dst2_from_prop(cls, gauge_dirac, prop: LatticePropagator, mu: int):
         """Construct the left-acting derivative on ``dst2 = gamma5 S^dagger gamma5``."""
-        D_y = cls._covdev_sym_prop(U_f, prop, mu)
+        D_y = cls._covdev_sym_prop(gauge_dirac, prop, mu)
         D_y_dag = D_y.data.conj().transpose(0, 1, 2, 3, 4, 6, 5, 8, 7)
         G5_local = cls._gamma5_for(prop.data)
         leftD_dst2 = contract("ab,wtzyxbcij,cd->wtzyxadij", G5_local, D_y_dag, G5_local)

@@ -967,6 +967,15 @@ for step in range(Nsteps + 1):
         flow gauge for 1 step of stepsize
 \end{verbatim}
 
+The production implementation deliberately keeps this materialize-and-advance
+schedule.  A persistent resident gauge-flow context was tested for Wilson and
+Symanzik flow with one and ten output steps.  It reproduced every saved
+component exactly, but after separately prewarming both paths its end-to-end
+speed changed by only a few percent and was not consistently faster in both
+execution orders.  It therefore did not meet the ten-percent integration
+threshold.  This avoids adding resident-state lifetime logic without a stable
+performance benefit.
+
 \section{Gluon HDF5 Layout}
 
 The gluon writer is \code{save\_emt\_gluon\_1pt\_hdf5}.  Unlike the quark file,

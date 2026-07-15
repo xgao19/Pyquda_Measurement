@@ -38,6 +38,12 @@ def test_base_ranges_and_nondivisible_part_layout():
     assert hp_vectors_per_base("zn", 256) == 1
     assert hp_vectors_per_base("hierarchical_probing", 16) == 16
     assert base_part_ranges(1, 64) == [(0, 0, 1)]
+
+
+def test_shard_attribute_comparison_treats_matching_nan_as_equal():
+    assert shard_module._attr_equal(np.nan, np.nan)
+    assert shard_module._attr_equal([1.0, np.nan], [1.0, np.nan])
+    assert not shard_module._attr_equal(np.nan, 0.0)
     assert base_part_ranges(16, 64) == [(0, 0, 16)]
     assert base_part_ranges(256, 64) == [
         (0, 0, 64), (1, 64, 128), (2, 128, 192), (3, 192, 256)
