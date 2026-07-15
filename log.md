@@ -609,3 +609,44 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Updated the application examples to use `MEASUREMENT_ROOT`, `m5208` gauge
   and run paths, and the `m5208_g` GPU account. The allocation requests generic
   Perlmutter GPU nodes without a memory-capacity constraint.
+
+## 2026-07-14: Avoid repeated EMT multigrid and covDev gauge setup
+
+- Kept the initial full disconnected-EMT multigrid construction, but restored
+  the unchanged original gauge before subsequent stochastic inversions with a
+  thin MG update instead of refreshing near-null vectors and coarse operators.
+- Reused one flowed-gauge context for all eight forward/backward covariant
+  derivatives at each flow time.
+- Validated pure Z4 and complete 4D-HP16 S8T8 outputs over all primitive and
+  derived channels, including a two-rank decomposition test. Tight-solve
+  reference/candidate results passed `rtol=1e-9, atol=1e-11`; the warmed HP16
+  S8T8 total QUDA time decreased from 3.648 to 1.233 seconds.
+
+## 2026-07-15: Add optional disconnected-EMT source-batched fermion flow
+
+- Added the explicit `--flow-batch-size` production option, with a low-memory
+  default of one and no environment-variable alias or automatic OOM fallback.
+- Plain counter-Z4 sources may batch across pending bases; hierarchical-probing
+  sources batch only inside one base and one HP-part interval. Existing shard,
+  complete-base sample-log, and canonical schemas are unchanged.
+- Each batch restores the unchanged original gauge once, performs sequential
+  inversions, flows the interleaved `xi,eta` fields in one double-precision
+  multi-field call, and shares one flowed-gauge context across all sources at
+  each flow time.
+- The preceding cfg1050 light-quark l64 benchmark found exact agreement for
+  B=1,2,4,8. B=8 reduced the measured total to 3.19 s/source at about 59.6 GiB
+  peak device memory; B=16 exhausted an 80 GB GPU. The application guide thus
+  recommends B=8 as the measured 80 GB starting point and B=1 for 40 GB nodes.
+- Formal-path S8T8 regression compared pure B=1/2/4 and complete HP16 B=1/4.
+  All 27 canonical datasets passed `rtol=1e-9, atol=1e-11`; the largest raw
+  difference was `1.96e-10` with relative L2 difference below `7.38e-12`.
+- A 16-rank cfg1050 light-quark smoke then compared the same 16 counter sources
+  through the formal B=1 and B=8 production/finalization paths. All 27 datasets
+  were bitwise identical, both maximum true residuals were `9.286115e-11`, and
+  sampled peak device memory was 33.8 GiB versus 60.7 GiB.
+- In that short smoke, variable gauge/HYP and full resident-MG startup dominated
+  total wall time, so its setup-inclusive 322 s versus 387 s is not a
+  steady-state source-throughput comparison. The two directly targeted QUDA
+  stages improved from 37.47 s to 14.44 s (`loadGauge+gFlow`), while total QUDA
+  time decreased from 226.41 s to 216.42 s. The longer source-only benchmark
+  remains the basis for the 3.19 s/source B=8 recommendation.

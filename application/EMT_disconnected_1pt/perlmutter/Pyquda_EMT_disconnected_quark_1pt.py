@@ -15,10 +15,26 @@ from pyquda_measurement_utils.io_corr import (
 )
 
 
+def positive_integer(value):
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("expected a positive integer") from error
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("expected a positive integer")
+    return parsed
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("EMT_1PT_MPI_GEOMETRY", "1.1.1.1"))
 parser.add_argument("--mg-block", default="8.8.4.4")
+parser.add_argument(
+    "--flow-batch-size",
+    type=positive_integer,
+    default=1,
+    help="number of stochastic sources flowed together (default: 1)",
+)
 args = parser.parse_args()
 
 conf = args.config_num
@@ -91,4 +107,5 @@ quark_1pt.flowed_fermionic_1pt(
     base_start=base_start,
     base_stop=base_stop,
     block_interval_solves=block_interval_solves,
+    flow_batch_size=args.flow_batch_size,
 )

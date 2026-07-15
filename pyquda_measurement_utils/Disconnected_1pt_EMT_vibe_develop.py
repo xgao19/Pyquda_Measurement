@@ -8,6 +8,7 @@ disconnected diagrams in analysis:
 """
 
 import os
+import operator
 from pathlib import Path
 
 import h5py
@@ -87,6 +88,34 @@ def _normalize_flow_type(flow_type: str) -> str:
 
 def _flow_times(flow_epsilon, flow_steps):
     return np.arange(flow_steps + 1, dtype=np.float64) * float(flow_epsilon)
+
+
+def _positive_flow_batch_size(value):
+    """Return a validated positive source-batch size without coercing floats."""
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(
+            f"flow_batch_size should be a positive integer, got {value!r}"
+        )
+    try:
+        batch_size = operator.index(value)
+    except TypeError as error:
+        raise ValueError(
+            f"flow_batch_size should be a positive integer, got {value!r}"
+        ) from error
+    if batch_size <= 0:
+        raise ValueError(
+            f"flow_batch_size should be a positive integer, got {value!r}"
+        )
+    return batch_size
+
+
+def _interval_batches(start, stop, batch_size):
+    """Yield contiguous half-open intervals no larger than ``batch_size``."""
+    batch_size = _positive_flow_batch_size(batch_size)
+    return [
+        (batch_start, min(batch_start + batch_size, int(stop)))
+        for batch_start in range(int(start), int(stop), batch_size)
+    ]
 
 
 def parse_multigrid_blocks(value):
@@ -233,8 +262,9 @@ class EMTDisconnectedQuark1pt:
         xi: LatticeFermion,
         eta: LatticeFermion,
         phases_3pt,
+        gauge_dirac=None,
     ):
-        """Build all local/one-derivative bilinears and the flowed-noise norm."""
+        """Build primitive bilinears, optionally reusing a resident gauge context."""
         Nt = U_f.latt_info.global_size[3]
         Nq = len(phases_3pt)
 
@@ -253,51 +283,96 @@ class EMTDisconnectedQuark1pt:
         del dot_xi_xi
 
         derivative = np.zeros([16, 4, Nq, Nt], dtype=np.complex128)
-        U_f.gauge_dirac.loadGauge(U_f)
-        for mu in range(4):
-            derivative_right = U_f.pure_gauge.covDev(eta, mu)
-            derivative_left = U_f.pure_gauge.covDev(eta, mu + 4)
-            tmp = derivative_right - derivative_left
-            derivative_fields = contract(
-                "wtzyxia,gij,wtzyxja->gwtzyx",
-                xi.data.conj(), gamma_ls, tmp.data,
-            )
-            derivative[:, mu] = -0.5 * np.asarray(
-                self._project_gamma_fields(derivative_fields, phases_3pt)
-            )
-            del derivative_fields, tmp, derivative_right, derivative_left
+
+        def contract_derivatives(loaded_gauge):
+            for mu in range(4):
+                derivative_right = loaded_gauge.covDev(eta, mu)
+                derivative_left = loaded_gauge.covDev(eta, mu + 4)
+                tmp = derivative_right - derivative_left
+                derivative_fields = contract(
+                    "wtzyxia,gij,wtzyxja->gwtzyx",
+                    xi.data.conj(), gamma_ls, tmp.data,
+                )
+                derivative[:, mu] = -0.5 * np.asarray(
+                    self._project_gamma_fields(derivative_fields, phases_3pt)
+                )
+                del derivative_fields, tmp, derivative_right, derivative_left
+
+        if gauge_dirac is None:
+            with U_f.use() as loaded_gauge:
+                contract_derivatives(loaded_gauge)
+        else:
+            contract_derivatives(gauge_dirac)
 
         return local, derivative, flowed_noise_norm
 
-    def _measure_flowed_source(self, U, xi, eta, phases_3pt):
+    def _measure_flowed_batch(self, U, xis, etas, phases_3pt):
+        """Flow and contract a non-empty source batch in its original order."""
+        xis = list(xis)
+        etas = list(etas)
+        if not xis or len(xis) != len(etas):
+            raise ValueError("xis and etas should be non-empty lists of equal length")
+        batch_size = len(xis)
         n_flow = self.flow_steps + 1
         nt = U.latt_info.global_size[3]
-        local = np.zeros((16, len(self.qlist), n_flow, nt), dtype=np.complex128)
-        derivative = np.zeros((16, 4, len(self.qlist), n_flow, nt), dtype=np.complex128)
+        local = np.zeros(
+            (batch_size, 16, len(self.qlist), n_flow, nt), dtype=np.complex128
+        )
+        derivative = np.zeros(
+            (batch_size, 16, 4, len(self.qlist), n_flow, nt),
+            dtype=np.complex128,
+        )
         flowed_noise_norm = np.zeros(
-            (len(self.qlist), n_flow, nt), dtype=np.complex128
+            (batch_size, len(self.qlist), n_flow, nt), dtype=np.complex128
         )
         U_f = U.copy()
         U_f.setAntiPeriodicT()
+        flowed_owner = None
         for step in range(n_flow):
             mpi_print(U_f.latt_info, f"calc primitive bilinears, step = {step}")
-            (
-                local[:, :, step],
-                derivative[:, :, :, step],
-                flowed_noise_norm[:, step],
-            ) = (
-                self._get_primitive_bilinears_P_Breit_slice(
-                U_f, xi, eta, phases_3pt
-                )
-            )
+            # All sources at this flow time reuse one resident flowed gauge.
+            with U_f.use() as gauge_dirac:
+                for source_idx, (xi, eta) in enumerate(zip(xis, etas)):
+                    (
+                        local[source_idx, :, :, step],
+                        derivative[source_idx, :, :, :, step],
+                        flowed_noise_norm[source_idx, :, step],
+                    ) = self._get_primitive_bilinears_P_Breit_slice(
+                        U_f, xi, eta, phases_3pt, gauge_dirac=gauge_dirac
+                    )
             if step < self.flow_steps:
                 if step == 0:
                     n_steps, step_size = 10, self.flow_epsilon / 10
                 else:
                     n_steps, step_size = 1, self.flow_epsilon
-                flowed = U_f.gradientFlow(convert.multiField([xi, eta]), self.flow_type, n_steps, step_size)
-                xi, eta = flowed[0], flowed[1]
+                fields = []
+                for xi, eta in zip(xis, etas):
+                    fields.extend((xi, eta))
+                flowed_owner = U_f.gradientFlow(
+                    convert.multiField(fields), self.flow_type, n_steps, step_size
+                )
+                xis = [flowed_owner[2 * idx] for idx in range(batch_size)]
+                etas = [flowed_owner[2 * idx + 1] for idx in range(batch_size)]
         return local, derivative, flowed_noise_norm
+
+    def _measure_flowed_source(self, U, xi, eta, phases_3pt):
+        """Compatibility-sized wrapper around the batch kernel for one source."""
+        local, derivative, flowed_noise_norm = self._measure_flowed_batch(
+            U, [xi], [eta], phases_3pt
+        )
+        return local[0], derivative[0], flowed_noise_norm[0]
+
+    def _invert_and_measure_batch(self, U, dirac, source_records, phases_3pt):
+        """Restore the original gauge once, then invert and flow one source batch."""
+        source_records = list(source_records)
+        if not source_records:
+            raise ValueError("source_records should not be empty")
+        # Fermion flow leaves a flowed gauge resident.  Restore the unchanged
+        # original thin gauge once for all sequential inversions in this batch.
+        dirac.loadGauge(U, thin_update_only=True)
+        xis = [record[3] for record in source_records]
+        etas = [dirac.invert(xi) for xi in xis]
+        return self._measure_flowed_batch(U, xis, etas, phases_3pt)
 
     def _measurement_attrs(self, latt_info, invPara, randPara, counter_config, counter_stream, n_eff, spatial_volume):
         n_vec, n_zn, _ = randPara
@@ -349,7 +424,7 @@ class EMTDisconnectedQuark1pt:
     def _measure_base_shards(
         self, U, dirac, invPara, randPara, tag, phases_3pt, attrs,
         shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
-        completed_bases,
+        completed_bases, flow_batch_size,
     ):
         n_vec, n_zn, _ = randPara
         hp_count = hp_vectors_per_base(self.noise_scheme, self.hp_num_vectors)
@@ -365,16 +440,79 @@ class EMTDisconnectedQuark1pt:
         operator_metadata = basis_metadata()
         comm = getMPIComm()
 
-        for base_idx in selected_base_range(n_vec, base_start, base_stop):
+        flow_batch_size = _positive_flow_batch_size(flow_batch_size)
+        selected_bases = list(selected_base_range(n_vec, base_start, base_stop))
+        pending_bases = []
+        for base_idx in selected_bases:
             if base_idx in completed_bases:
                 mpi_print(U.latt_info, f"EMT base SKIP from sample log: base{base_idx:06d}")
-                continue
+            else:
+                pending_bases.append(base_idx)
+
+        def write_part(base_idx, part_idx, hp_start, hp_stop, local, derivative, norm):
+            path = shard_part_path(
+                shard_dir, tag, base_idx, part_idx, hp_start, hp_stop
+            )
+            write_attrs = shard_part_attrs(
+                common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
+            )
+            bookkeeping = part_source_bookkeeping(
+                base_idx, hp_start, hp_stop, hp_count
+            )
+            if U.latt_info.mpi_rank == 0:
+                write_raw_part_hdf5(
+                    path,
+                    {
+                        "local_bilinear_pervec": local,
+                        "derivative_bilinear_pervec": derivative,
+                        "flowed_noise_norm_pervec": norm,
+                    },
+                    write_attrs,
+                    bookkeeping,
+                    metadata_datasets=operator_metadata,
+                )
+            comm.Barrier()
+
+        def complete_base(base_idx):
+            if U.latt_info.mpi_rank == 0:
+                append_completed_base(sample_log_file, tag, common_attrs, base_idx)
+            comm.Barrier()
+
+        if self.noise_scheme != "hierarchical_probing":
+            # A plain-noise base contains one source, so batching across pending
+            # bases is required for pure Z_N to benefit from source batching.
+            for batch_start, batch_stop in _interval_batches(
+                0, len(pending_bases), flow_batch_size
+            ):
+                batch_bases = pending_bases[batch_start:batch_stop]
+                source_records = []
+                for base_idx in batch_bases:
+                    records = list(iter_noise_base_hp_interval(
+                        U.latt_info, base_idx, 0, 1, n_zn,
+                        self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
+                        config_num=int(attrs["config_num"]),
+                        noise_stream=int(attrs["noise_stream"]),
+                    ))
+                    if len(records) != 1:
+                        raise RuntimeError(
+                            f"plain noise base {base_idx} generated {len(records)} sources"
+                        )
+                    source_records.extend(records)
+                local, derivative, norm = self._invert_and_measure_batch(
+                    U, dirac, source_records, phases_3pt
+                )
+                for source_offset, base_idx in enumerate(batch_bases):
+                    source_slice = slice(source_offset, source_offset + 1)
+                    write_part(
+                        base_idx, 0, 0, 1,
+                        local[source_slice], derivative[source_slice], norm[source_slice],
+                    )
+                    complete_base(base_idx)
+            return None, None
+
+        for base_idx in pending_bases:
             for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
                 count = hp_stop - hp_start
-                path = shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop)
-                write_attrs = shard_part_attrs(
-                    common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
-                )
                 raw_shapes = {
                     "local_bilinear_pervec": (count, 16, len(self.qlist), n_flow, nt),
                     "derivative_bilinear_pervec": (count, 16, 4, len(self.qlist), n_flow, nt),
@@ -385,48 +523,34 @@ class EMTDisconnectedQuark1pt:
                     "base_noise_index": (count,),
                     "hp_index": (count,),
                 }
-                bookkeeping = part_source_bookkeeping(
-                    base_idx, hp_start, hp_stop, hp_count
-                )
                 local_part = np.zeros(raw_shapes["local_bilinear_pervec"], dtype=np.complex128)
                 derivative_part = np.zeros(raw_shapes["derivative_bilinear_pervec"], dtype=np.complex128)
                 norm_part = np.zeros(
                     raw_shapes["flowed_noise_norm_pervec"], dtype=np.complex128
                 )
-                for _, _, hp_idx, xi in iter_noise_base_hp_interval(
-                    U.latt_info, base_idx, hp_start, hp_stop, n_zn,
-                    self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
-                    config_num=int(attrs["config_num"]),
-                    noise_stream=int(attrs["noise_stream"]),
+                for batch_hp_start, batch_hp_stop in _interval_batches(
+                    hp_start, hp_stop, flow_batch_size
                 ):
-                    local_idx = hp_idx - hp_start
-                    # The previous source leaves a flowed gauge resident in QUDA.
-                    dirac.loadGauge(U)
-                    eta = dirac.invert(xi)
-                    (
-                        local_part[local_idx],
-                        derivative_part[local_idx],
-                        norm_part[local_idx],
-                    ) = self._measure_flowed_source(U, xi, eta, phases_3pt)
-                if U.latt_info.mpi_rank == 0:
-                    write_raw_part_hdf5(
-                        path,
-                        {
-                            "local_bilinear_pervec": local_part,
-                            "derivative_bilinear_pervec": derivative_part,
-                            "flowed_noise_norm_pervec": norm_part,
-                        },
-                        write_attrs,
-                        bookkeeping,
-                        metadata_datasets=operator_metadata,
+                    source_records = list(iter_noise_base_hp_interval(
+                        U.latt_info, base_idx, batch_hp_start, batch_hp_stop, n_zn,
+                        self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
+                        config_num=int(attrs["config_num"]),
+                        noise_stream=int(attrs["noise_stream"]),
+                    ))
+                    local, derivative, norm = self._invert_and_measure_batch(
+                        U, dirac, source_records, phases_3pt
                     )
-                comm.Barrier()
-
-            if U.latt_info.mpi_rank == 0:
-                append_completed_base(
-                    sample_log_file, tag, common_attrs, base_idx
+                    destination = slice(
+                        batch_hp_start - hp_start, batch_hp_stop - hp_start
+                    )
+                    local_part[destination] = local
+                    derivative_part[destination] = derivative
+                    norm_part[destination] = norm
+                write_part(
+                    base_idx, part_idx, hp_start, hp_stop,
+                    local_part, derivative_part, norm_part,
                 )
-            comm.Barrier()
+            complete_base(base_idx)
         return None, None
 
     def flowed_fermionic_1pt(
@@ -440,8 +564,10 @@ class EMTDisconnectedQuark1pt:
         base_start=0,
         base_stop=None,
         block_interval_solves=64,
+        flow_batch_size=1,
     ):
-        """Compute quark flowed 1pt observables with stochastic sources."""
+        """Compute stochastic quark 1pt observables with optional batched flow."""
+        flow_batch_size = _positive_flow_batch_size(flow_batch_size)
         n_vec, n_zn, randseed = randPara
         mass, csw, tol, maxiter = invPara
         U = gauge
@@ -497,7 +623,7 @@ class EMTDisconnectedQuark1pt:
         return self._measure_base_shards(
             U, dirac, invPara, randPara, tag, phases_3pt, attrs,
             shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
-            completed_bases,
+            completed_bases, flow_batch_size,
         )
 
     @staticmethod

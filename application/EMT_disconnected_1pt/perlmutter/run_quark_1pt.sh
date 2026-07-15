@@ -3,6 +3,7 @@ set -euo pipefail
 
 config_num=""
 mg_block="8.8.4.4"
+flow_batch_size="1"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config_num)
@@ -21,6 +22,14 @@ while [[ $# -gt 0 ]]; do
       mg_block="$2"
       shift 2
       ;;
+    --flow-batch-size)
+      [[ $# -ge 2 && "${2:-}" =~ ^[1-9][0-9]*$ ]] || {
+        echo "--flow-batch-size requires a positive integer" >&2
+        exit 2
+      }
+      flow_batch_size="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1" >&2
       exit 2
@@ -28,7 +37,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ -z "$config_num" ]]; then
-  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;X.Y.Z.T]]" >&2
+  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;X.Y.Z.T]] [--flow-batch-size B]" >&2
   exit 2
 fi
 
@@ -70,4 +79,5 @@ echo "Running disconnected quark EMT 1pt"
 python3 -u "$script_dir/Pyquda_EMT_disconnected_quark_1pt.py" \
   --config_num "$config_num" \
   --mpi_geometry "$EMT_1PT_MPI_GEOMETRY" \
-  --mg-block "$mg_block"
+  --mg-block "$mg_block" \
+  --flow-batch-size "$flow_batch_size"

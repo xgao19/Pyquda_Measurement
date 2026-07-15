@@ -156,6 +156,31 @@ def test_emt_quark_hp_defaults_to_isotropic_four_dimensional_ordering():
     assert f'EMT_1PT_HP_ORDERING:-{ordering}' in wrapper
 
 
+def test_emt_quark_flow_batch_size_is_positive_cli_only():
+    driver = (
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_quark_1pt.py"
+    )
+    wrapper = "application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh"
+    argument = _parser_arguments(driver)["--flow-batch-size"]
+    assert _keyword_constant(argument, "default") == 1
+    assert "flow_batch_size=args.flow_batch_size" in _source(driver)
+    assert "EMT_1PT_FLOW_BATCH_SIZE" not in _source(driver)
+    assert "EMT_1PT_FLOW_BATCH_SIZE" not in _source(wrapper)
+
+    for invalid in ("0", "-1", "1.5", "bad"):
+        result = subprocess.run(
+            [
+                "bash", str(REPO_ROOT / wrapper),
+                "--config_num", "0", "--flow-batch-size", invalid,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 2
+        assert "positive integer" in result.stderr
+
+
 def test_disconnected_configuration_is_required_cli_only():
     single_config_scripts = {
         "application/EMT_disconnected_1pt/perlmutter/Pyquda_EMT_disconnected_quark_1pt.py": "EMT_1PT_CONFIG_NUM",

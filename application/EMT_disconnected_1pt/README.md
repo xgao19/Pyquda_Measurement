@@ -439,7 +439,10 @@ EMT_1PT_N_VEC=1 \
 EMT_1PT_N_ZN=4 \
 EMT_1PT_NOISE_SCHEME=hierarchical_probing \
 EMT_1PT_HP_NUM_VECTORS=2 \
-bash "$APP/run_quark_1pt.sh" --config_num 0 --mg-block 8.8.4.4
+bash "$APP/run_quark_1pt.sh" \
+  --config_num 0 \
+  --mg-block 8.8.4.4 \
+  --flow-batch-size 1
 ```
 
 `--config_num` is required even for the test gauge. It is part of the
@@ -512,6 +515,51 @@ hp_index               = [0, 1]
 This smoke test checks the environment, source bookkeeping, shard writer, and
 finalizer. It is too small to compare stochastic convergence.
 
+## Optional Fermion-Flow Source Batching
+
+The quark wrapper can flow several already-inverted stochastic sources in one
+QUDA call:
+
+```bash
+bash "$APP/run_quark_1pt.sh" \
+  --config_num 1050 \
+  --mg-block '4.4.4.4;4.4.4.4' \
+  --flow-batch-size 8
+```
+
+The default is `--flow-batch-size 1`, which preserves the lowest-memory
+execution path. A batch of size `B` packs the fields in the order
+
+```text
+xi_1, eta_1, xi_2, eta_2, ..., xi_B, eta_B
+```
+
+and evolves all `2B` fields with one double-precision fermion-flow call. The
+sources still use sequential inversions. The original gauge is restored once
+at the start of the batch, and all sources at one flow time share the same
+resident flowed-gauge context for their covariant derivatives.
+
+Use the largest batch that leaves a safe GPU-memory margin. The current
+`l64c64a076`, resident-multigrid test found these practical starting points:
+
+```text
+80 GB Perlmutter GPU: B=8
+40 GB Perlmutter GPU: B=1
+```
+
+`B=16` exhausted an 80 GB GPU for that particular `64^4` setup with
+double-precision flow and resident multigrid. These are measured settings for
+one ensemble, not universal limits; a new lattice, multigrid hierarchy, or GPU
+should be tested from `B=1` upward. QUDA out-of-memory errors normally terminate
+the MPI job, so the production code deliberately has no automatic fallback.
+
+Batching changes only scheduling. It is not stored as physics provenance, does
+not enter the sample-log fingerprint, and may be changed when resuming or
+between nonoverlapping base jobs. Plain `Z4` batching may span pending bases.
+Hierarchical probing is batched only within one base and one shard part, so a
+partial HP prefix never becomes a completed estimator. Shards and the sample
+log are published at the same completion boundaries as for `B=1`.
+
 ## Fixed-Cost Benchmark
 
 The following shell function runs one method through the normal production
@@ -524,6 +572,7 @@ run_method () {
   scheme=$2
   hp=$3
   bases=$4
+  batch=${5:-1}
   EMT_1PT_DATA_DIR="$DATA" \
   EMT_1PT_GAUGE_PATH="$ROOT/test_gauge/S8T8_wilson_b6.0" \
   EMT_1PT_LAT_TAG=S8T8 \
@@ -537,7 +586,10 @@ run_method () {
   EMT_1PT_NOISE_SCHEME="$scheme" \
   EMT_1PT_HP_NUM_VECTORS="$hp" \
   EMT_1PT_HP_ORDERING=interleaved_xyzt_binary_projected_to_evenodd \
-  bash "$APP/run_quark_1pt.sh" --config_num 0 --mg-block 8.8.4.4
+  bash "$APP/run_quark_1pt.sh" \
+    --config_num 0 \
+    --mg-block 8.8.4.4 \
+    --flow-batch-size "$batch"
 }
 ```
 
