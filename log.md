@@ -650,3 +650,17 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   stages improved from 37.47 s to 14.44 s (`loadGauge+gFlow`), while total QUDA
   time decreased from 226.41 s to 216.42 s. The longer source-only benchmark
   remains the basis for the 3.19 s/source B=8 recommendation.
+
+## 2026-07-15: Lighten disconnected-EMT batching internals
+
+- Removed the unused single-source flow wrapper, an unused shard-method
+  argument, and indirect raw-shape bookkeeping while preserving the source
+  scheduler and HDF5 schemas.
+- Made the primitive contraction require a caller-owned resident flowed-gauge
+  context, eliminating its optional context branch and making the one-context
+  per-flow-time invariant explicit.
+- Consolidated the batching tests around small shared lattice, communicator,
+  measurement, and output fixtures. A fresh S8T8 pure-B4 and complete-HP16-B4
+  comparison passed for all 27 canonical datasets; HP16 was bitwise identical,
+  while pure had maximum absolute difference `1.93e-10` and relative L2
+  difference `3.76e-12`.

@@ -259,12 +259,12 @@ class EMTDisconnectedQuark1pt:
     def _get_primitive_bilinears_P_Breit_slice(
         self,
         U_f: LatticeGauge,
+        gauge_dirac,
         xi: LatticeFermion,
         eta: LatticeFermion,
         phases_3pt,
-        gauge_dirac=None,
     ):
-        """Build primitive bilinears, optionally reusing a resident gauge context."""
+        """Build primitive bilinears using an already resident flowed gauge."""
         Nt = U_f.latt_info.global_size[3]
         Nq = len(phases_3pt)
 
@@ -284,25 +284,18 @@ class EMTDisconnectedQuark1pt:
 
         derivative = np.zeros([16, 4, Nq, Nt], dtype=np.complex128)
 
-        def contract_derivatives(loaded_gauge):
-            for mu in range(4):
-                derivative_right = loaded_gauge.covDev(eta, mu)
-                derivative_left = loaded_gauge.covDev(eta, mu + 4)
-                tmp = derivative_right - derivative_left
-                derivative_fields = contract(
-                    "wtzyxia,gij,wtzyxja->gwtzyx",
-                    xi.data.conj(), gamma_ls, tmp.data,
-                )
-                derivative[:, mu] = -0.5 * np.asarray(
-                    self._project_gamma_fields(derivative_fields, phases_3pt)
-                )
-                del derivative_fields, tmp, derivative_right, derivative_left
-
-        if gauge_dirac is None:
-            with U_f.use() as loaded_gauge:
-                contract_derivatives(loaded_gauge)
-        else:
-            contract_derivatives(gauge_dirac)
+        for mu in range(4):
+            derivative_right = gauge_dirac.covDev(eta, mu)
+            derivative_left = gauge_dirac.covDev(eta, mu + 4)
+            tmp = derivative_right - derivative_left
+            derivative_fields = contract(
+                "wtzyxia,gij,wtzyxja->gwtzyx",
+                xi.data.conj(), gamma_ls, tmp.data,
+            )
+            derivative[:, mu] = -0.5 * np.asarray(
+                self._project_gamma_fields(derivative_fields, phases_3pt)
+            )
+            del derivative_fields, tmp, derivative_right, derivative_left
 
         return local, derivative, flowed_noise_norm
 
@@ -338,7 +331,7 @@ class EMTDisconnectedQuark1pt:
                         derivative[source_idx, :, :, :, step],
                         flowed_noise_norm[source_idx, :, step],
                     ) = self._get_primitive_bilinears_P_Breit_slice(
-                        U_f, xi, eta, phases_3pt, gauge_dirac=gauge_dirac
+                        U_f, gauge_dirac, xi, eta, phases_3pt
                     )
             if step < self.flow_steps:
                 if step == 0:
@@ -354,13 +347,6 @@ class EMTDisconnectedQuark1pt:
                 xis = [flowed_owner[2 * idx] for idx in range(batch_size)]
                 etas = [flowed_owner[2 * idx + 1] for idx in range(batch_size)]
         return local, derivative, flowed_noise_norm
-
-    def _measure_flowed_source(self, U, xi, eta, phases_3pt):
-        """Compatibility-sized wrapper around the batch kernel for one source."""
-        local, derivative, flowed_noise_norm = self._measure_flowed_batch(
-            U, [xi], [eta], phases_3pt
-        )
-        return local[0], derivative[0], flowed_noise_norm[0]
 
     def _invert_and_measure_batch(self, U, dirac, source_records, phases_3pt):
         """Restore the original gauge once, then invert and flow one source batch."""
@@ -422,7 +408,7 @@ class EMTDisconnectedQuark1pt:
         return attrs
 
     def _measure_base_shards(
-        self, U, dirac, invPara, randPara, tag, phases_3pt, attrs,
+        self, U, dirac, randPara, tag, phases_3pt, attrs,
         shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
         completed_bases, flow_batch_size,
     ):
@@ -513,20 +499,17 @@ class EMTDisconnectedQuark1pt:
         for base_idx in pending_bases:
             for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
                 count = hp_stop - hp_start
-                raw_shapes = {
-                    "local_bilinear_pervec": (count, 16, len(self.qlist), n_flow, nt),
-                    "derivative_bilinear_pervec": (count, 16, 4, len(self.qlist), n_flow, nt),
-                    "flowed_noise_norm_pervec": (
-                        count, len(self.qlist), n_flow, nt
-                    ),
-                    "source_index": (count,),
-                    "base_noise_index": (count,),
-                    "hp_index": (count,),
-                }
-                local_part = np.zeros(raw_shapes["local_bilinear_pervec"], dtype=np.complex128)
-                derivative_part = np.zeros(raw_shapes["derivative_bilinear_pervec"], dtype=np.complex128)
+                local_part = np.zeros(
+                    (count, 16, len(self.qlist), n_flow, nt),
+                    dtype=np.complex128,
+                )
+                derivative_part = np.zeros(
+                    (count, 16, 4, len(self.qlist), n_flow, nt),
+                    dtype=np.complex128,
+                )
                 norm_part = np.zeros(
-                    raw_shapes["flowed_noise_norm_pervec"], dtype=np.complex128
+                    (count, len(self.qlist), n_flow, nt),
+                    dtype=np.complex128,
                 )
                 for batch_hp_start, batch_hp_stop in _interval_batches(
                     hp_start, hp_stop, flow_batch_size
@@ -621,7 +604,7 @@ class EMTDisconnectedQuark1pt:
         qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
         phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, [0, 0, 0, 0])
         return self._measure_base_shards(
-            U, dirac, invPara, randPara, tag, phases_3pt, attrs,
+            U, dirac, randPara, tag, phases_3pt, attrs,
             shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
             completed_bases, flow_batch_size,
         )

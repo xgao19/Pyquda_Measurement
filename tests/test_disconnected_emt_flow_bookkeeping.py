@@ -24,6 +24,48 @@ from pyquda_measurement_utils.disconnected_shards import (
 )
 
 
+class FakeLatticeInfo:
+    def __init__(self, global_size=(1, 1, 1, 1), t_boundary=-1, mpi_rank=0):
+        self.global_size = list(global_size)
+        self.t_boundary = t_boundary
+        self.mpi_rank = mpi_rank
+
+
+class FakeGauge:
+    def __init__(self, latt_info=None):
+        self.latt_info = latt_info or FakeLatticeInfo()
+
+
+class FakeComm:
+    @staticmethod
+    def bcast(value, root=0):
+        return value
+
+    @staticmethod
+    def Barrier():
+        return None
+
+
+def make_measurement(**overrides):
+    params = {
+        "config_num": 1,
+        "qext": [[0, 0, 0, 0]],
+        "flow_type": "wilson",
+        "flow_epsilon": 0.1,
+        "flow_steps": 0,
+    }
+    params.update(overrides)
+    return EMTDisconnectedQuark1pt(params)
+
+
+def zero_batch_output(count, n_flow=1, nq=1, nt=1):
+    return (
+        np.zeros((count, 16, nq, n_flow, nt), dtype=np.complex128),
+        np.zeros((count, 16, 4, nq, n_flow, nt), dtype=np.complex128),
+        np.zeros((count, nq, n_flow, nt), dtype=np.complex128),
+    )
+
+
 def test_flow_times_include_zero_flow_and_regular_steps():
     np.testing.assert_allclose(_flow_times(0.02, 4), [0.0, 0.02, 0.04, 0.06, 0.08])
 
@@ -147,37 +189,17 @@ def test_ringed_zero_momentum_should_be_unique():
 
 
 def test_emt_default_hp_ordering_is_isotropic_four_dimensional():
-    measurement = EMTDisconnectedQuark1pt({
-        "qext": [[0, 0, 0, 0]],
-        "flow_type": "wilson",
-        "flow_epsilon": 0.1,
-        "flow_steps": 1,
-    })
+    measurement = make_measurement(flow_steps=1)
     assert measurement.hp_ordering == "interleaved_xyzt_binary_projected_to_evenodd"
 
 
 def test_ringed_zero_momentum_validation_precedes_inverter_setup():
-    class FakeLatticeInfo:
-        global_size = [2, 2, 2, 2]
-
-    class FakeGauge:
-        latt_info = FakeLatticeInfo()
-
-    measurement = EMTDisconnectedQuark1pt({
-        "qext": [[1, 0, 0, 0]],
-        "pf": [0, 0, 0, 0],
-        "p_2pt": [[1, 0, 0, 0]],
-        "pos_boost": [0, 0, 0],
-        "neg_boost": [0, 0, 0],
-        "width": 1.0,
-        "flow_type": "wilson",
-        "flow_epsilon": 0.1,
-        "flow_steps": 1,
-    })
+    gauge = FakeGauge(FakeLatticeInfo(global_size=(2, 2, 2, 2)))
+    measurement = make_measurement(qext=[[1, 0, 0, 0]], flow_steps=1)
 
     try:
         measurement.flowed_fermionic_1pt(
-            FakeGauge(),
+            gauge,
             [0.1, 1.0, 1e-10, 10],
             [1, 4, 0],
             tag="emt",
@@ -189,64 +211,26 @@ def test_ringed_zero_momentum_validation_precedes_inverter_setup():
 
 
 def test_counter_configuration_validation_precedes_inverter_setup():
-    class FakeLatticeInfo:
-        global_size = [2, 2, 2, 2]
-        t_boundary = -1
-
-    class FakeGauge:
-        latt_info = FakeLatticeInfo()
-
-    measurement = EMTDisconnectedQuark1pt({
-        "qext": [[0, 0, 0, 0]],
-        "pf": [0, 0, 0, 0],
-        "p_2pt": [[0, 0, 0, 0]],
-        "pos_boost": [0, 0, 0],
-        "neg_boost": [0, 0, 0],
-        "width": 1.0,
-        "flow_type": "wilson",
-        "flow_epsilon": 0.1,
-        "flow_steps": 1,
-    })
+    gauge = FakeGauge(FakeLatticeInfo(global_size=(2, 2, 2, 2)))
+    measurement = make_measurement(config_num=None, flow_steps=1)
 
     with pytest.raises(ValueError, match="config_num is required"):
         measurement.flowed_fermionic_1pt(
-            FakeGauge(), [0.1, 1.0, 1e-10, 10], [1, 4, 0],
+            gauge, [0.1, 1.0, 1e-10, 10], [1, 4, 0],
             tag="emt",
         )
 
 
 def test_logged_base_skips_before_inverter_and_without_hdf5(tmp_path, monkeypatch):
-    class FakeLatticeInfo:
-        global_size = [2, 2, 2, 2]
-        t_boundary = -1
-        mpi_rank = 0
-
-    class FakeGauge:
-        latt_info = FakeLatticeInfo()
-
-    class FakeComm:
-        @staticmethod
-        def bcast(value, root=0):
-            return value
-
-    measurement = EMTDisconnectedQuark1pt({
-        "config_num": 17,
-        "qext": [[0, 0, 0, 0]],
-        "pf": [0, 0, 0, 0],
-        "p_2pt": [[0, 0, 0, 0]],
-        "pos_boost": [0, 0, 0],
-        "neg_boost": [0, 0, 0],
-        "width": 1.0,
-        "flow_type": "wilson",
-        "flow_epsilon": 0.1,
-        "flow_steps": 1,
-    })
+    latt_info = FakeLatticeInfo(global_size=(2, 2, 2, 2))
+    gauge = FakeGauge(latt_info)
+    measurement = make_measurement(config_num=17, flow_steps=1)
     inv = [0.1, 1.0, 1e-10, 10]
     rand = [1, 4, 0]
     tag = str(tmp_path / "lat.EMTc.17.0.sm")
     log = tmp_path / "sample.log"
     attrs = measurement._measurement_attrs(
-        FakeLatticeInfo(), inv, rand, 17, 0, 1, 8
+        latt_info, inv, rand, 17, 0, 1, 8
     )
     common = {
         key: value for key, value in attrs.items()
@@ -263,7 +247,7 @@ def test_logged_base_skips_before_inverter_and_without_hdf5(tmp_path, monkeypatc
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("inverter should not initialize")),
     )
     assert measurement.flowed_fermionic_1pt(
-        FakeGauge(), inv, rand, tag=tag, sample_log_file=log
+        gauge, inv, rand, tag=tag, sample_log_file=log
     ) == (None, None)
     assert not list(tmp_path.rglob("*.h5"))
 
@@ -295,10 +279,7 @@ def test_complete_gamma_basis_does_not_add_covdev_calls(monkeypatch):
             self.calls.append(direction)
             return FakeField((direction + 1) * field.data)
 
-    class FakeLatticeInfo:
-        global_size = [1, 1, 1, 1]
-
-    class FakeGauge:
+    class PrimitiveGauge:
         def __init__(self):
             self.latt_info = FakeLatticeInfo()
             self.pure_gauge = FakePureGauge()
@@ -318,18 +299,7 @@ def test_complete_gamma_basis_does_not_add_covdev_calls(monkeypatch):
 
             return GaugeContext()
 
-    measurement = EMTDisconnectedQuark1pt({
-        "config_num": 1,
-        "qext": [[0, 0, 0, 0]],
-        "pf": [0, 0, 0, 0],
-        "p_2pt": [[0, 0, 0, 0]],
-        "pos_boost": [0, 0, 0],
-        "neg_boost": [0, 0, 0],
-        "width": 1.0,
-        "flow_type": "wilson",
-        "flow_epsilon": 0.1,
-        "flow_steps": 0,
-    })
+    measurement = make_measurement()
     monkeypatch.setattr(measurement, "_gamma_stack_for", lambda _ref: gamma_matrices_numpy())
     monkeypatch.setattr(
         measurement,
@@ -345,10 +315,13 @@ def test_complete_gamma_basis_does_not_add_covdev_calls(monkeypatch):
         np.arange(12, dtype=np.float64).reshape(1, 1, 1, 1, 1, 4, 3)
         + 1j * np.arange(12, 24, dtype=np.float64).reshape(1, 1, 1, 1, 1, 4, 3)
     )
-    gauge = FakeGauge()
-    local, derivative, flowed_noise_norm = measurement._get_primitive_bilinears_P_Breit_slice(
-        gauge, FakeField(data), FakeField(2 * data), [None]
-    )
+    gauge = PrimitiveGauge()
+    with gauge.use() as gauge_dirac:
+        local, derivative, flowed_noise_norm = (
+            measurement._get_primitive_bilinears_P_Breit_slice(
+                gauge, gauge_dirac, FakeField(data), FakeField(2 * data), [None]
+            )
+        )
     gamma = gamma_matrices_numpy()
     expected_local = np.einsum(
         "wtzyxia,gij,wtzyxja->gwtzyx", data.conj(), gamma, 2 * data
@@ -426,17 +399,10 @@ def test_flowed_batch_uses_one_context_and_one_multifield_flow_per_step(monkeypa
             )
             return FakeFlowedOwner(fields)
 
-    measurement = EMTDisconnectedQuark1pt({
-        "config_num": 1,
-        "qext": [[0, 0, 0, 0]],
-        "flow_type": "wilson",
-        "flow_epsilon": 0.2,
-        "flow_steps": 2,
-    })
+    measurement = make_measurement(flow_epsilon=0.2, flow_steps=2)
     primitive_calls = []
 
-    def fake_primitive(_gauge, xi, eta, _phases, gauge_dirac=None):
-        assert gauge_dirac is not None
+    def fake_primitive(_gauge, gauge_dirac, xi, eta, _phases):
         primitive_calls.append((xi.identity, eta.identity, gauge_dirac))
         return (
             np.full((16, 1, 1), len(primitive_calls), dtype=np.complex128),
@@ -470,25 +436,8 @@ def test_flowed_batch_uses_one_context_and_one_multifield_flow_per_step(monkeypa
 def test_plain_noise_batches_across_bases_and_logs_only_successful_batches(
     tmp_path, monkeypatch
 ):
-    class FakeInfo:
-        global_size = [1, 1, 1, 1]
-        mpi_rank = 0
-
-    class FakeGauge:
-        latt_info = FakeInfo()
-
-    class FakeComm:
-        @staticmethod
-        def Barrier():
-            return None
-
-    measurement = EMTDisconnectedQuark1pt({
-        "config_num": 3,
-        "qext": [[0, 0, 0, 0]],
-        "flow_type": "wilson",
-        "flow_epsilon": 0.1,
-        "flow_steps": 0,
-    })
+    gauge = FakeGauge()
+    measurement = make_measurement(config_num=3)
     batches = []
     writes = []
     completed = []
@@ -507,12 +456,7 @@ def test_plain_noise_batches_across_bases_and_logs_only_successful_batches(
         batches.append(bases)
         if bases == [2, 3]:
             raise RuntimeError("synthetic batch failure")
-        count = len(records)
-        return (
-            np.zeros((count, 16, 1, 1, 1), dtype=np.complex128),
-            np.zeros((count, 16, 4, 1, 1, 1), dtype=np.complex128),
-            np.zeros((count, 1, 1, 1), dtype=np.complex128),
-        )
+        return zero_batch_output(len(records))
 
     monkeypatch.setattr(measurement, "_invert_and_measure_batch", fake_measure)
     monkeypatch.setattr(
@@ -535,7 +479,7 @@ def test_plain_noise_batches_across_bases_and_logs_only_successful_batches(
 
     with pytest.raises(RuntimeError, match="synthetic batch failure"):
         measurement._measure_base_shards(
-            FakeGauge(), object(), [0.1, 1.0, 1e-10, 10], [5, 4, 0],
+            gauge, object(), [5, 4, 0],
             str(tmp_path / "test.h5"), [None], attrs,
             tmp_path / "shards", tmp_path / "sample.log", 0, 5, 64,
             set(), 2,
@@ -546,27 +490,12 @@ def test_plain_noise_batches_across_bases_and_logs_only_successful_batches(
 
 
 def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
-    class FakeInfo:
-        global_size = [1, 1, 1, 1]
-        mpi_rank = 0
-
-    class FakeGauge:
-        latt_info = FakeInfo()
-
-    class FakeComm:
-        @staticmethod
-        def Barrier():
-            return None
-
-    measurement = EMTDisconnectedQuark1pt({
-        "config_num": 4,
-        "qext": [[0, 0, 0, 0]],
-        "flow_type": "wilson",
-        "flow_epsilon": 0.1,
-        "flow_steps": 0,
-        "noise_scheme": "hierarchical_probing",
-        "hp_num_vectors": 16,
-    })
+    gauge = FakeGauge()
+    measurement = make_measurement(
+        config_num=4,
+        noise_scheme="hierarchical_probing",
+        hp_num_vectors=16,
+    )
     batches = []
     completed = []
     writes = []
@@ -582,12 +511,7 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
     def fake_measure(_gauge, _dirac, records, _phases):
         records = list(records)
         batches.append([(record[1], record[2]) for record in records])
-        count = len(records)
-        return (
-            np.zeros((count, 16, 1, 1, 1), dtype=np.complex128),
-            np.zeros((count, 16, 4, 1, 1, 1), dtype=np.complex128),
-            np.zeros((count, 1, 1, 1), dtype=np.complex128),
-        )
+        return zero_batch_output(len(records))
 
     monkeypatch.setattr(measurement, "_invert_and_measure_batch", fake_measure)
     monkeypatch.setattr(
@@ -606,7 +530,7 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
         "effective_n_inversions": 16,
     }
     measurement._measure_base_shards(
-        FakeGauge(), object(), [0.1, 1.0, 1e-10, 10], [1, 4, 0],
+        gauge, object(), [1, 4, 0],
         str(tmp_path / "test.h5"), [None], attrs,
         tmp_path / "shards", tmp_path / "sample.log", 0, 1, 64,
         set(), 6,
@@ -620,23 +544,6 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
 
 
 def test_source_loop_uses_one_full_mg_setup_then_thin_restores(tmp_path, monkeypatch):
-    class FakeLatticeInfo:
-        global_size = [1, 1, 1, 1]
-        t_boundary = -1
-        mpi_rank = 0
-
-    class FakeGauge:
-        latt_info = FakeLatticeInfo()
-
-    class FakeComm:
-        @staticmethod
-        def bcast(value, root=0):
-            return value
-
-        @staticmethod
-        def Barrier():
-            return None
-
     class FakeDirac:
         def __init__(self):
             self.load_calls = []
@@ -656,13 +563,8 @@ def test_source_loop_uses_one_full_mg_setup_then_thin_restores(tmp_path, monkeyp
         def getPhases(momentum, source_position):
             return [None]
 
-    measurement = EMTDisconnectedQuark1pt({
-        "config_num": 19,
-        "qext": [[0, 0, 0, 0]],
-        "flow_type": "wilson",
-        "flow_epsilon": 0.1,
-        "flow_steps": 0,
-    })
+    gauge = FakeGauge()
+    measurement = make_measurement(config_num=19)
     fake_dirac = FakeDirac()
     monkeypatch.setattr(emt_module, "getMPIComm", lambda: FakeComm())
     monkeypatch.setattr(emt_module.core, "getDirac", lambda *args: fake_dirac)
@@ -678,15 +580,11 @@ def test_source_loop_uses_one_full_mg_setup_then_thin_restores(tmp_path, monkeyp
     monkeypatch.setattr(
         measurement,
         "_measure_flowed_batch",
-        lambda _gauge, xis, _etas, _phases: (
-            np.zeros((len(xis), 16, 1, 1, 1), dtype=np.complex128),
-            np.zeros((len(xis), 16, 4, 1, 1, 1), dtype=np.complex128),
-            np.zeros((len(xis), 1, 1, 1), dtype=np.complex128),
-        ),
+        lambda _gauge, xis, _etas, _phases: zero_batch_output(len(xis)),
     )
 
     measurement.flowed_fermionic_1pt(
-        FakeGauge(),
+        gauge,
         [0.1, 1.0, 1e-10, 10],
         [2, 4, 7],
         tag=str(tmp_path / "S1T1.EMTc.19.0.test.h5"),
