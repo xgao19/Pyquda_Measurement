@@ -12,7 +12,7 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     iter_noise_base_hp_interval,
     normalize_noise_scheme,
     part_source_bookkeeping,
-    source_bookkeeping_arrays,
+    reconstruct_source_indices,
     validate_hierarchical_probing_options,
 )
 
@@ -131,11 +131,29 @@ def test_noise_iterator_requires_counter_configuration():
         ))
 
 
+def test_array_to_numpy_accepts_numpy_and_get_backends():
+    from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
+
+    values = np.asarray([1.0, 2.0])
+    assert array_to_numpy(values) is values
+
+    class GetArray:
+        def get(self):
+            return values.copy()
+
+    np.testing.assert_array_equal(array_to_numpy(GetArray()), values)
+
+
 def test_direct_part_bookkeeping_plain_and_hp():
     plain = part_source_bookkeeping(3, 2, 5, 8)
-    np.testing.assert_array_equal(plain["source_index"], [26, 27, 28])
     np.testing.assert_array_equal(plain["base_noise_index"], [3, 3, 3])
     np.testing.assert_array_equal(plain["hp_index"], [2, 3, 4])
+    np.testing.assert_array_equal(
+        reconstruct_source_indices(
+            plain["base_noise_index"], plain["hp_index"], 8
+        ),
+        [26, 27, 28],
+    )
 
 def test_hierarchical_probes_reuse_one_counter_base_source():
     latt_info = TinyLatticeInfo()
@@ -149,14 +167,13 @@ def test_hierarchical_probes_reuse_one_counter_base_source():
     np.testing.assert_array_equal(hp1.data, base.data * pattern[..., None, None])
 
 
-def test_effective_inversions_and_source_bookkeeping_arrays():
+def test_effective_inversions_and_reconstructed_source_indices():
     assert effective_n_inversions(3, "zn", 8) == 3
     assert effective_n_inversions(3, "hierarchical_probing", 8) == 24
-
-    bookkeeping = source_bookkeeping_arrays(4)
-    np.testing.assert_array_equal(bookkeeping["source_index"], np.arange(4, dtype=np.int32))
-    np.testing.assert_array_equal(bookkeeping["base_noise_index"], np.zeros(4, dtype=np.int32))
-    np.testing.assert_array_equal(bookkeeping["hp_index"], np.zeros(4, dtype=np.int32))
+    np.testing.assert_array_equal(
+        reconstruct_source_indices([0, 0, 1, 1], [0, 1, 0, 1], 2),
+        [0, 1, 2, 3],
+    )
 
 
 def test_hierarchical_probe_patterns_are_rademacher():

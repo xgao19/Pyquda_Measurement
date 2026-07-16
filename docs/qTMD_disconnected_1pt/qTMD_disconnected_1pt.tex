@@ -308,7 +308,7 @@ New output uses the source-independent helper
 \end{center}
 The obsolete source-position helper has been removed because the full-volume
 loop has no hadron source position.  New shards and canonical files record
-\(\code{schema\_version=2}\),
+\(\code{schema\_version=3}\),
 \(\code{loop\_convention=xi\_dagger\_Gamma\_O\_b\_eta}\), and
 \(\code{trace\_target=Tr[P\_qtau Gamma O\_b Dinv]}\).  The finalizer rejects
 any other convention before replacing a canonical file.  It stores:
@@ -319,9 +319,13 @@ any other convention before replacing a canonical file.  It stores:
 \end{equation}
 The raw bookkeeping datasets are
 \begin{equation}
-  \code{raw/source\_index},\quad
   \code{raw/base\_noise\_index},\quad
   \code{raw/hp\_index}.
+\end{equation}
+The effective source coordinate is not persisted because it is exactly
+reconstructed as
+\begin{equation}
+  r=bN_{\mathrm{HP}}+h.
 \end{equation}
 
 The averaged data are divided by the spatial volume and stored in a qTMD-like

@@ -4,6 +4,8 @@ from pyquda_measurement_utils.io_corr import (
     get_c2pt_file_tag,
     get_disconnected_qTMD_loop_file_tag,
     get_emt_gluon_loop_file_tag,
+    get_emt_meson_2pt_file_tag,
+    get_emt_quark_3pt_file_tag,
     get_emt_quark_loop_file_tag,
     get_emt_proton_quark_3pt_file_tag,
     get_flowed_quark_ringed_norm_file_tag,
@@ -45,6 +47,17 @@ def test_emt_tag_helpers_preserve_measurement_kind():
 
     assert get_emt_gluon_loop_file_tag("/data", "lat", 9, "G", "sm") == "/data/EMTg/lat.EMTg.9.G.sm"
     assert get_emt_quark_loop_file_tag("/data", "lat", 9, "Q", "sm") == "/data/EMTc/lat.EMTc.9.Q.sm"
+    assert get_emt_meson_2pt_file_tag(
+        "/data", "lat", 9, "Q", src, "sm", "5"
+    ) == "/data/EMT2pt/lat.EMT2pt.9.Q.x1y0z2t3.sm.src5"
+    assert get_emt_quark_3pt_file_tag(
+        "/data", "lat", 9, "Q", src, "sm", "5", "T5"
+    ) == "/data/EMT3pt/lat.EMT3pt.9.Q.x1y0z2t3.sm.src5.sinkT5"
+    assert get_emt_quark_3pt_file_tag(
+        "/data", "lat", 9, "Q", src, "sm", "T", "5"
+    ) != get_emt_quark_3pt_file_tag(
+        "/data", "lat", 9, "Q", src, "sm", "5", "T"
+    )
     assert get_emt_proton_quark_3pt_file_tag(
         "/data", "lat", 9, "Q", src, "sm", [1, -2, 3, 0], 9
     ) == "/data/EMTproton3pt/lat.EMTproton3pt.9.Q.x1y0z2t3.sm.PX1PY-2PZ3dt9"

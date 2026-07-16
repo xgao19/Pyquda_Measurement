@@ -22,7 +22,7 @@ E[L_hat] = Tr[P(q,tau) Gamma O_b D^{-1}]
 ```
 
 `O_b` always acts on the solved field `eta`; the original noise `xi` remains
-at the left endpoint.  Output records `schema_version=2`,
+at the left endpoint.  Output records `schema_version=3`,
 `loop_convention=xi_dagger_Gamma_O_b_eta`, and
 `trace_target=Tr[P_qtau Gamma O_b Dinv]`.  Shards and canonical files produced
 with the removed `eta^dagger Gamma O_b xi` contraction are invalid and must be
@@ -80,9 +80,11 @@ with raw layout
 
 ```text
 raw/loop_pervec  [source, Wilson_index, gamma, momentum, time]
-raw/source_index
 raw/base_noise_index
 raw/hp_index
 ```
+
+The effective source index is reconstructed from
+`base_noise_index * hp_vectors_per_base + hp_index`; it is not stored.
 
 and the existing `avg/SS/...` hierarchy divided by the spatial volume.

@@ -157,7 +157,7 @@ def _write_ringed_base(shard_dir, tag, config_num, base_idx):
     )
 
 
-def test_ringed_finalize_stores_only_kinetic_and_three_bookkeeping_arrays(tmp_path):
+def test_ringed_finalize_stores_only_kinetic_and_base_hp_bookkeeping(tmp_path):
     tag = str(tmp_path / "FlowedQuarkRinged" / "lat.FlowedQuarkRinged.9.0.sm")
     shard_dir = tmp_path / "FlowedQuarkRinged" / "shards"
     _write_ringed_base(shard_dir, tag, 9, 0)
@@ -167,11 +167,11 @@ def test_ringed_finalize_stores_only_kinetic_and_three_bookkeeping_arrays(tmp_pa
         assert h5.attrs["content"] == "kinetic_only"
         assert set(h5) == {"flow_times", "raw", "avg"}
         assert set(h5["raw"]) == {
-            "kinetic_pervec", "source_index", "base_noise_index", "hp_index"
+            "kinetic_pervec", "base_noise_index", "hp_index"
         }
         assert set(h5["avg"]) == {"kinetic_spacetime"}
         assert h5["raw/kinetic_pervec"].shape == (2, 3, 4)
-        np.testing.assert_array_equal(h5["raw/source_index"], [0, 1])
+        np.testing.assert_array_equal(h5["raw/base_noise_index"], [0, 0])
         np.testing.assert_allclose(h5["avg/kinetic_spacetime"], -10.0)
         assert "spin_color_dilution" not in h5.attrs
         assert "spin_index" not in h5["raw"]

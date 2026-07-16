@@ -160,8 +160,6 @@ def finalize_ringed_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
             "output_kind",
             "block_interval_solves",
             "hp_vectors_per_base",
-            "solves_per_hp",
-            "spin_color_dilution",
         }
     }
     total_sources = int(manifest["total_sources"])
@@ -195,7 +193,7 @@ def finalize_ringed_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
         )
         bookkeeping = {
             name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
-            for name in ("source_index", "base_noise_index", "hp_index")
+            for name in ("base_noise_index", "hp_index")
         }
         kinetic_sum = np.zeros(kinetic_tail[:-1], dtype=np.complex128)
         for info, part in iter_validated_shard_parts(manifest):

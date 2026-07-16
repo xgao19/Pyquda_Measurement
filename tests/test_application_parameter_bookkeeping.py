@@ -273,8 +273,32 @@ def test_pion_connected_driver_has_no_shared_output_override():
     assert "EMT_3PT_OUT" not in source
     assert "EMT_2PT_OUT" not in source
     assert "get_emt_quark_3pt_file_tag" in source
+    assert "spin=5" not in source
+    assert ".spin" not in source
+    assert "src_interpolator" in source
+    assert "sink_interpolator" in source
     assert 'os.environ.get("EMT_LAT_TAG", "S8T32")' in source
     assert "1e-10" in source
+
+
+def test_emt_backend_transfers_do_not_call_cupy_get_directly():
+    pion = _source("pyquda_measurement_utils/pion_EMT_vibe_develop.py")
+    gluon = _source(
+        "pyquda_measurement_utils/Disconnected_1pt_EMT_vibe_develop.py"
+    )
+    assert 'contract("qwtzyx, gwtzyx -> gqt", phases_2pt, scalar).get()' not in pion
+    assert 'contract("qwtzyx, wtzyx -> qt", phases_3pt, tmp).get()' not in gluon
+    assert "array_to_numpy" in pion
+    assert "array_to_numpy" in gluon
+
+
+def test_proton_emt_parameters_use_only_canonical_boost_names():
+    module = _source("pyquda_measurement_utils/proton_EMT_vibe_develop.py")
+    assert "self.save_propagators" not in module
+    assert "self.pos_boost" not in module
+    assert "self.neg_boost" not in module
+    assert 'parameters["boost_in"]' in module
+    assert 'parameters["boost_out"]' in module
 
 
 def test_standalone_ringed_exposes_cli_only_flow_batch_size():

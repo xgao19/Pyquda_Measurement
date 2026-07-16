@@ -64,11 +64,13 @@ The canonical file contains only
 ```text
 flow_times
 raw/kinetic_pervec
-raw/source_index
 raw/base_noise_index
 raw/hp_index
 avg/kinetic_spacetime
 ```
+
+The effective source index is reconstructed as
+`base_noise_index * hp_vectors_per_base + hp_index` and is not stored.
 
 It stores no ringed factor. Any nonlinear normalization must be constructed in
 downstream ensemble analysis after averaging `K` over gauge configurations;

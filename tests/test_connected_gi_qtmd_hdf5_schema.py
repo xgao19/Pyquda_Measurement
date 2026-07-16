@@ -11,7 +11,7 @@ except ModuleNotFoundError as err:
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pyquda_measurement_utils.Disconnected_utils_vibe_develop import create_gi_qtmd_wilsonline_index_lists
+from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import create_gi_qtmd_wilsonline_index_lists
 from pyquda_measurement_utils.io_corr import save_qTMD_pion_hdf5_noRoll
 
 

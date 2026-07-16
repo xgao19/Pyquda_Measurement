@@ -61,7 +61,7 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
 )
 
 _VALID_FLOW_TYPES = {"wilson", "symanzik"}
-EMT_OPERATOR_SCHEMA_VERSION = 3
+EMT_OPERATOR_SCHEMA_VERSION = 4
 my_gammas = list(GAMMA_LABELS)
 
 
@@ -1003,9 +1003,9 @@ def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
             shape=(total_sources,) + norm_shape,
             dtype=np.complex128,
         )
-        source_datasets = {
+        bookkeeping_datasets = {
             name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
-            for name in ("source_index", "base_noise_index", "hp_index")
+            for name in ("base_noise_index", "hp_index")
         }
         local_sum = np.zeros(local_shape, dtype=np.complex128)
         derivative_sum = np.zeros(derivative_shape, dtype=np.complex128)
@@ -1044,7 +1044,7 @@ def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
             t_data = emt_tensor_from_derivative_bilinear(derivative_data)
             t_sum += np.sum(t_data, axis=0)
             norm_sum += np.sum(norm_data, axis=0)
-            for name, dataset in source_datasets.items():
+            for name, dataset in bookkeeping_datasets.items():
                 dataset[start:stop] = part[f"raw/{name}"][()]
             kinetic = ringed_kinetic_pervec_from_derivative(
                 derivative_data, q0_index, spatial_volume
@@ -1174,10 +1174,14 @@ class EMTDisconnectedGluon1pt:
                             continue
                         F_mr = F[mu][rho]
                         F_nr = F[nu][rho]
-                        tmp += contract("...ab,...ba->...", F_mr, F_nr)
+                        tmp += _array_on_backend(
+                            contract("...ab,...ba->...", F_mr, F_nr), tmp
+                        )
 
                     slice_t = core.gatherLattice(
-                        contract("qwtzyx, wtzyx -> qt", phases_3pt, tmp).get(),
+                        array_to_numpy(
+                            contract("qwtzyx, wtzyx -> qt", phases_3pt, tmp)
+                        ),
                         [1, -1, -1, -1],
                     )
                     if U.latt_info.mpi_rank == 0:

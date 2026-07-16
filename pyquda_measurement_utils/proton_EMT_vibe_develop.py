@@ -144,15 +144,12 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         self.pf = parameters["pf"]
         self.pilist = parameters["p_2pt"]
         self.CG_GaussSmear = bool(parameters.get("CG_GaussSmear", False))
-        self.pos_boost = parameters["pos_boost"]
-        self.neg_boost = parameters["neg_boost"]
         self.width = parameters["width"]
         self.pol_list = parameters["pol"]
         self.t_insert = parameters["t_insert"]
         self.t_separations = [int(t_sep) for t_sep in parameters.get("t_separations", [self.t_insert])]
-        self.save_propagators = parameters.get("save_propagators", False)
-        self.boost_in = parameters.get("boost_in", self.pos_boost)
-        self.boost_out = parameters.get("boost_out", self.pos_boost)
+        self.boost_in = parameters["boost_in"]
+        self.boost_out = parameters["boost_out"]
 
     @staticmethod
     def _wait_sycl_queues(*objects):

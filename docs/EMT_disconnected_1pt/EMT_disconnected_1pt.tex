@@ -622,14 +622,13 @@ observable dependent and should be compared at fixed inversion cost.
 
 \subsection{Bookkeeping Datasets}
 
-For each effective source, the output records:
+For each effective source, the output persists only the irreducible
+bookkeeping coordinates:
 \begin{center}
 \begin{tabular}{ll}
 \toprule
 Dataset & Meaning \\
 \midrule
-\code{raw/source\_index}
-& Effective source index after HP expansion. \\
 \code{raw/base\_noise\_index}
 & Original base noise index. \\
 \code{raw/hp\_index}
@@ -637,14 +636,19 @@ Dataset & Meaning \\
 \bottomrule
 \end{tabular}
 \end{center}
-For example, with \(\code{n\_vec}=1\) and
-\(\code{hp\_num\_vectors}=2\), the expected bookkeeping is
+The effective source index is reconstructed in analysis as
 \begin{equation}
-  \code{source\_index}=[0,1],
-  \qquad
+  r=bN_{\mathrm{HP}}+h,
+\end{equation}
+and is therefore not stored as a third dataset. For example, with
+\(\code{n\_vec}=1\) and \(\code{hp\_num\_vectors}=2\), the persisted
+bookkeeping and reconstructed coordinate are
+\begin{equation}
   \code{base\_noise\_index}=[0,0],
   \qquad
-  \code{hp\_index}=[0,1].
+  \code{hp\_index}=[0,1],
+  \qquad
+  r=[0,1].
 \end{equation}
 
 \section{Quark HDF5 Layout}
@@ -849,7 +853,6 @@ derivative_directions
 raw/local_bilinear_pervec
 raw/derivative_bilinear_pervec
 raw/flowed_noise_norm_pervec
-raw/source_index
 raw/base_noise_index
 raw/hp_index
 avg/Tmunu/T11
@@ -1178,9 +1181,10 @@ signals.  Useful smoke-test checks are:
   \item quark raw datasets have the expected
         \([N_{\mathrm{eff}},16,N_q,N_{\mathrm{steps}}+1,N_t]\),
         \([N_{\mathrm{eff}},16,4,N_q,N_{\mathrm{steps}}+1,N_t]\), and
-        \([N_{\mathrm{eff}},2,N_q,N_{\mathrm{steps}}+1,N_t]\) shapes;
-  \item HP runs have consistent \code{raw/source\_index},
-        \code{raw/base\_noise\_index}, and \code{raw/hp\_index};
+        \([N_{\mathrm{eff}},N_q,N_{\mathrm{steps}}+1,N_t]\) shapes;
+  \item HP runs have consistent \code{raw/base\_noise\_index} and
+        \code{raw/hp\_index}, from which the effective source coordinate is
+        reconstructed;
   \item gluon datasets contain \code{Tmunu/T11} through \code{T44} and no
         stochastic quark primitive datasets.
 \end{itemize}

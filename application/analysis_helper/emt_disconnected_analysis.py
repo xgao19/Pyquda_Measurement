@@ -4,6 +4,11 @@ import h5py
 import numpy as np
 
 from pyquda_measurement_utils.fermion_bilinear_basis import VECTOR_GAMMA_POSITIONS
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
+    SOURCE_BOOKKEEPING_SCHEMA,
+    hp_vectors_per_base,
+    reconstruct_source_indices,
+)
 
 
 LOOP_PROVENANCE_SCHEMA = "emt_disconnected_loop_provenance_v1"
@@ -97,6 +102,10 @@ def read_quark_loop(path, source_position, source_chunk_size=8):
         raise ValueError("source_chunk_size should be positive")
     with h5py.File(path, "r") as h5:
         lattice_size, phase_origin = validate_loop_provenance(h5, path)
+        if h5.attrs.get("source_bookkeeping_schema") != SOURCE_BOOKKEEPING_SCHEMA:
+            raise ValueError(f"{path} has incompatible source bookkeeping")
+        if "raw/source_index" in h5:
+            raise ValueError(f"{path} contains obsolete raw/source_index")
         qext = np.asarray(h5.attrs["qext"], dtype=np.int32)
         derivative = h5["raw/derivative_bilinear_pervec"]
         if derivative.ndim != 6 or derivative.shape[1:3] != (16, 4):
@@ -143,9 +152,17 @@ def read_quark_loop(path, source_position, source_chunk_size=8):
                 )
             del b_tensor, tensor
 
+        base_indices = h5["raw/base_noise_index"][...]
+        hp_indices = h5["raw/hp_index"][...]
+        hp_count = hp_vectors_per_base(
+            h5.attrs["noise_scheme"], h5.attrs["hp_num_vectors"]
+        )
         bookkeeping = {
-            name: h5[f"raw/{name}"][...]
-            for name in ("source_index", "base_noise_index", "hp_index")
+            "source_index": reconstruct_source_indices(
+                base_indices, hp_indices, hp_count
+            ),
+            "base_noise_index": base_indices,
+            "hp_index": hp_indices,
         }
         flow_times = np.asarray(h5.attrs["flow_times"], dtype=np.float64)
 

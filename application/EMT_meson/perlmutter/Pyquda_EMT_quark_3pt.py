@@ -51,8 +51,19 @@ parameters = {
     "multigrid": parse_optional_multigrid_blocks(args.mg_block),
 }
 src_pos = [0, 0, 0, 0]
-meson_2pt_tag = get_emt_meson_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
-quark_3pt_tag = get_emt_quark_3pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag, spin=5)
+meson_2pt_tag = get_emt_meson_2pt_file_tag(
+    data_dir, lat_tag, conf, 0, src_pos, sm_tag, args.src_interpolator
+)
+quark_3pt_tag = get_emt_quark_3pt_file_tag(
+    data_dir,
+    lat_tag,
+    conf,
+    0,
+    src_pos,
+    sm_tag,
+    args.src_interpolator,
+    args.sink_interpolator,
+)
 
 # ============================================================
 # Initialize QUDA backend
@@ -79,7 +90,6 @@ quark_emt.connected_3pt(
     invPara,
     src_pos=src_pos,
     t_separations=[2, 3],
-    spin=5,
     tag=quark_3pt_tag,
     c2_tag=meson_2pt_tag,
     src_interpolator=args.src_interpolator,

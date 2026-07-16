@@ -129,7 +129,7 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
     create_fermion_TMD_GI_from_link,
 )
-from pyquda_measurement_utils.Disconnected_utils_vibe_develop import create_gi_qtmd_wilsonline_index_lists
+from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import create_gi_qtmd_wilsonline_index_lists
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.proton_utils_vibe_develop import contract_proton_c2
 

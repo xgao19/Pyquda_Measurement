@@ -783,3 +783,29 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   24-field connected fermion flow.  The complete connected numerical gate is
   therefore supplied by S8T8, while the l64 resource failure is retained in
   the external validation logs.
+## 2026-07-16: Simplify EMT interfaces and disconnected bookkeeping
+
+- Removed the pion EMT spin-projection argument, `.spin*` output suffix and
+  HDF5 attribute. Pion channel identity now comes from the source and sink
+  interpolators encoded in the canonical connected tags.
+- Routed pion C2 and gluon EMT host transfers through the shared
+  backend-independent array conversion helper and removed stale copied pion
+  module documentation.
+- Removed unused proton EMT propagator-saving state and duplicate boost names;
+  connected proton EMT now uses only `boost_in` and `boost_out`.
+- Upgraded disconnected shards to base/HP-only bookkeeping. EMT, qTMD and
+  standalone ringed canonical files no longer persist the exactly
+  reconstructible source index, and analysis reconstructs it as
+  `base_noise_index * hp_vectors_per_base + hp_index`.
+- Removed obsolete shard fields for per-HP solve counts and spin-color
+  dilution, and moved the qTMD Wilson-index generator out of the shared
+  disconnected noise/shard utility.
+- Fixed an additional gluon backend boundary exposed by the GPU regression:
+  an `opt_einsum` host result is converted to the active accumulator backend
+  before addition, while the gathered result uses `array_to_numpy`.
+- Completed the requested S8T8 matrix at solver tolerance `1e-15` with both
+  one rank (`1.1.1.1`) and four ranks (`2.2.1.1`). Reference/candidate outputs
+  were bitwise identical in both layouts across EMT, ringed, qTMD, pion and
+  gluon workflows. The one/four-rank maximum relative L2 difference was
+  `8.31e-15`, and all 80 HDF5 files opened successfully with no per-rank
+  duplicate outputs.

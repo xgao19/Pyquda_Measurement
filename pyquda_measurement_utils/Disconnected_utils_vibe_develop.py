@@ -17,8 +17,9 @@ from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array
 
 VALID_NOISE_SCHEMES = {"zn", "hierarchical_probing"}
 COUNTER_NOISE_ALGORITHM = "splitmix64_global_coordinate_v1"
-SHARD_SCHEMA = "disconnected_1pt_base_parts_v2"
+SHARD_SCHEMA = "disconnected_1pt_base_parts_v3"
 SAMPLE_LOG_SCHEMA = "disconnected_sample_log_v1"
+SOURCE_BOOKKEEPING_SCHEMA = "base_hp_v1"
 VALID_HP_ORDERINGS = {
     "global_xyzt_gray_projected_to_evenodd",
     "interleaved_xyzt_binary_projected_to_evenodd",
@@ -96,35 +97,6 @@ def effective_n_inversions(n_vec: int, noise_scheme: str, hp_num_vectors: int) -
     """Return the number of effective stochastic inversions."""
     hp_factor = hp_num_vectors if noise_scheme == "hierarchical_probing" else 1
     return n_vec * hp_factor
-
-
-def source_bookkeeping_arrays(n_eff: int):
-    """Create common source bookkeeping arrays."""
-    bookkeeping = {
-        "source_index": np.arange(n_eff, dtype=np.int32),
-        "base_noise_index": np.zeros(n_eff, dtype=np.int32),
-        "hp_index": np.zeros(n_eff, dtype=np.int32),
-    }
-    return bookkeeping
-
-
-def create_gi_qtmd_wilsonline_index_lists(eta_list, max_b_z: int, max_b_T: int):
-    """Create fixed-length GI qTMD Wilson-index lists for transverse x/y."""
-    index_list_trans0 = []
-    index_list_trans1 = []
-    for eta in eta_list:
-        eta = int(eta)
-        for current_bz in range(0, int(max_b_z) + 1, 2):
-            if eta < current_bz // 2:
-                continue
-            for current_b_T in range(0, int(max_b_T) + 1):
-                index_list_trans0.append([current_b_T, current_bz, eta, 0])
-                index_list_trans1.append([current_b_T, current_bz, eta, 1])
-
-                if current_bz != 0:
-                    index_list_trans0.append([current_b_T, -current_bz, eta, 0])
-                    index_list_trans1.append([current_b_T, -current_bz, eta, 1])
-    return index_list_trans0, index_list_trans1
 
 
 def _splitmix64(values):
@@ -293,21 +265,29 @@ def part_source_bookkeeping(
             f"hp_count={hp_count}"
         )
 
-    source_indices = []
     base_indices = []
     hp_indices = []
     for hp_idx in range(hp_start, hp_stop):
-        effective_base_idx = base_idx * hp_count + hp_idx
-        source_indices.append(effective_base_idx)
         base_indices.append(base_idx)
         hp_indices.append(hp_idx)
 
     bookkeeping = {
-        "source_index": np.asarray(source_indices, dtype=np.int32),
         "base_noise_index": np.asarray(base_indices, dtype=np.int32),
         "hp_index": np.asarray(hp_indices, dtype=np.int32),
     }
     return bookkeeping
+
+
+def reconstruct_source_indices(base_noise_index, hp_index, hp_count):
+    """Reconstruct the effective source index from base and HP indices."""
+    base = np.asarray(base_noise_index, dtype=np.int64)
+    hp = np.asarray(hp_index, dtype=np.int64)
+    hp_count = int(hp_count)
+    if base.shape != hp.shape:
+        raise ValueError("base_noise_index and hp_index should have the same shape")
+    if hp_count <= 0 or np.any(base < 0) or np.any(hp < 0) or np.any(hp >= hp_count):
+        raise ValueError("invalid base/HP bookkeeping")
+    return (base * hp_count + hp).astype(np.int64, copy=False)
 
 
 def iter_noise_base_hp_interval(
@@ -327,13 +307,11 @@ def iter_noise_base_hp_interval(
         raise ValueError("config_num is required for decomposition-independent stochastic sources")
     noise_scheme = normalize_noise_scheme(noise_scheme)
     hp_count = int(hp_num_vectors) if noise_scheme == "hierarchical_probing" else 1
-    bookkeeping = part_source_bookkeeping(base_idx, hp_start, hp_stop, hp_count)
     base_noise = make_counter_zn_noise_fermion(
         latt_info, int(config_num), int(base_idx),
         stream_seed=int(noise_stream), n=n_zn,
     )
 
-    output_idx = 0
     for hp_idx in range(int(hp_start), int(hp_stop)):
         source = (
             apply_hierarchical_probe(base_noise, hp_idx, hp_ordering)
@@ -341,12 +319,11 @@ def iter_noise_base_hp_interval(
             else base_noise.copy()
         )
         fields = (
-            int(bookkeeping["source_index"][output_idx]),
+            int(base_idx) * hp_count + int(hp_idx),
             int(base_idx),
             int(hp_idx),
             source,
         )
-        output_idx += 1
         yield fields
 
 
@@ -389,24 +366,17 @@ def hp_vectors_per_base(noise_scheme, hp_num_vectors):
     )
 
 
-def base_part_ranges(hp_count, block_interval_solves, solves_per_hp=1):
+def base_part_ranges(hp_count, block_interval_solves):
     hp_count = int(hp_count)
     interval = int(block_interval_solves)
-    solves_per_hp = int(solves_per_hp)
-    if hp_count <= 0 or interval <= 0 or solves_per_hp <= 0:
+    if hp_count <= 0 or interval <= 0:
         raise ValueError(
-            "hp_count, block_interval_solves, and solves_per_hp should be positive, "
-            f"got {hp_count}, {interval}, {solves_per_hp}"
+            "hp_count and block_interval_solves should be positive, "
+            f"got {hp_count}, {interval}"
         )
-    if interval < solves_per_hp:
-        raise ValueError(
-            f"block_interval_solves={interval} cannot hold one complete HP vector "
-            f"requiring {solves_per_hp} solves"
-        )
-    hp_per_part = interval // solves_per_hp
     return [
-        (part_index, hp_start, min(hp_start + hp_per_part, hp_count))
-        for part_index, hp_start in enumerate(range(0, hp_count, hp_per_part))
+        (part_index, hp_start, min(hp_start + interval, hp_count))
+        for part_index, hp_start in enumerate(range(0, hp_count, interval))
     ]
 
 
@@ -465,8 +435,6 @@ def shard_part_attrs(
     hp_start,
     hp_stop,
     hp_count,
-    solves_per_hp=1,
-    spin_color_dilution="none",
 ):
     attrs = dict(base_attrs)
     attrs.update(
@@ -477,8 +445,7 @@ def shard_part_attrs(
             "hp_start": int(hp_start),
             "hp_stop_exclusive": int(hp_stop),
             "hp_vectors_per_base": int(hp_count),
-            "solves_per_hp": int(solves_per_hp),
-            "spin_color_dilution": str(spin_color_dilution),
+            "source_bookkeeping_schema": SOURCE_BOOKKEEPING_SCHEMA,
         }
     )
     return attrs
@@ -506,6 +473,7 @@ def _jsonable(value):
 
 def sample_log_fingerprint(attrs, metadata=None):
     identity = {
+        "source_bookkeeping_schema": SOURCE_BOOKKEEPING_SCHEMA,
         "attrs": _jsonable(dict(attrs or {})),
         "metadata": _jsonable(dict(metadata or {})),
     }
@@ -621,12 +589,10 @@ def discover_shard_layout(
                 raise ValueError(f"shard {first_path} has incompatible schema")
             hp_count = int(first.attrs["hp_vectors_per_base"])
             interval = int(first.attrs["block_interval_solves"])
-            solves_per_hp = int(first.attrs["solves_per_hp"])
-            spin_color_dilution = str(first.attrs["spin_color_dilution"])
-            if solves_per_hp != 1 or spin_color_dilution != "none":
-                raise ValueError(
-                    "spin-color-diluted disconnected shards are no longer supported"
-                )
+            if first.attrs.get("source_bookkeeping_schema") != SOURCE_BOOKKEEPING_SCHEMA:
+                raise ValueError(f"shard {first_path} has incompatible bookkeeping schema")
+            if "raw/source_index" in first:
+                raise ValueError(f"shard {first_path} contains obsolete raw/source_index")
             reference_attrs = {
                 key: first.attrs[key]
                 for key in first.attrs
@@ -654,7 +620,7 @@ def discover_shard_layout(
         0,
         0,
         0,
-        min(interval // solves_per_hp, hp_count),
+        min(interval, hp_count),
     )
     if first_path != expected_first:
         raise ValueError(
@@ -664,13 +630,11 @@ def discover_shard_layout(
     parts = []
     output_offset = 0
     for base_idx in range(n_base_noise):
-        for part_idx, hp_start, hp_stop in base_part_ranges(
-            hp_count, interval, solves_per_hp
-        ):
+        for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, interval):
             bookkeeping = part_source_bookkeeping(
                 base_idx, hp_start, hp_stop, hp_count
             )
-            count = len(bookkeeping["source_index"])
+            count = hp_stop - hp_start
             parts.append(
                 {
                     "base_idx": base_idx,
@@ -712,8 +676,6 @@ def discover_shard_layout(
         "parts": parts,
         "hp_count": hp_count,
         "block_interval_solves": interval,
-        "solves_per_hp": solves_per_hp,
-        "spin_color_dilution": spin_color_dilution,
         "total_sources": output_offset,
         "raw_dataset_names": raw_dataset_names,
         "metadata_dataset_names": metadata_dataset_names,
@@ -737,8 +699,7 @@ def iter_validated_shard_parts(layout):
                     "hp_stop_exclusive": info["hp_stop"],
                     "hp_vectors_per_base": layout["hp_count"],
                     "block_interval_solves": layout["block_interval_solves"],
-                    "solves_per_hp": layout["solves_per_hp"],
-                    "spin_color_dilution": layout["spin_color_dilution"],
+                    "source_bookkeeping_schema": SOURCE_BOOKKEEPING_SCHEMA,
                 }
                 for key, expected in part_fields.items():
                     if key not in part.attrs or not _attr_equal(
@@ -794,6 +755,7 @@ __all__ = [
     "COUNTER_NOISE_ALGORITHM",
     "SAMPLE_LOG_SCHEMA",
     "SHARD_SCHEMA",
+    "SOURCE_BOOKKEEPING_SCHEMA",
     "VALID_HP_ORDERINGS",
     "VALID_NOISE_SCHEMES",
     "append_completed_base",
@@ -803,7 +765,6 @@ __all__ = [
     "canonical_temp_path",
     "ceil_log2",
     "counter_zn_phase_indices",
-    "create_gi_qtmd_wilsonline_index_lists",
     "disconnected_sample_log_path",
     "discover_shard_layout",
     "effective_n_inversions",
@@ -817,12 +778,12 @@ __all__ = [
     "normalize_noise_scheme",
     "part_source_bookkeeping",
     "prepare_sample_log",
+    "reconstruct_source_indices",
     "sample_log_fingerprint",
     "sample_log_header",
     "selected_base_range",
     "shard_part_attrs",
     "shard_part_path",
-    "source_bookkeeping_arrays",
     "validate_hierarchical_probing_options",
     "write_raw_part_hdf5",
 ]

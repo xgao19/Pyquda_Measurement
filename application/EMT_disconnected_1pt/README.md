@@ -381,7 +381,6 @@ derivative_directions
 raw/local_bilinear_pervec
 raw/derivative_bilinear_pervec
 raw/flowed_noise_norm_pervec
-raw/source_index
 raw/base_noise_index
 raw/hp_index
 
@@ -405,10 +404,13 @@ raw/flowed_noise_norm_pervec   [source,q,flow,t_abs]
 The bookkeeping datasets mean:
 
 ```text
-source_index      effective source index after HP expansion
 base_noise_index  randomized full-volume source index
 hp_index          HP sign-vector index within that base
 ```
+
+The effective source index is not stored. Reconstruct it as
+`base_noise_index * hp_vectors_per_base + hp_index`, where
+`hp_vectors_per_base` is 1 for plain noise and `hp_num_vectors` for HP.
 
 The large per-source derivative primitive controls the file size. For the
 current 8192-solve, nine-momentum S8T8 file, the measured complete-file shares
@@ -1020,8 +1022,8 @@ Useful checks:
 
 - Change the smoke from HP2 to HP4 and confirm that `hp_index` becomes
   `[0,1,2,3]` while `base_noise_index` remains `[0,0,0,0]`.
-- Run pure noise with `N_VEC=4` and confirm that both `source_index` and
-  `base_noise_index` are `[0,1,2,3]`, with `hp_index=0`.
+- Run pure noise with `N_VEC=4` and confirm that `base_noise_index` is
+  `[0,1,2,3]`, with `hp_index=0`; reconstruct source indices `[0,1,2,3]`.
 - Verify that changing `config_num`, `base_noise_index`, or `noise_stream`
   changes the counter source while rerunning the same tuple reproduces it.
 - Reconstruct `T44` and the ringed kinetic from the raw derivative primitive.

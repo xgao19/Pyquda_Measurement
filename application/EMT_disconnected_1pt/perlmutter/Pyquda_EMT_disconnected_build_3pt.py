@@ -190,7 +190,6 @@ c2_full = []
 quark_loops = []
 gluon_loops = []
 source_counts = []
-source_indices = []
 base_noise_indices = []
 hp_indices = []
 qext_list = []
@@ -214,7 +213,6 @@ for config_index, (c2_path, quark_path) in enumerate(zip(c2_paths, quark_paths))
     c2_full.append(c2_t)
     quark_loops.append(quark_loop)
     source_counts.append(source_count)
-    source_indices.append(source_bookkeeping["source_index"])
     base_noise_indices.append(source_bookkeeping["base_noise_index"])
     hp_indices.append(source_bookkeeping["hp_index"])
     qext_list.append(qext)
@@ -319,7 +317,6 @@ with h5py.File(output, "w") as h5:
     qgrp.create_dataset("source_count", data=source_count)
     qgrp.create_dataset("loop_cumulative", data=quark_loops)
     qgrp.create_dataset("C3_unsubtracted_cumulative", data=quark_c3_unsub)
-    qgrp.create_dataset("source_index", data=source_indices)
     qgrp.create_dataset("base_noise_index", data=base_noise_indices)
     qgrp.create_dataset("hp_index", data=hp_indices)
     if quark_c3_disc is not None:

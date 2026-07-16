@@ -122,6 +122,8 @@ python tests/run_smoke_tests.py
   align time with `tau_abs = (t0 + tau_rel) % Nt` and rephase spatial momentum
   by `exp[-2 pi i q.(x0-origin)/L]`.  Reject loop files without explicit global
   lattice/Fourier-origin provenance.
+- Disconnected shards and canonical files persist only base-noise and HP
+  indices; reconstruct the effective source index as `base * N_HP + hp`.
 - Gluon EMT loops are also source independent and use
   `EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5`.  Quark and gluon wrappers must share
   the same flow grid; the production epsilon default is `0.207936`.

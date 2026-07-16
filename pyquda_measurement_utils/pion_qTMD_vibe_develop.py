@@ -138,7 +138,7 @@ from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
     build_gi_qtmd_staple_links,
     create_fermion_TMD_GI_from_link,
 )
-from pyquda_measurement_utils.Disconnected_utils_vibe_develop import create_gi_qtmd_wilsonline_index_lists
+from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import create_gi_qtmd_wilsonline_index_lists
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.pion_utils_vibe_develop import (

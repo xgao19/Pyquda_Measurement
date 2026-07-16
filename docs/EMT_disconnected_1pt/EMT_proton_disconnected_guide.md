@@ -156,7 +156,6 @@ data/EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5
 raw/local_bilinear_pervec
 raw/derivative_bilinear_pervec
 raw/flowed_noise_norm_pervec
-raw/source_index
 raw/base_noise_index
 raw/hp_index
 avg/Tmunu/T11 ... T44

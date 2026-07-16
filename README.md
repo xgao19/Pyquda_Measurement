@@ -263,7 +263,7 @@ For pion/meson EMT:
 
 For quark/gluon one-point data:
 
-- Quark 1pt schema v3 stores all 16 local and 64 unsymmetrized derivative
+- Quark 1pt schema v4 stores all 16 local and 64 unsymmetrized derivative
   primitive bilinears plus an explicitly named flowed-noise norm.
 - Quark 1pt defaults to decomposition-independent full-volume counter-based `Z4` noise.
 - Never seed an ordinary array-backend RNG identically on every MPI rank to
@@ -277,8 +277,9 @@ For quark/gluon one-point data:
   outputs are invalid and must be regenerated.
 - Quark 1pt can use either ordinary `zn` noise or `hierarchical_probing`.
 - For hierarchical probing, `effective_n_inversions = n_base_noise * hp_num_vectors`.
-- Raw quark 1pt files store `source_index`, `base_noise_index`, and `hp_index`
-  bookkeeping datasets.
+- Raw quark 1pt files store only `base_noise_index` and `hp_index` bookkeeping.
+  Reconstruct the effective source index as
+  `base_noise_index * hp_vectors_per_base + hp_index`.
 - Current HP ordering choices include `interleaved_xyz_binary_projected_to_evenodd`
   with a time-independent spatial sign pattern, plus 4D orderings such as
   `interleaved_xyzt_binary_projected_to_evenodd`,

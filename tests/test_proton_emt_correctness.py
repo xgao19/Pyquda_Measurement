@@ -14,8 +14,6 @@ def _measurement(smearing):
         "pf": [0, 0, 0, 0],
         "p_2pt": [[0, 0, 0, 0]],
         "CG_GaussSmear": smearing,
-        "pos_boost": [0, 0, 0],
-        "neg_boost": [0, 0, 0],
         "boost_in": [0, 0, 0],
         "boost_out": [0, 0, 0],
         "width": 1.0,

@@ -164,13 +164,25 @@ def get_emt_quark_loop_file_tag(data_dir, lat, cfg, ama, sm):
 
 
 # Build the pion/meson quark EMT three-point output tag.
-def get_emt_quark_3pt_file_tag(data_dir, lat, cfg, ama, src, sm, spin):
-    return str(Path(data_dir) / "EMT3pt" / (str(lat) + ".EMT3pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm) + ".spin" + str(spin)))
+def get_emt_quark_3pt_file_tag(
+    data_dir, lat, cfg, ama, src, sm, src_interpolator, sink_interpolator
+):
+    name = (
+        f"{lat}.EMT3pt.{cfg}.{ama}.{_emt_site_tag(src)}.{sm}"
+        f".src{src_interpolator}.sink{sink_interpolator}"
+    )
+    return str(Path(data_dir) / "EMT3pt" / name)
 
 
 # Build the pion/meson EMT two-point diagnostic output tag.
-def get_emt_meson_2pt_file_tag(data_dir, lat, cfg, ama, src, sm):
-    return str(Path(data_dir) / "EMT2pt" / (str(lat) + ".EMT2pt." + str(cfg) + "." + str(ama) + "." + _emt_site_tag(src) + "." + str(sm)))
+def get_emt_meson_2pt_file_tag(
+    data_dir, lat, cfg, ama, src, sm, src_interpolator
+):
+    name = (
+        f"{lat}.EMT2pt.{cfg}.{ama}.{_emt_site_tag(src)}.{sm}"
+        f".src{src_interpolator}"
+    )
+    return str(Path(data_dir) / "EMT2pt" / name)
 
 
 # Build the proton EMT two-point diagnostic output tag.

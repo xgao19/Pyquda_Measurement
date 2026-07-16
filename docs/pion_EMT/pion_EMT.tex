@@ -657,7 +657,7 @@ The output file (written by \code{save\_emt\_quark\_3pt\_hdf5}) contains:
         \code{gamma\_matrices}, \code{physical\_from\_pyquda}, and
         \code{derivative\_directions}: exact operator-basis metadata.
   \item \code{momentum\_transfer\_list}: list of $[q_x, q_y, q_z, q_t]$ arrays.
-  \item HDF5 attributes: \code{measurement}, \code{spin}, \code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{n\_t\_separations}, \code{src\_interpolator}, \code{sink\_interpolator}, \code{contraction\_convention} (``B''), \code{meson\_sign} ($+1$), \code{n\_qext}.
+  \item HDF5 attributes: \code{measurement}, \code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{n\_t\_separations}, \code{src\_interpolator}, \code{sink\_interpolator}, \code{contraction\_convention} (``B''), \code{meson\_sign} ($+1$), \code{n\_qext}. The spin-zero pion channel is specified only by the source and sink interpolators; no separate spin-projection label is used.
 \end{itemize}
 
 The connected primitive axes differ from the disconnected EMTc axes.  The

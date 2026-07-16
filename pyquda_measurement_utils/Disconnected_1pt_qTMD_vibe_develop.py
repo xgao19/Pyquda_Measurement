@@ -55,7 +55,6 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     iter_noise_base_hp_interval,
     iter_validated_shard_parts,
     normalize_noise_scheme,
-    create_gi_qtmd_wilsonline_index_lists,
     part_source_bookkeeping,
     prepare_sample_log,
     selected_base_range,
@@ -66,9 +65,27 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
 )
 
 _VALID_OPERATOR_KINDS = {"CG_qTMD", "CG_PDF", "GI_PDF", "GI_qTMD"}
-QTMD_SCHEMA_VERSION = 2
+QTMD_SCHEMA_VERSION = 3
 QTMD_LOOP_CONVENTION = "xi_dagger_Gamma_O_b_eta"
 QTMD_TRACE_TARGET = "Tr[P_qtau Gamma O_b Dinv]"
+
+
+def create_gi_qtmd_wilsonline_index_lists(eta_list, max_b_z, max_b_T):
+    """Create fixed-length GI qTMD Wilson-index lists for transverse x/y."""
+    index_list_trans0 = []
+    index_list_trans1 = []
+    for eta in eta_list:
+        eta = int(eta)
+        for current_bz in range(0, int(max_b_z) + 1, 2):
+            if eta < current_bz // 2:
+                continue
+            for current_b_T in range(0, int(max_b_T) + 1):
+                index_list_trans0.append([current_b_T, current_bz, eta, 0])
+                index_list_trans1.append([current_b_T, current_bz, eta, 1])
+                if current_bz != 0:
+                    index_list_trans0.append([current_b_T, -current_bz, eta, 0])
+                    index_list_trans1.append([current_b_T, -current_bz, eta, 1])
+    return index_list_trans0, index_list_trans1
 
 
 def gi_qtmd_staple_segments(W_index):
@@ -330,12 +347,6 @@ class DisconnectedQuarkqTMD1pt:
                 write_attrs = shard_part_attrs(
                     common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
                 )
-                raw_shapes = {
-                    "loop_pervec": (count,) + loop_shape,
-                    "source_index": (count,),
-                    "base_noise_index": (count,),
-                    "hp_index": (count,),
-                }
                 bookkeeping = part_source_bookkeeping(
                     base_idx, hp_start, hp_stop, hp_count
                 )
@@ -525,9 +536,9 @@ def finalize_disconnected_qtmd_1pt_shards(shard_dir, canonical_tag, n_base_noise
             out.create_dataset(name, data=values)
         raw = out.require_group("raw")
         raw_loop = raw.create_dataset("loop_pervec", shape=(total_sources,) + loop_shape, dtype=np.complex128)
-        source_datasets = {
+        bookkeeping_datasets = {
             name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
-            for name in ("source_index", "base_noise_index", "hp_index")
+            for name in ("base_noise_index", "hp_index")
         }
         loop_sum = np.zeros(loop_shape, dtype=np.complex128)
         for part_info, part in iter_validated_shard_parts(manifest):
@@ -536,7 +547,7 @@ def finalize_disconnected_qtmd_1pt_shards(shard_dir, canonical_tag, n_base_noise
             values = part["raw/loop_pervec"][()]
             raw_loop[start:stop] = values
             loop_sum += np.sum(values, axis=0)
-            for name, dataset in source_datasets.items():
+            for name, dataset in bookkeeping_datasets.items():
                 dataset[start:stop] = part[f"raw/{name}"][()]
 
         loop_avg = loop_sum / total_sources / int(canonical_attrs["volume_norm"])
