@@ -50,7 +50,10 @@ def _iter_bw_seq_raw(dirac, prop: LatticePropagator, origin, sm_width, sm_boost,
     latt_info = prop.latt_info
     GLt = latt_info.GLt
 
-    prop = boosted_smearing(prop, w=sm_width, boost=sm_boost)
+    if sm_width is not None:
+        if sm_boost is None:
+            raise ValueError("sm_boost is required when sm_width is provided")
+        prop = boosted_smearing(prop, w=sm_width, boost=sm_boost)
 
     for pol in pol_list:
         if flavor == 1:  # up quark insertion
@@ -81,7 +84,11 @@ def _iter_bw_seq_raw(dirac, prop: LatticePropagator, origin, sm_width, sm_boost,
         if latt_info.mpi_rank == 0:
             print(f"diquark contractions for Polarization {pol} done")
 
-        src = boosted_smearing(smearing_input, w=sm_width, boost=sm_boost)
+        src = (
+            boosted_smearing(smearing_input, w=sm_width, boost=sm_boost)
+            if sm_width is not None
+            else smearing_input
+        )
         yield core.invertPropagator(dirac, src, 1, 0)
 
 

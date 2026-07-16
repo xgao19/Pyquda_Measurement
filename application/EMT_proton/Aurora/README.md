@@ -43,13 +43,12 @@ export EMT_PROTON_NRANKS=32
 export EMT_PROTON_MPI_GEOMETRY=2.2.2.4
 export EMT_PROTON_LAT_TAG=l64c64a076
 export EMT_PROTON_GAUGE_PATH=/lus/flare/projects/StructNGB/ensemble/l6464f21b7130m00119m0322a.nersc.cg_high_prec/fixed_GLU/l6464f21b7130m00119m0322a.1050.coulomb.1e-14
-export EMT_PROTON_MG_BLOCK=none
 export EMT_PROTON_T_SEPS=1
 export EMT_PROTON_WIDTH=1.0
 export EMT_PROTON_FLOW_STEPS=0
 export EMT_PROTON_TOL=1e-2
 export EMT_PROTON_MAXITER=50
-bash submit_or_run_interactive.sh --config_num 1050
+bash submit_or_run_interactive.sh --config_num 1050 --mg-block none
 ```
 
 Those l64 values are smoke settings only; restore production tolerances,

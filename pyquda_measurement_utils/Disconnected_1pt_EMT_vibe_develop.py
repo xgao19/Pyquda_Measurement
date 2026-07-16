@@ -18,7 +18,7 @@ from opt_einsum import contract
 
 from pyquda import getMPIComm
 from pyquda.field import LatticeGauge, LatticePropagator, LatticeFermion, MultiLatticeFermion
-from pyquda_utils import core, gamma, phase, convert
+from pyquda_utils import core, phase, convert
 from pyquda_comm.array import arrayIdentity, arrayZeros
 
 from pyquda_measurement_utils.io_corr import (
@@ -33,7 +33,6 @@ from pyquda_measurement_utils.tools import (
 )
 from pyquda_measurement_utils.fermion_bilinear_basis import (
     GAMMA_LABELS,
-    PYQUDA_GAMMA_IDS,
     VECTOR_GAMMA_POSITIONS,
     basis_attrs,
     basis_metadata,
@@ -64,9 +63,6 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
 _VALID_FLOW_TYPES = {"wilson", "symanzik"}
 EMT_OPERATOR_SCHEMA_VERSION = 3
 my_gammas = list(GAMMA_LABELS)
-pyquda_gammas_order = list(PYQUDA_GAMMA_IDS)
-my_pyquda_gammas = [gamma.gamma(idx) for idx in pyquda_gammas_order]
-G5 = gamma.gamma(15)
 
 
 def _gamma_matrix(gamma_like):
@@ -195,6 +191,15 @@ def parse_multigrid_blocks(value):
     return blocks
 
 
+def parse_optional_multigrid_blocks(value):
+    """Parse an EMT multigrid hierarchy, allowing an explicit ``none``."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() == "none":
+        return None
+    return parse_multigrid_blocks(value)
+
+
 def _unique_zero_momentum_index(momentum_list):
     """Return the unique zero-momentum index or raise a clear error."""
     zero_indices = [
@@ -278,21 +283,55 @@ class EMTDisconnectedQuark1pt:
         self.multigrid_blocks = (
             None if multigrid is None else parse_multigrid_blocks(multigrid)
         )
+        self._emt_gamma_cache = {}
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
 
     @staticmethod
-    def _gamma5_for(ref_arr):
-        return _array_on_backend(_gamma_matrix(G5), ref_arr)
+    def _gamma_cache_key(ref_arr):
+        """Identify one backend/dtype/device or SYCL queue allocation domain."""
+        xp = _get_xp_from_array(ref_arr)
+        queue = getattr(ref_arr, "sycl_queue", None)
+        if queue is not None:
+            location = ("sycl_queue", id(queue))
+        else:
+            device = getattr(ref_arr, "device", None)
+            device_id = getattr(device, "id", device)
+            location = ("device", str(device_id)) if device is not None else ("host", None)
+        return (xp.__name__, str(getattr(ref_arr, "dtype", None)), location)
 
-    @staticmethod
-    def _gamma_stack_for(ref_arr):
-        return gamma_stack(ref_arr)
+    def _gamma_cache_entry(self, ref_arr):
+        key = self._gamma_cache_key(ref_arr)
+        entry = self._emt_gamma_cache.get(key)
+        if entry is None:
+            entry = {"stack": gamma_stack(ref_arr), "matrices": {}}
+            self._emt_gamma_cache[key] = entry
+        return entry
 
-    @classmethod
-    def _get_interpolator_gamma_for(cls, interpolator, ref_arr):
+    def _gamma5_for(self, ref_arr):
+        return self._gamma_cache_entry(ref_arr)["stack"][GAMMA_LABELS.index("5")]
+
+    def _gamma_stack_for(self, ref_arr):
+        return self._gamma_cache_entry(ref_arr)["stack"]
+
+    def _vector_gamma_stack_for(self, ref_arr):
+        entry = self._gamma_cache_entry(ref_arr)
+        if "vector_stack" not in entry:
+            xp = _get_xp_from_array(ref_arr)
+            entry["vector_stack"] = xp.stack(
+                [entry["stack"][position] for position in VECTOR_GAMMA_POSITIONS]
+            )
+        return entry["vector_stack"]
+
+    def _cached_backend_matrix(self, name, matrix, ref_arr):
+        entry = self._gamma_cache_entry(ref_arr)
+        if name not in entry["matrices"]:
+            entry["matrices"][name] = _array_on_backend(_gamma_matrix(matrix), ref_arr)
+        return entry["matrices"][name]
+
+    def _get_interpolator_gamma_for(self, interpolator, ref_arr):
         if interpolator not in my_gammas:
             raise ValueError(f"Unsupported interpolator {interpolator!r}. Expected one of {my_gammas}.")
-        return _array_on_backend(_gamma_matrix(my_pyquda_gammas[my_gammas.index(interpolator)]), ref_arr)
+        return self._gamma_stack_for(ref_arr)[my_gammas.index(interpolator)]
 
     @staticmethod
     def _impose_P_Breit_slice(complex_field, phases_3pt):
@@ -482,7 +521,8 @@ class EMTDisconnectedQuark1pt:
         return raw
 
     def _invert_and_measure_batch(
-        self, U, dirac, source_records, phases_3pt, timers=None
+        self, U, dirac, source_records, phases_3pt, timers=None,
+        restore_original_gauge=True,
     ):
         """Restore the original gauge once, then invert and flow one source batch."""
         source_records = list(source_records)
@@ -490,11 +530,10 @@ class EMTDisconnectedQuark1pt:
             raise ValueError("source_records should not be empty")
         if timers is None:
             timers = self._new_batch_timers()
-        # Preserve the established production sequence: one thin restore at the
-        # start of every batch, including the first batch after the full load.
-        restore_t0 = _timer_start(U)
-        dirac.loadGauge(U, thin_update_only=True)
-        timers["restore"] += _timer_stop(restore_t0, U)
+        if restore_original_gauge:
+            restore_t0 = _timer_start(U)
+            dirac.loadGauge(U, thin_update_only=True)
+            timers["restore"] += _timer_stop(restore_t0, U)
         xis = [record[3] for record in source_records]
         invert_t0 = _timer_start(xis)
         etas = [dirac.invert(xi) for xi in xis]
@@ -505,7 +544,7 @@ class EMTDisconnectedQuark1pt:
 
     def _measurement_attrs(self, latt_info, invPara, randPara, counter_config, counter_stream, n_eff, spatial_volume):
         n_vec, n_zn, _ = randPara
-        mass, csw, tol, maxiter = invPara
+        mass, csw, _, _ = invPara
         attrs = {
             "measurement": "quark_1pt",
             "emt_operator_schema_version": EMT_OPERATOR_SCHEMA_VERSION,
@@ -514,6 +553,13 @@ class EMTDisconnectedQuark1pt:
             "flow_steps": self.flow_steps,
             "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
             "qext": np.asarray(self.qlist, dtype=np.int32),
+            "loop_provenance_schema": "emt_disconnected_loop_provenance_v1",
+            "global_lattice_size": np.asarray(latt_info.global_size, dtype=np.int32),
+            "momentum_phase_origin": np.zeros(4, dtype=np.int32),
+            "spatial_momentum_phase_convention": (
+                "exp(-2pi*i*sum_j q_j*(x_j-origin_j)/L_j)"
+            ),
+            "loop_time_convention": "absolute_lattice_time",
             "volume_norm": spatial_volume,
             "primitive_local_axes": "source,gamma,q,flow,t",
             "primitive_derivative_axes": "source,gamma,derivative,q,flow,t",
@@ -530,12 +576,6 @@ class EMTDisconnectedQuark1pt:
             "emt_derivation": "B[nu,mu]=L_D[gamma_nu,mu]; T=0.5*(B+B_transpose)",
             "mass": mass,
             "csw": csw,
-            "tol": tol,
-            "maxiter": maxiter,
-            "multigrid_blocks": np.asarray(
-                self.multigrid_blocks if self.multigrid_blocks is not None else [],
-                dtype=np.int32,
-            ).reshape(-1, 4),
             "gauge_preprocessing": self.gauge_preprocessing,
             "t_boundary": latt_info.t_boundary,
             "n_vec": n_vec,
@@ -569,6 +609,7 @@ class EMTDisconnectedQuark1pt:
         common_attrs["block_interval_solves"] = int(block_interval_solves)
         metadata_datasets = self._metadata_datasets()
         comm = getMPIComm()
+        first_inversion_batch = True
 
         flow_batch_size = _positive_flow_batch_size(flow_batch_size)
         selected_bases = list(selected_base_range(n_vec, base_start, base_stop))
@@ -605,7 +646,12 @@ class EMTDisconnectedQuark1pt:
 
         def complete_base(base_idx):
             if U.latt_info.mpi_rank == 0:
-                append_completed_base(sample_log_file, tag, common_attrs, base_idx)
+                append_completed_base(
+                    sample_log_file,
+                    tag,
+                    common_attrs,
+                    base_idx,
+                )
             comm.Barrier()
 
         if self.noise_scheme != "hierarchical_probing":
@@ -631,8 +677,10 @@ class EMTDisconnectedQuark1pt:
                 timers = self._new_batch_timers()
                 batch_t0 = _timer_start()
                 raw = self._invert_and_measure_batch(
-                    U, dirac, source_records, phases_3pt, timers=timers
+                    U, dirac, source_records, phases_3pt, timers=timers,
+                    restore_original_gauge=not first_inversion_batch,
                 )
+                first_inversion_batch = False
                 write_t0 = _timer_start()
                 for source_offset, base_idx in enumerate(batch_bases):
                     source_slice = slice(source_offset, source_offset + 1)
@@ -672,8 +720,10 @@ class EMTDisconnectedQuark1pt:
                         noise_stream=int(attrs["noise_stream"]),
                     ))
                     raw = self._invert_and_measure_batch(
-                        U, dirac, source_records, phases_3pt, timers=timers
+                        U, dirac, source_records, phases_3pt, timers=timers,
+                        restore_original_gauge=not first_inversion_batch,
                     )
+                    first_inversion_batch = False
                     destination = slice(
                         batch_hp_start - hp_start, batch_hp_stop - hp_start
                     )
@@ -762,7 +812,11 @@ class EMTDisconnectedQuark1pt:
         common_attrs["block_interval_solves"] = int(block_interval_solves)
         comm = getMPIComm()
         if latt_info.mpi_rank == 0:
-            completed_bases = prepare_sample_log(sample_log_file, tag, common_attrs)
+            completed_bases = prepare_sample_log(
+                sample_log_file,
+                tag,
+                common_attrs,
+            )
         else:
             completed_bases = None
         completed_bases = set(comm.bcast(completed_bases, root=0))
@@ -812,10 +866,9 @@ class EMTDisconnectedQuark1pt:
 
         return convert.multiFermionToPropagator(mf_covdev)
 
-    @classmethod
-    def _make_dst2(cls, prop: LatticePropagator):
+    def _make_dst2(self, prop: LatticePropagator):
         """Build the backward meson line gamma5 * prop^dagger * gamma5."""
-        G5_local = cls._gamma5_for(prop.data)
+        G5_local = self._gamma5_for(prop.data)
         return contract(
             "ab,wtzyxbcij,cd->wtzyxadij",
             G5_local,
@@ -823,12 +876,11 @@ class EMTDisconnectedQuark1pt:
             G5_local,
         )
 
-    @classmethod
-    def _left_covdev_dst2_from_prop(cls, gauge_dirac, prop: LatticePropagator, mu: int):
+    def _left_covdev_dst2_from_prop(self, gauge_dirac, prop: LatticePropagator, mu: int):
         """Construct the left-acting derivative on ``dst2 = gamma5 S^dagger gamma5``."""
-        D_y = cls._covdev_sym_prop(gauge_dirac, prop, mu)
+        D_y = self._covdev_sym_prop(gauge_dirac, prop, mu)
         D_y_dag = D_y.data.conj().transpose(0, 1, 2, 3, 4, 6, 5, 8, 7)
-        G5_local = cls._gamma5_for(prop.data)
+        G5_local = self._gamma5_for(prop.data)
         leftD_dst2 = contract("ab,wtzyxbcij,cd->wtzyxadij", G5_local, D_y_dag, G5_local)
         return leftD_dst2
 
@@ -1143,6 +1195,13 @@ class EMTDisconnectedGluon1pt:
             "flow_steps": self.flow_steps,
             "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
             "qext": np.asarray(self.qlist, dtype=np.int32),
+            "loop_provenance_schema": "emt_disconnected_loop_provenance_v1",
+            "global_lattice_size": np.asarray(global_size, dtype=np.int32),
+            "momentum_phase_origin": np.zeros(4, dtype=np.int32),
+            "spatial_momentum_phase_convention": (
+                "exp(-2pi*i*sum_j q_j*(x_j-origin_j)/L_j)"
+            ),
+            "loop_time_convention": "absolute_lattice_time",
             "volume_norm": Ns3,
             "upper_triangle_only": True,
             "operator_normalization": "flowed_gluon_bilinear",
@@ -1162,6 +1221,7 @@ __all__ = [
     "EMTDisconnectedGluon1pt",
     "EMT_OPERATOR_SCHEMA_VERSION",
     "parse_multigrid_blocks",
+    "parse_optional_multigrid_blocks",
     "my_gammas",
     "validate_quark_gluon_loop_axes",
 ]

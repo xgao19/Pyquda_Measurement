@@ -119,7 +119,9 @@ python tests/run_smoke_tests.py
   never infer it from an environment variable or silently default it to zero.
 - One source-independent EMTc file is written per configuration and contains
   every absolute insertion time.  Reuse it for all hadron source times and
-  align with `tau_abs = (t0 + tau_rel) % Nt` in analysis.
+  align time with `tau_abs = (t0 + tau_rel) % Nt` and rephase spatial momentum
+  by `exp[-2 pi i q.(x0-origin)/L]`.  Reject loop files without explicit global
+  lattice/Fourier-origin provenance.
 - Gluon EMT loops are also source independent and use
   `EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5`.  Quark and gluon wrappers must share
   the same flow grid; the production epsilon default is `0.207936`.
@@ -131,6 +133,9 @@ python tests/run_smoke_tests.py
   Restore the original gauge before the next stochastic inversion; loading it
   only once before the source loop causes later inversions to use the wrong
   resident gauge.
+- A full initial `loadGauge(U)` already leaves the original gauge/MG state
+  resident.  The first inversion must use it directly; only inversions after a
+  flowed-gauge context need `thin_update_only=True` restoration.
 - A single initial-time projector is incomplete at nonzero flow time.  A
   complete time-dilution basis is unbiased only after all projectors are
   summed, with the corresponding inversion cost.
@@ -181,6 +186,8 @@ python tests/run_smoke_tests.py
 - Standalone ringed, EMT, and qTMD resume only from a fingerprinted base-level
   text sample log; production must not require local shards to remain after a
   base is logged. Finalizers validate parts once while merging at the destination.
+- Multigrid blocks, solver tolerance and maxiter are runtime controls, not
+  disconnected measurement identity; resumed base ranges may mix them.
 - Standalone ringed uses `RingedQuark1pt`, a kinetic-only subclass of the EMT
   shared runner. It supports full-volume plain/HP counter noise but no
   spin-color dilution or stored ringed factors. Average `K` over configurations

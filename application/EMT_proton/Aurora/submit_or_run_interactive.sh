@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
-  echo "Usage: $0 --config_num CFG" >&2
+if [[ $# -lt 2 ]]; then
+  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]]" >&2
   exit 2
 fi
 

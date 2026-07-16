@@ -122,24 +122,20 @@ Those should be added as separate, explicit workflows rather than hidden inside
 the current connected contraction path.
 """
 
-from pyquda_utils import core, gamma
-from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
-from pyquda_measurement_utils.fermion_bilinear_basis import GAMMA_LABELS, PYQUDA_GAMMA_IDS
+from pyquda_measurement_utils.fermion_bilinear_basis import (
+    GAMMA_LABELS,
+    PYQUDA_GAMMA_IDS,
+)
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
     create_fermion_TMD_GI_from_link,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import create_gi_qtmd_wilsonline_index_lists
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
-from pyquda_measurement_utils.tools import _get_xp_from_array, mpi_print, _asarray_on_queue
+from pyquda_measurement_utils.proton_utils_vibe_develop import contract_proton_c2
 
 
 my_gammas = list(GAMMA_LABELS)
 pyquda_gammas_order = list(PYQUDA_GAMMA_IDS)
-my_pyquda_gammas = [gamma.gamma(idx) for idx in pyquda_gammas_order]
-
-Cg5 = (1j * gamma.gamma(2) @ gamma.gamma(8)) @ gamma.gamma(15)
-CgT5 = (1j * gamma.gamma(2) @ gamma.gamma(8)) @ gamma.gamma(7)
-CgZ5 = (1j * gamma.gamma(2) @ gamma.gamma(8)) @ gamma.gamma(11)
 
 
 """
@@ -176,247 +172,22 @@ class proton_TMD():
     def contract_2pt_TMD(
         self, latt_info, prop_f, phases, tag, interpolator="5", attrs=None
     ):
-        if interpolator == "5":
-            gamma_insert = Cg5
-        elif interpolator == "T5":
-            gamma_insert = CgT5
-        elif interpolator == "Z5":
-            gamma_insert = CgZ5
-        else:
-            raise ValueError(f"Invalid interpolator: {interpolator}")
-        
-        
-        mpi_print(latt_info, "Begin sink smearing")
-        prop_f = boosted_smearing(prop_f, w=self.width, boost=self.pos_boost)
-        mpi_print(latt_info, "Sink smearing completed")
-        
-        xp = _get_xp_from_array(prop_f.data)
-        #* IMPORTANT: keep complex dtype.
-        # Some gamma matrices (e.g. Z / Z5 in the QUDA bitmask basis) can be purely imaginary.
-        # If we allocate float here, imaginary parts get dropped and those gammas become identically 0,
-        # which makes the corresponding c2pt channels exactly zero.
-        P_2pt_gamma_host = xp.zeros((16, latt_info.Lt, 4, 4), dtype=prop_f.data.dtype)
-        P_2pt_gamma = _asarray_on_queue(P_2pt_gamma_host, xp, prop_f.data)
-
-        for gamma_idx, gamma_pyq_host in enumerate(my_pyquda_gammas):
-            gamma_device = _asarray_on_queue(gamma_pyq_host, xp, prop_f.data)
-            
-            P_2pt_local = _asarray_on_queue(xp.zeros((latt_info.Lt, 4, 4), dtype=prop_f.data.dtype), xp, prop_f.data)
-            P_2pt_local[:] = gamma_device
-            P_2pt_gamma[gamma_idx] = P_2pt_local
-            
-        epsilon_host = xp.zeros((3,3,3), dtype=prop_f.data.real.dtype)
-        for a in range (3):
-            b = (a+1) % 3
-            c = (a+2) % 3
-            epsilon_host[a,b,c] = 1
-            epsilon_host[a,c,b] = -1
-        epsilon = _asarray_on_queue(epsilon_host, xp, prop_f.data)
-        
-        phases = _asarray_on_queue(phases, xp, prop_f.data)
-        gamma_insert = _asarray_on_queue(gamma_insert, xp, prop_f.data)
-        
-        #! Optimized version of the 2pt TMD contraction (memory-friendly)
-        #! Strategy: split large einsum into small 2-tensor / 3-tensor contractions
-
-        # ============================================================
-        # --- Term 1 ---
-        # original:
-        # - epsilon(abc)*epsilon(def)*G(ij)*G(kl)*P2pt(gtmn)*P1(ikad)*P2(jlbe)*P3(mncf)*Phases
-        # ============================================================
-
-        # -----------------------------
-        # 1) Sink block (split)
-        # term1_sink = einsum("abc, ij, ...ikad, ...jlbe -> ...klcde")
-        # -----------------------------
-
-        # (a) contract epsilon(abc) with first propagator P1(i,k,a,d)
-        #     "abc, ...ikad -> ...ikbcd"
-        t1_s1 = xp.einsum(
-            "abc, wtzyxikad -> wtzyxikbcd",
-            epsilon, prop_f.data,
-            optimize=True
+        """Contract and write proton C2 through the shared calculation kernel."""
+        corr_collect = contract_proton_c2(
+            latt_info,
+            prop_f,
+            phases,
+            interpolator=interpolator,
+            sink_smearing=True,
+            smearing_width=self.width,
+            smearing_boost=self.pos_boost,
         )
-
-        # (b) contract gamma_insert(ij) with second propagator P2(j,l,b,e)
-        #     "ij, ...jlbe -> ...ilbe"
-        t1_s2 = xp.einsum(
-            "ij, wtzyxjlbe -> wtzyxilbe",
-            gamma_insert, prop_f.data,
-            optimize=True
-        )
-
-        # (c) combine the two partial sink blocks, contract i and b
-        #     "...ikbcd, ...ilbe -> ...klcde"
-        term1_sink = xp.einsum(
-            "wtzyxikbcd, wtzyxilbe -> wtzyxklcde",
-            t1_s1, t1_s2,
-            optimize=True
-        )
-
-        del t1_s1, t1_s2
-
-
-        # -----------------------------
-        # 2) P3 block (already 2 tensors)
-        # term1_p3 = einsum("gtmn, ...mncf -> g...cf")
-        # -----------------------------
-        term1_p3 = xp.einsum(
-            "gtmn, wtzyxmncf -> gwtzyxcf",
-            P_2pt_gamma, prop_f.data,
-            optimize=True
-        )
-
-
-        # -----------------------------
-        # 3) Final assembly (split)
-        # original:
-        # term1 = einsum("def, pwtzyx, kl, ...klcde, g...cf -> gpt")
-        # -----------------------------
-
-        # (a) contract epsilon(def) with term1_sink on d,e
-        #     "def, ...klcde -> ...klcf"
-        t1_f1 = xp.einsum(
-            "def, wtzyxklcde -> wtzyxklcf",
-            epsilon, term1_sink,
-            optimize=True
-        )
-        del term1_sink
-
-        # (b) contract gamma_insert(k,l)
-        #     "kl, ...klcf -> ...cf"
-        t1_f2 = xp.einsum(
-            "kl, wtzyxklcf -> wtzyxcf",
-            gamma_insert, t1_f1,
-            optimize=True
-        )
-        del t1_f1
-
-        # (c) contract with P3 block on c,f
-        #     "...cf, g...cf -> g..."
-        t1_f3 = xp.einsum(
-            "wtzyxcf, gwtzyxcf -> gwtzyx",
-            t1_f2, term1_p3,
-            optimize=True
-        )
-        del t1_f2, term1_p3
-
-        # (d) contract phases
-        #     "p..., g... -> gpt"
-        term1 = xp.einsum(
-            "pwtzyx, gwtzyx -> gpt",
-            phases, t1_f3,
-            optimize=True
-        )
-        del t1_f3
-
-
-        # ============================================================
-        # --- Term 2 ---
-        # original:
-        # - epsilon(abc)*epsilon(def)*G(ij)*G(kl)*P2pt(gtmn)*P1(ikad)*P2(jnbe)*P3(mlcf)*Phases
-        # ============================================================
-
-        # -----------------------------
-        # 1) Sink block (split)
-        # term2_sink = einsum("abc, ij, ...ikad, ...jnbe -> ...kncde")
-        # -----------------------------
-
-        # (a) epsilon with P1
-        #     "abc, ...ikad -> ...ikbcd"
-        t2_s1 = xp.einsum(
-            "abc, wtzyxikad -> wtzyxikbcd",
-            epsilon, prop_f.data,
-            optimize=True
-        )
-
-        # (b) gamma_insert with P2(j,n,b,e)
-        #     "ij, ...jnbe -> ...inbe"
-        t2_s2 = xp.einsum(
-            "ij, wtzyxjnbe -> wtzyxinbe",
-            gamma_insert, prop_f.data,
-            optimize=True
-        )
-
-        # (c) combine, contract i and b
-        #     "...ikbcd, ...inbe -> ...kncde"
-        term2_sink = xp.einsum(
-            "wtzyxikbcd, wtzyxinbe -> wtzyxkncde",
-            t2_s1, t2_s2,
-            optimize=True
-        )
-
-        del t2_s1, t2_s2
-
-
-        # -----------------------------
-        # 2) P3 block (already 2 tensors)
-        # term2_p3 = einsum("gtmn, ...mlcf -> g...nlcf")
-        # -----------------------------
-        term2_p3 = xp.einsum(
-            "gtmn, wtzyxmlcf -> gwtzyxnlcf",
-            P_2pt_gamma, prop_f.data,
-            optimize=True
-        )
-
-
-        # -----------------------------
-        # 3) Final assembly (split)
-        # original:
-        # term2 = einsum("def, pwtzyx, kl, ...kncde, g...nlcf -> gpt")
-        # -----------------------------
-
-        # (a) contract epsilon(def) with term2_sink on d,e
-        #     "def, ...kncde -> ...kncf"
-        t2_f1 = xp.einsum(
-            "def, wtzyxkncde -> wtzyxkncf",
-            epsilon, term2_sink,
-            optimize=True
-        )
-        del term2_sink
-
-        # (b) contract sink-part and P3-part on (n,c,f), keep (g,k,l,w,t,z,y,x)
-        #     "...kncf, g...nlcf -> g...kl"
-        t2_f2 = xp.einsum(
-            "wtzyxkncf, gwtzyxnlcf -> gwtzyxkl",
-            t2_f1, term2_p3,
-            optimize=True
-        )
-        del t2_f1, term2_p3
-
-        # (c) contract gamma_insert(k,l)
-        #     "kl, g...kl -> g..."
-        t2_f3 = xp.einsum(
-            "kl, gwtzyxkl -> gwtzyx",
-            gamma_insert, t2_f2,
-            optimize=True
-        )
-        del t2_f2
-
-        # (d) contract phases
-        term2 = xp.einsum(
-            "pwtzyx, gwtzyx -> gpt",
-            phases, t2_f3,
-            optimize=True
-        )
-        del t2_f3
-
-        # --- Final Result ---
-        # original code is (- Einsum1 - Einsum2)
-        corr = - term1 - term2
-
-        corr_collect = core.gatherLattice(xp.asnumpy(corr), [2, -1, -1, -1])
-        
-        
         if latt_info.mpi_rank == 0:
             save_proton_c2pt_hdf5(
-                corr_collect, tag, my_gammas, self.pilist, attrs=attrs
+                corr_collect, tag, list(GAMMA_LABELS), self.pilist, attrs=attrs
             )
-        result = corr_collect
-        del corr
-        return result
-    
-        
+        return corr_collect
+
     def create_TMD_Wilsonline_index_list_CG(self):
         index_list_trans0 = []
         index_list_trans1 = []

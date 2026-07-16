@@ -13,6 +13,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from application.analysis_helper.emt_disconnected_analysis import source_relative_loops
+
 from pyquda_measurement_utils.fermion_bilinear_basis import (
     GAMMA_LABELS,
     VECTOR_GAMMA_POSITIONS,
@@ -135,29 +137,6 @@ def load_t44_base_loops(path):
     if len(source_t44) != len(bases) * hp_count:
         raise ValueError("source axis contains duplicated or incomplete HP vectors")
     return T44BaseLoops(path, qext, flow_times, hp_count, base_values)
-
-
-def source_relative_loops(loop_qt, qext, source_positions, lattice_size):
-    """Rephase and roll an origin-based absolute-time loop for every source."""
-    loop_qt = np.asarray(loop_qt, dtype=np.complex128)
-    qext = np.asarray(qext, dtype=np.int32)
-    sources = np.asarray(source_positions, dtype=np.int32)
-    if loop_qt.shape[-2:] != (len(qext), int(lattice_size[3])):
-        raise ValueError("loop tail should be [q,t] and match qext/lattice time")
-    spatial_size = np.asarray(lattice_size[:3], dtype=np.float64)
-    phases = np.exp(
-        -2j * np.pi * np.einsum(
-            "qi,si->sq", qext[:, :3], sources[:, :3] / spatial_size
-        )
-    )
-    time_indices = (
-        sources[:, 3, None] + np.arange(int(lattice_size[3]))[None, :]
-    ) % int(lattice_size[3])
-    # np.take inserts the [source,t] index shape at the old time axis, giving
-    # [...,q,source,t]; move source to the leading analysis axis.
-    result = np.moveaxis(np.take(loop_qt, time_indices, axis=-1), -2, 0)
-    phase_shape = (len(sources),) + (1,) * (loop_qt.ndim - 2) + (len(qext), 1)
-    return result * phases.reshape(phase_shape)
 
 
 def optimized_ratio(c3_qtau, c2_pf_t, c2_pi_qt, t_sep, taus=None):

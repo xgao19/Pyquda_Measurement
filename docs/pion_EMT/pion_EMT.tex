@@ -537,8 +537,9 @@ derivative directions.  This changes only gauge loading: the derivative order,
 signs, Gamma contractions, and saved arrays are unchanged.
 
 The inverter still performs one full gauge load when it constructs the initial
-multigrid hierarchy.  Every later source or fixed-sink sequential inversion
-restores the same original thin gauge with
+multigrid hierarchy.  The first source and first fixed-sink sequential
+inversions use that already-resident state directly.  Inversions after a
+flowed-gauge context restore the same original thin gauge with
 \code{thin\_update\_only=True}; near-null vectors and the coarse hierarchy are
 not rebuilt.  The connected workflow remains one branch at a time and does not
 batch different separations or sources.
@@ -1464,7 +1465,11 @@ The Dirac operator uses the QUDA multigrid solver with parameters:
 \begin{center}
 \code{invPara = [mass, csw, tol, maxiter]}
 \end{center}
-Typical values: \code{mass = 0.236}, \code{csw = 1.0372}, \code{tol = 1e-10}, \code{maxiter = 300}. The multigrid setup uses a $[[8, 8, 4, 4]]$ block size configuration.
+Typical values are \code{mass = 0.236}, \code{csw = 1.0372},
+\code{tol = 1e-10}, and \code{maxiter = 300}.  Connected pion and proton
+entrypoints share \code{--mg-block X.Y.Z.T[;...]}, defaulting to one level
+\code{8.8.4.4}; \code{--mg-block none} disables multigrid.  The actual
+hierarchy is stored in both C2 and C3 attributes.
 
 \subsection{Random Number Parameters (Quark 1pt)}
 \label{sec:rand_par}

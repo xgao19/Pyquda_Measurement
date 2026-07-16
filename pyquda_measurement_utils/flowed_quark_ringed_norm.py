@@ -6,13 +6,9 @@ import h5py
 import numpy as np
 from opt_einsum import contract
 
-from pyquda_utils import gamma
-
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedQuark1pt,
-    _array_on_backend,
     _flow_times,
-    _gamma_matrix,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
@@ -20,9 +16,6 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     discover_shard_layout,
     iter_validated_shard_parts,
 )
-
-
-_VECTOR_GAMMA_IDS = (1, 2, 4, 8)
 
 
 class RingedQuark1pt(EMTDisconnectedQuark1pt):
@@ -40,15 +33,6 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
         parameters["qext"] = [[0, 0, 0, 0]]
         super().__init__(parameters)
 
-    @staticmethod
-    def _vector_gammas_for(ref_arr):
-        xp = type(ref_arr).__module__.split(".")[0]
-        backend = __import__(xp)
-        return backend.stack([
-            _array_on_backend(_gamma_matrix(gamma.gamma(gamma_id)), ref_arr)
-            for gamma_id in _VECTOR_GAMMA_IDS
-        ])
-
     def _raw_step_tail_shapes(self, latt_info):
         return {"kinetic_pervec": (int(latt_info.global_size[3]),)}
 
@@ -65,7 +49,7 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
         self, U_f, gauge_dirac, xi, eta, phases_3pt
     ):
         """Compute K=V_s^-1 sum_mu xi^dag gamma_mu(D+-D-)eta."""
-        vector_gammas = self._vector_gammas_for(eta.data)
+        vector_gammas = self._vector_gamma_stack_for(eta.data)
         local_kinetic = None
         for mu in range(4):
             derivative_right = gauge_dirac.covDev(eta, mu)
@@ -95,7 +79,7 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
         spatial_volume,
     ):
         n_vec, n_zn, _ = randPara
-        mass, csw, tol, maxiter = invPara
+        mass, csw, _, _ = invPara
         return {
             "measurement": "flowed_quark_ringed_norm",
             "content": "kinetic_only",
@@ -114,12 +98,6 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
             "volume_norm": int(spatial_volume),
             "mass": mass,
             "csw": csw,
-            "tol": tol,
-            "maxiter": maxiter,
-            "multigrid_blocks": np.asarray(
-                self.multigrid_blocks if self.multigrid_blocks is not None else [],
-                dtype=np.int32,
-            ).reshape(-1, 4),
             "gauge_preprocessing": self.gauge_preprocessing,
             "t_boundary": latt_info.t_boundary,
             "flavor_convention": self.flavor_convention,

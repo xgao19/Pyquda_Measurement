@@ -2,6 +2,13 @@
 
 This note summarizes the Aurora S8T32 validation evidence for the connected proton EMT implementation. It is a regression and implementation sanity record, not a proof of final physical normalization, renormalization, operator mixing, disconnected pieces, or GFF extraction.
 
+> **Legacy smearing warning.**  The historical runs summarized below predate the
+> correction that made `CG_GaussSmear=False` disable source, sink, and
+> sequential smearing consistently.  Their files must not be used as validated
+> point-source/point-sink data.  The algebraic and gauge-covariance comparisons
+> remain useful implementation history, but a genuine no-smearing production
+> result must be regenerated with the corrected code.
+
 ## Scope
 
 Validated code paths:
@@ -28,10 +35,10 @@ backend="dpnp", backend_target="sycl"
 h5py.get_config().mpi == True
 EMT_PROTON_DISABLE_SMEARING=1
 EMT_PROTON_GAUSS_SMEAR=0
-EMT_PROTON_MG_BLOCK=none
+CLI argument: --mg-block none
 ```
 
-All tests used the S8T32 test gauge and 2 MPI ranks with `mpi_geometry=1.1.1.2`. HYP gauge preprocessing was kept enabled. The point-source/sink setting was used to isolate EMT and sequential-source gauge covariance from boosted-smearing behavior.
+All tests used the S8T32 test gauge and 2 MPI ranks with `mpi_geometry=1.1.1.2`. HYP gauge preprocessing was kept enabled. Although the historical run was labelled as point-source/point-sink, the old proton path still applied smearing internally; therefore that label and the associated no-smearing interpretation are invalid.
 
 ## Raw-Only Sequential Builder
 

@@ -881,10 +881,12 @@ follows (for each flavor and polarization):
         to convert the source into the correct form for the sequential inversion
         with the same Dirac operator used for the forward propagator.
 
-  \item \textbf{Boosted smearing.}  The sequential source is smeared using
+  \item \textbf{Optional boosted smearing.}  When
+        \texttt{CG\_GaussSmear=True}, the sequential source is smeared using
         \texttt{boosted\_smearing} with width $w$ and boost vector
-        \texttt{boost\_out}.  This applies the same gauge-covariant Gaussian
-        smearing used at the source and sink of the two-point function.
+        \texttt{boost\_out}.  When it is false, source, two-point sink,
+        propagator sink, and sequential-source smearing are all skipped, giving
+        a genuine point-source/point-sink workflow.
 
   \item \textbf{Sequential inversion.}  The smeared source is inverted:
         \begin{equation}
@@ -1172,8 +1174,9 @@ The production implementation keeps the existing one-branch flow
 \([S_{\rm fw},S_{\rm seq}]\), containing the 24 spin--color propagator
 fields.  It does not batch different source positions, separations, flavors,
 or polarizations.  After the initial full gauge and multigrid construction,
-source and sequential inversions restore the unchanged thin gauge with
-\code{thin\_update\_only=True}.  At each flow time a single
+the first source and first flavor/separation sequential inversion use the
+already-resident original gauge.  Inversions following a flowed-gauge context
+restore it with \code{thin\_update\_only=True}.  At each flow time a single
 \code{U\_f.use()} context supplies all forward/backward covariant derivatives
 for the two quark legs.  These are performance changes only and leave the
 operator and HDF5 schema unchanged.
@@ -1333,8 +1336,9 @@ The dimensions are:
   \item $N_{t}$ = temporal lattice extent.
 \end{itemize}
 
-The attributes store configuration, Dirac parameters, gauge preprocessing,
-temporal boundary, source position, source/sink interpolators, smearing and
+The attributes store configuration, Dirac parameters, the actual multigrid
+hierarchy, gauge preprocessing, temporal boundary, source position,
+source/sink interpolators, separate source/sink/sequential smearing flags and
 boosts, \(p_f\), \(q\), two-point momenta, flow schedule, scalar \code{t\_sep},
 and explicit dataset-axis labels.  They also record convention metadata:
 \begin{itemize}
@@ -1800,9 +1804,8 @@ with \texttt{backend="dpnp"}, \texttt{backend\_target="sycl"}, two MPI ranks, an
 for the gauge-covariance tests so that the tests isolate the EMT/sequential
 contractions rather than the non-gauge-covariant boosted-smearing path:
 \begin{verbatim}
-EMT_PROTON_DISABLE_SMEARING=1
 EMT_PROTON_GAUSS_SMEAR=0
-EMT_PROTON_MG_BLOCK=none
+bash run_proton_quark_3pt.sh --config_num 0 --mg-block none
 \end{verbatim}
 HYP gauge preprocessing was kept enabled, matching the normal workflow.
 

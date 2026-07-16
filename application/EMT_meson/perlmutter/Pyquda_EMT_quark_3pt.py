@@ -4,6 +4,7 @@ from pathlib import Path
 from pyquda import init
 from pyquda_utils import io
 from pyquda_measurement_utils.pion_EMT_vibe_develop import QuarkEMT
+from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import parse_optional_multigrid_blocks
 from pyquda_measurement_utils.io_corr import get_emt_meson_2pt_file_tag, get_emt_quark_3pt_file_tag
 
 # ============================================================
@@ -15,6 +16,7 @@ parser.add_argument("--config_num", type=int, required=True, help="Configuration
 parser.add_argument("--mpi_geometry", type=str, default="1.1.1.1", help="MPI geometry")
 parser.add_argument("--src_interpolator", type=str, default="5", help="Source interpolator gamma label")
 parser.add_argument("--sink_interpolator", type=str, default="5", help="Sink interpolator gamma label")
+parser.add_argument("--mg-block", default="8.8.4.4", help="X.Y.Z.T[;...] or none")
 args = parser.parse_args()
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -46,6 +48,7 @@ parameters = {
     "flow_epsilon": 0.207936,
     "flow_steps": 10,
     "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,4)",
+    "multigrid": parse_optional_multigrid_blocks(args.mg_block),
 }
 src_pos = [0, 0, 0, 0]
 meson_2pt_tag = get_emt_meson_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)

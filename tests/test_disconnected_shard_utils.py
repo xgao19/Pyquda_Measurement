@@ -73,8 +73,6 @@ def _common_attrs(configured_n_vec):
         "derivative_convention": "test",
         "mass": 0.1,
         "csw": 1.0,
-        "tol": 1e-10,
-        "maxiter": 100,
         "gauge_preprocessing": "test",
         "t_boundary": -1,
         "n_zn": 4,
@@ -210,8 +208,6 @@ def _write_synthetic_qtmd_base(shard_dir, tag, base_idx, legacy=False):
         "volume_norm": 8,
         "mass": 0.1,
         "csw": 1.0,
-        "tol": 1e-10,
-        "maxiter": 100,
         "gauge_preprocessing": "test",
         "t_boundary": -1,
         "n_zn": 4,
@@ -328,6 +324,8 @@ def test_qtmd_finalize_streams_source_independent_canonical(tmp_path):
         assert h5.attrs["loop_convention"] == QTMD_LOOP_CONVENTION
         assert h5.attrs["trace_target"] == QTMD_TRACE_TARGET
         assert "rand_seed" not in h5.attrs
+        assert "tol" not in h5.attrs
+        assert "maxiter" not in h5.attrs
 
 
 def test_qtmd_finalize_rejects_legacy_trace_and_preserves_canonical(tmp_path):

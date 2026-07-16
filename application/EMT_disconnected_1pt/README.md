@@ -888,13 +888,29 @@ bash "$APP/run_build_disconnected_3pt.sh" --configs 0
 ```
 
 EMTc stores loops at absolute lattice time. Before forming the product, the
-builder converts them to source-relative time:
+builder reads the full source position from the C2 file and converts both the
+spatial Fourier origin and time coordinate:
 
 ```text
+L_x0(q,tau_rel) = exp[-2 pi i q.(x0-o)/L]
+                  * L_o(q,(source_t + tau_rel) mod Nt)
 L_rel(tau_rel) = L_abs((source_t + tau_rel) mod Nt)
 ```
 
-which is implemented as `roll(time_axis, -source_t)`.
+New quark and gluon loop files record the global lattice size, Fourier origin,
+phase convention, and absolute-time convention. Analysis rejects old loops
+without this provenance instead of guessing a phase.
+
+Connected pion/proton runs use the same explicit multigrid option:
+
+```bash
+--mg-block 8.8.4.4
+--mg-block '4.4.4.4;4.4.4.4'
+--mg-block none
+```
+
+The shared default is one level `8.8.4.4`. The chosen hierarchy is written to
+the connected C2/C3 attributes.
 
 For one configuration, the output is only an unsubtracted `C2 * loop`
 diagnostic. The physical disconnected building block requires a gauge ensemble
@@ -1048,8 +1064,11 @@ Use a new setup tag for a genuinely new run, or deliberately repair the log and
 base range only after identifying where the transferred shards are stored.
 
 If a sample-log fingerprint changes, do not mix the runs. Check the
-configuration, counter stream, `Z_n`, HP ordering, flow schedule, Dirac
-parameters, gauge preprocessing, momenta, operator schema, and part interval.
+configuration, counter stream, `Z_n`, HP ordering, flow schedule, physical
+Dirac-action parameters (mass and `csw`), gauge preprocessing, momenta,
+operator schema, and part interval. Multigrid blocks, solver tolerance and
+maximum iterations are runtime controls rather than measurement identity, so
+they may differ between resumed base ranges.
 
 If HP256 seems worse than pure noise, first verify that:
 

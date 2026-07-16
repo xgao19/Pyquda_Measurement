@@ -14,6 +14,7 @@ for module_root in (REPOSITORY_ROOT, APPLICATION_ROOT):
         sys.path.insert(0, str(module_root))
 
 from analysis_helper.emt_disconnected_analysis import (
+    SPATIAL_PHASE_CONVENTION,
     read_gluon_loop,
     read_quark_loop,
 )
@@ -87,6 +88,11 @@ def require_files(paths, label):
 
 def read_c2(path, momentum_label, t_separations):
     with h5py.File(path, "r") as h5:
+        if "source_position" not in h5.attrs:
+            raise KeyError(f"{path} is missing attrs/source_position")
+        source_position = np.asarray(h5.attrs["source_position"], dtype=np.int32)
+        if source_position.shape != (4,):
+            raise ValueError(f"{path} has invalid source_position={source_position}")
         identity = f"SS/I/{momentum_label}"
         temporal = f"SS/T/{momentum_label}"
         if identity not in h5 or temporal not in h5:
@@ -95,7 +101,7 @@ def read_c2(path, momentum_label, t_separations):
     t_separations = np.asarray(t_separations, dtype=np.int32)
     if np.any(t_separations < 0) or np.any(t_separations >= c2_t.shape[0]):
         raise ValueError(f"Requested t_separations {t_separations.tolist()} outside C2 length {c2_t.shape[0]}")
-    return c2_t[t_separations], c2_t
+    return c2_t[t_separations], c2_t, source_position
 
 
 def zero_momentum_index(qext):
@@ -191,10 +197,18 @@ qext_list = []
 quark_flow_time_list = []
 gluon_qext_list = []
 gluon_flow_time_list = []
+source_positions = []
 for config_index, (c2_path, quark_path) in enumerate(zip(c2_paths, quark_paths)):
-    c2_tseps, c2_t = read_c2(c2_path, c2_momentum, t_separations)
+    c2_tseps, c2_t, c2_source_position = read_c2(
+        c2_path, c2_momentum, t_separations
+    )
+    if not np.array_equal(c2_source_position, np.asarray(src_pos, dtype=np.int32)):
+        raise ValueError(
+            f"{c2_path} source_position={c2_source_position.tolist()} does not "
+            f"match requested source {src_pos}"
+        )
     quark_loop, source_count, source_bookkeeping, qext, quark_flow_times = read_quark_loop(
-        quark_path, src_pos[3]
+        quark_path, c2_source_position
     )
     c2_selected.append(c2_tseps)
     c2_full.append(c2_t)
@@ -205,9 +219,10 @@ for config_index, (c2_path, quark_path) in enumerate(zip(c2_paths, quark_paths))
     hp_indices.append(source_bookkeeping["hp_index"])
     qext_list.append(qext)
     quark_flow_time_list.append(quark_flow_times)
+    source_positions.append(c2_source_position)
     if args.include_gluon:
         gluon_loop, gluon_qext, gluon_flow_times = read_gluon_loop(
-            gluon_paths[config_index], src_pos[3]
+            gluon_paths[config_index], c2_source_position
         )
         gluon_loops.append(gluon_loop)
         gluon_qext_list.append(gluon_qext)
@@ -284,8 +299,13 @@ with h5py.File(output, "w") as h5:
         h5.attrs["gluon_flow_times"] = gluon_flow_times
     h5.attrs["input_loop_time_convention"] = "absolute_lattice_time"
     h5.attrs["output_loop_time_convention"] = "source_relative_time"
+    h5.attrs["input_spatial_momentum_phase_convention"] = SPATIAL_PHASE_CONVENTION
+    h5.attrs["output_spatial_momentum_phase_origin"] = "hadron_source_position"
+    h5.attrs["source_positions"] = np.asarray(source_positions, dtype=np.int32)
     h5.attrs["source_t"] = int(src_pos[3])
-    h5.attrs["absolute_to_relative_mapping"] = "roll(time_axis,-source_t)"
+    h5.attrs["absolute_to_relative_mapping"] = (
+        "exp(-2pi*i*q.(source-origin)/L)*roll(time_axis,-source_t)"
+    )
     h5.create_dataset("C2", data=c2_selected)
     h5.create_dataset("C2_full_time", data=c2_full)
 

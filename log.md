@@ -747,3 +747,39 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   with maximum true residual `6.30e-16`.  A two-rank, two-GPU smoke covered all
   three workflows: all 84 numerical datasets were bitwise identical and the
   maximum true residual was `2.15e-16`.
+## 2026-07-15: EMT correctness and focused runtime cleanup
+
+- Made proton `CG_GaussSmear=False` a genuine point workflow: source, C2 sink,
+  sequential propagator sink, and sequential-source smearing are all disabled.
+  Added separate source/sink/sequential smearing provenance and `POINT` default
+  tags for this mode.
+- Extracted the calculation-only proton C2 contraction into
+  `proton_utils_vibe_develop.py`; proton EMT and qTMD now call the same kernel.
+- Unified connected pion/proton multigrid selection as the CLI-only
+  `--mg-block` interface, with default `8.8.4.4` and explicit `none` support.
+- Added instance-local backend/dtype/device-or-queue Gamma caches for EMT and
+  standalone ringed contractions.
+- Removed the redundant thin restore before the first inversion after the
+  initial full gauge/MG load. Later inversions still restore the original gauge
+  after any flowed-gauge context.
+- Added strict disconnected-loop Fourier provenance. Analysis now converts an
+  origin-based absolute-time loop to each C2 source using the spatial phase and
+  periodic time roll; old loops without the new provenance are rejected.
+- Classified multigrid hierarchy, solver tolerance and maximum iterations as
+  runtime solver controls rather than measurement identity. Resume/finalize
+  may mix them across completed bases. They are supplied only when the solver
+  is created and are absent from shards, sample-log identity and canonical
+  disconnected files.
+- S8T8 reference/candidate checks at solver tolerance `1e-15` found bitwise
+  identical disconnected EMT, standalone ringed, pion C2/C3, proton C2/C3,
+  and all primitive/derived channels.  The new point-proton path completed a
+  real GPU smoke with all three smearing flags false.  Two-rank checks agreed
+  with single-rank results at relative L2 differences of order `1e-15` or less.
+- On l64 cfg1050 at light mass `-0.049` and tolerance `1e-12`, the same eight
+  counter sources gave bitwise-identical reference/candidate disconnected EMT
+  and standalone ringed files.  Full connected l64 validation is presently
+  memory-blocked independently of this refactor: the existing pion C2 einsum
+  OOMs even on 80-GiB A100s, and skipping C2 then reaches an 80-GiB OOM in the
+  24-field connected fermion flow.  The complete connected numerical gate is
+  therefore supplied by S8T8, while the l64 resource failure is retained in
+  the external validation logs.

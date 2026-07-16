@@ -57,6 +57,7 @@ Disconnected_1pt_qTMD_vibe_develop.py Shared disconnected qTMD/PDF one-point loo
 fermion_bilinear_basis.py       Canonical 16-Gamma ordering and physics-basis transform.
 pion_qTMDWF_pyquda.py           Mature pion qTMDWF reference workflow.
 proton_EMT_vibe_develop.py      Proton flowed EMT connected contractions.
+proton_utils_vibe_develop.py    Shared calculation-only proton C2 kernel.
 proton_qTMD_pyquda.py           Mature proton qTMD/PDF reference workflow.
 tools.py                        Shared MPI/backend utility helpers.
 ```
@@ -317,7 +318,8 @@ For proton EMT:
 
 - The current proton EMT path computes connected U and D insertions.
 - Disconnected diagrams and renormalization/mixing factors are not included.
-- Proton 2pt reuses the mature proton qTMD two-point contraction.
+- Proton EMT and qTMD call the same calculation-only proton two-point kernel;
+  each workflow retains its own file writer and provenance.
 - Proton quark/gluon one-point workflows reuse the shared EMT one-point code.
 
 ## Development Guidelines

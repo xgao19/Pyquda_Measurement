@@ -1,11 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
-if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
-  echo "Usage: $0 --config_num CFG" >&2
+config_num=""
+mg_block="8.8.4.4"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config_num) config_num="${2:-}"; shift 2 ;;
+    --mg-block) mg_block="${2:-}"; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+if [[ ! "$config_num" =~ ^[0-9]+$ || -z "$mg_block" ]]; then
+  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]]" >&2
   exit 2
 fi
-config_num="$2"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 measurement_root="$(cd "$script_dir/../../.." && pwd)"
@@ -46,4 +54,5 @@ echo "  QUDA_RESOURCE_PATH=$QUDA_RESOURCE_PATH"
 
 python -u "$script_dir/Pyquda_EMT_proton_quark_3pt.py" \
   --config_num "$config_num" \
-  --mpi_geometry "$EMT_PROTON_MPI_GEOMETRY"
+  --mpi_geometry "$EMT_PROTON_MPI_GEOMETRY" \
+  --mg-block "$mg_block"

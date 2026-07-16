@@ -7,6 +7,7 @@ from pyquda_utils import core, io
 
 from pyquda_measurement_utils.io_corr import get_emt_proton_2pt_file_tag
 from pyquda_measurement_utils.proton_EMT_vibe_develop import ProtonQuarkEMT
+from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import parse_optional_multigrid_blocks
 from pyquda_measurement_utils.tools import mpi_print
 
 
@@ -18,22 +19,11 @@ def parse_str_list(text):
     return [v for v in text.split(",") if v]
 
 
-def parse_mg_block(default):
-    text = os.environ.get("EMT_DISC_MG_BLOCK", os.environ.get("EMT_PROTON_MG_BLOCK", ""))
-    if not text:
-        return default
-    if text.strip().lower() in {"none", "off", "false", "0"}:
-        return None
-    block = [int(v) for v in text.replace(",", ".").split(".") if v]
-    if len(block) != 4:
-        raise ValueError("EMT_DISC_MG_BLOCK must contain four integers, e.g. 8.8.4.4")
-    return [block]
-
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("EMT_1PT_MPI_GEOMETRY", "1.1.1.1"))
 parser.add_argument("--interpolator", type=str, default=os.environ.get("EMT_DISC_INTERPOLATOR", "5"))
+parser.add_argument("--mg-block", default="8.8.4.4", help="X.Y.Z.T[;...] or none")
 args = parser.parse_args()
 
 conf = args.config_num
@@ -83,6 +73,7 @@ parameters = {
     "flow_epsilon": float(os.environ.get("EMT_1PT_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_1PT_FLOW_STEPS", "1")),
     "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,4)",
+    "multigrid": parse_optional_multigrid_blocks(args.mg_block),
 }
 
 c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
@@ -98,7 +89,7 @@ mass = float(os.environ.get("EMT_DISC_MASS", os.environ.get("EMT_1PT_MASS", "0.2
 csw = float(os.environ.get("EMT_DISC_CSW", os.environ.get("EMT_1PT_CSW", "1.0372")))
 tol = float(os.environ.get("EMT_DISC_TOL", os.environ.get("EMT_1PT_TOL", "1e-10")))
 maxiter = int(os.environ.get("EMT_DISC_MAXITER", os.environ.get("EMT_1PT_MAXITER", "300")))
-multigrid = parse_mg_block([[8, 8, 4, 4]])
+multigrid = parameters["multigrid"]
 
 mpi_print(latt_info, f"disconnected proton 2pt multigrid block: {multigrid}")
 dirac = core.getDirac(latt_info, mass, tol, maxiter, 1.0, csw, csw, multigrid)
@@ -106,7 +97,9 @@ dirac.loadGauge(gauge)
 mpi_print(latt_info, "Disconnected proton 2pt inverter ready.")
 
 quark_emt = ProtonQuarkEMT(parameters)
-prop_fw = quark_emt._make_source_prop(dirac, gauge, src_pos)
+prop_fw = quark_emt._make_source_prop(
+    dirac, gauge, src_pos, restore_original_gauge=False
+)
 quark_emt.contract_proton_2pt(
     latt_info,
     prop_fw,
@@ -127,6 +120,9 @@ quark_emt.contract_proton_2pt(
         "source_interpolator": args.interpolator,
         "sink_interpolator": "all_16_gamma_scan",
         "gaussian_smearing": True,
+        "source_smearing": True,
+        "sink_smearing": True,
+        "sequential_smearing": True,
         "smearing_width": width,
         "source_boost": boost_in,
         "sink_boost": boost_out,

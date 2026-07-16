@@ -818,6 +818,27 @@ The input Python gauge object is unchanged, but omitting this resident-state
 restore makes later inversions use the wrong gauge and can trigger precision
 mismatch failures.
 
+The initial full \code{dirac.loadGauge(U)} is itself the first valid resident
+original-gauge state.  Therefore the first inversion batch does not perform a
+redundant thin reload.  After the first flowed-gauge context, every later batch
+uses \code{thin\_update\_only=True} exactly once before inversion.
+
+Canonical quark and gluon loops are projected with Fourier origin
+$o=(0,0,0,0)$ and retain absolute lattice time.  Their HDF5 provenance records
+the global lattice size, \code{momentum\_phase\_origin}, phase convention, and
+time convention.  Combining a loop with a hadron source $x_0$ uses
+
+\begin{equation}
+ L_{x_0}(\boldsymbol q,\tau)
+ = \exp\!\left[-2\pi i\sum_{j=1}^{3}
+       q_j\frac{x_{0j}-o_j}{L_j}\right]
+   L_o\!\left(\boldsymbol q,(t_0+\tau)\bmod N_t\right).
+\end{equation}
+
+Thus source-relative analysis requires both spatial rephasing and periodic
+time rolling.  Old loops without this provenance are rejected rather than
+silently interpreted with an assumed origin.
+
 The exact quark dataset and attribute names used by downstream scripts are:
 \begin{verbatim}
 gamma_list

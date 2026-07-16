@@ -412,8 +412,6 @@ class DisconnectedQuarkqTMD1pt:
             "volume_norm": Ns3,
             "mass": mass,
             "csw": csw,
-            "tol": tol,
-            "maxiter": maxiter,
             "gauge_preprocessing": self.gauge_preprocessing,
             "t_boundary": latt_info.t_boundary,
             "n_vec": n_vec,

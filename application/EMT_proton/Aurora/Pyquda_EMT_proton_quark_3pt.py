@@ -5,6 +5,7 @@ from pyquda import init
 from pyquda_utils import io
 
 from pyquda_measurement_utils.proton_EMT_vibe_develop import ProtonQuarkEMT
+from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import parse_optional_multigrid_blocks
 from pyquda_measurement_utils.io_corr import (
     get_emt_proton_2pt_file_tag,
     get_emt_proton_quark_3pt_file_tag,
@@ -27,6 +28,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("EMT_PROTON_MPI_GEOMETRY", "1.1.1.2"))
 parser.add_argument("--interpolator", type=str, default=os.environ.get("EMT_PROTON_INTERPOLATOR", "5"))
+parser.add_argument("--mg-block", default="8.8.4.4", help="X.Y.Z.T[;...] or none")
 args = parser.parse_args()
 
 conf = args.config_num
@@ -51,9 +53,14 @@ pol_list = parse_str_list(os.environ.get("EMT_PROTON_POL", "PpUnpol"))
 width = float(os.environ.get("EMT_PROTON_WIDTH", "1.0"))
 boost_in = parse_triplet(os.environ.get("EMT_PROTON_BOOST_IN", "0.0.0"))
 boost_out = parse_triplet(os.environ.get("EMT_PROTON_BOOST_OUT", "0.0.0"))
+gauss_smear = bool(int(os.environ.get("EMT_PROTON_GAUSS_SMEAR", "0")))
+default_sm_tag = (
+    f"1HYP_GSRC_W{width:g}_k0_{args.interpolator}"
+    if gauss_smear else f"1HYP_POINT_{args.interpolator}"
+)
 sm_tag = os.environ.get(
     "EMT_PROTON_SM_TAG",
-    f"1HYP_GSRC_W{width:g}_k0_{args.interpolator}",
+    default_sm_tag,
 )
 
 parameters = {
@@ -61,7 +68,7 @@ parameters = {
     "qext": qext,
     "pf": pf,
     "p_2pt": qext,
-    "CG_GaussSmear": bool(int(os.environ.get("EMT_PROTON_GAUSS_SMEAR", "0"))),
+    "CG_GaussSmear": gauss_smear,
     "pos_boost": boost_in,
     "neg_boost": boost_out,
     "boost_in": boost_in,
@@ -75,6 +82,7 @@ parameters = {
     "flow_epsilon": float(os.environ.get("EMT_PROTON_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_PROTON_FLOW_STEPS", "1")),
     "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,project=-1)",
+    "multigrid": parse_optional_multigrid_blocks(args.mg_block),
 }
 
 c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)

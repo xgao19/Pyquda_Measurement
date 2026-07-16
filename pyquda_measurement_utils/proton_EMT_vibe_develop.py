@@ -105,7 +105,6 @@ connected proton EMT data in disconnected-diagram analyses.
 
 import gc
 import numpy as np
-import os
 from time import perf_counter
 from opt_einsum import contract
 
@@ -120,44 +119,21 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_bw_seq_raw_pyquda
-from pyquda_measurement_utils.io_corr import save_emt_quark_3pt_hdf5
-from pyquda_measurement_utils.proton_qTMD_pyquda import my_gammas, proton_TMD
+from pyquda_measurement_utils.io_corr import (
+    save_emt_quark_3pt_hdf5,
+    save_proton_c2pt_hdf5,
+)
+from pyquda_measurement_utils.proton_utils_vibe_develop import (
+    contract_proton_c2,
+    proton_interpolator_matrix,
+)
 from pyquda_measurement_utils.fermion_bilinear_basis import (
+    GAMMA_LABELS,
     IDENTITY_GAMMA_POSITION,
     basis_attrs,
     symmetric_vector_emt,
 )
 from pyquda_measurement_utils.tools import mpi_print, mpi_timer_print
-
-
-def _parse_mg_block(default):
-    text = os.environ.get("EMT_PROTON_MG_BLOCK")
-    if not text:
-        return default
-    text = text.strip()
-    if text.lower() in {"none", "off", "false", "0"}:
-        return None
-    if any(sep in text for sep in [";", "/", "|"]):
-        block_texts = [part.strip() for part in text.replace("/", ";").replace("|", ";").split(";")]
-    elif "," in text and "." in text:
-        block_texts = [part.strip() for part in text.split(",")]
-    else:
-        block_texts = [text]
-
-    blocks = []
-    for block_text in block_texts:
-        if not block_text:
-            continue
-        block = [int(v) for v in block_text.replace(",", ".").split(".") if v]
-        if len(block) != 4:
-            raise ValueError(
-                "EMT_PROTON_MG_BLOCK blocks must contain four integers, "
-                "e.g. 4.4.4.4 or 4.4.4.4;4.4.2.2"
-            )
-        blocks.append(block)
-    if not blocks:
-        raise ValueError("EMT_PROTON_MG_BLOCK did not contain any multigrid blocks")
-    return blocks
 
 
 class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
@@ -212,7 +188,9 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         cls._wait_sycl_queues(*objects)
         gc.collect()
 
-    def _make_source_prop(self, dirac, U, src_pos):
+    def _make_source_prop(
+        self, dirac, U, src_pos, *, restore_original_gauge=True
+    ):
         latt_info = U.latt_info
         src = source.propagator(latt_info, "point", src_pos)
         if self.CG_GaussSmear:
@@ -220,11 +198,12 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
             src = boosted_smearing(src, w=self.width, boost=self.boost_in)
             mpi_print(latt_info, "proton source smearing ends")
 
-        restore_t0 = perf_counter()
-        dirac.loadGauge(U, thin_update_only=True)
-        mpi_timer_print(
-            latt_info, "proton_emt_source_restore", perf_counter() - restore_t0
-        )
+        if restore_original_gauge:
+            restore_t0 = perf_counter()
+            dirac.loadGauge(U, thin_update_only=True)
+            mpi_timer_print(
+                latt_info, "proton_emt_source_restore", perf_counter() - restore_t0
+            )
         inversion_t0 = perf_counter()
         prop = core.invertPropagator(dirac, src, 1, 0)
         mpi_timer_print(
@@ -238,26 +217,27 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
     ):
         p_2pt_xyz = [[-p[0], -p[1], -p[2]] for p in self.pilist]
         phases_2pt = phase.MomentumPhase(latt_info).getPhases(p_2pt_xyz, src_pos)
-        helper = proton_TMD(
-            {
-                "eta": [0],
-                "b_z": 0,
-                "b_T": 0,
-                "qext": self.qlist,
-                "qext_PDF": self.qlist,
-                "pf": self.pf,
-                "p_2pt": self.pilist,
-                "boost_in": self.boost_in,
-                "boost_out": self.boost_out,
-                "width": self.width,
-                "pol": self.pol_list,
-                "t_insert": self.t_insert,
-                "save_propagators": self.save_propagators,
-            }
+        gamma_matrices = self._gamma_stack_for(prop.data)
+        proton_interpolator = self._cached_backend_matrix(
+            f"proton_interpolator:{interpolator}",
+            proton_interpolator_matrix(interpolator),
+            prop.data,
         )
-        C2 = helper.contract_2pt_TMD(
-            latt_info, prop, phases_2pt, tag, interpolator=interpolator, attrs=attrs
+        C2 = contract_proton_c2(
+            latt_info,
+            prop,
+            phases_2pt,
+            interpolator=interpolator,
+            sink_smearing=self.CG_GaussSmear,
+            smearing_width=self.width,
+            smearing_boost=self.boost_out,
+            gamma_matrices=gamma_matrices,
+            interpolator_matrix=proton_interpolator,
         )
+        if tag is not None and latt_info.mpi_rank == 0:
+            save_proton_c2pt_hdf5(
+                C2, tag, list(GAMMA_LABELS), self.pilist, attrs=attrs
+            )
         return getMPIComm().bcast(C2, root=0)
 
     @classmethod
@@ -277,39 +257,38 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         slice_t = getMPIComm().bcast(slice_t, root=0)
         return np.roll(np.asarray(slice_t), -t0, axis=-1)
 
-    @classmethod
     def get_C3_primitive_bilinears_proton(
-        cls, U_f, gauge_dirac, prop_fw, raw_seq_prop, phases_3pt, t0
+        self, U_f, gauge_dirac, prop_fw, raw_seq_prop, phases_3pt, t0
     ):
         """Compute all local and one-derivative proton insertion bilinears."""
-        gamma_ls = cls._gamma_stack_for(prop_fw.data)
-        G5_local = cls._gamma5_for(prop_fw.data)
+        gamma_ls = self._gamma_stack_for(prop_fw.data)
+        G5_local = self._gamma5_for(prop_fw.data)
         G5_gamma_stack = contract("ai,gib->gab", G5_local, gamma_ls)
 
-        local_fields = cls._raw_seq_gamma_scalar_fields(
+        local_fields = self._raw_seq_gamma_scalar_fields(
             raw_seq_prop, prop_fw, G5_gamma_stack
         )
-        local = cls._project_gamma_scalars_to_qt(local_fields, phases_3pt, t0)
+        local = self._project_gamma_scalars_to_qt(local_fields, phases_3pt, t0)
         del local_fields
         derivative = np.zeros(
             (16, 4, len(phases_3pt), U_f.latt_info.global_size[3]),
             dtype=np.complex128,
         )
         for mu in range(4):
-            D_fw = cls._covdev_sym_prop(gauge_dirac, prop_fw, mu)
-            right_fields = 0.5 * cls._raw_seq_gamma_scalar_fields(
+            D_fw = self._covdev_sym_prop(gauge_dirac, prop_fw, mu)
+            right_fields = 0.5 * self._raw_seq_gamma_scalar_fields(
                 raw_seq_prop, D_fw, G5_gamma_stack
             )
-            derivative[:, mu] += cls._project_gamma_scalars_to_qt(
+            derivative[:, mu] += self._project_gamma_scalars_to_qt(
                 right_fields, phases_3pt, t0
             )
             del D_fw, right_fields
 
-            D_raw_seq = cls._covdev_sym_prop(gauge_dirac, raw_seq_prop, mu)
-            left_fields = -0.5 * cls._raw_seq_gamma_scalar_fields(
+            D_raw_seq = self._covdev_sym_prop(gauge_dirac, raw_seq_prop, mu)
+            left_fields = -0.5 * self._raw_seq_gamma_scalar_fields(
                 D_raw_seq, prop_fw, G5_gamma_stack
             )
-            derivative[:, mu] += cls._project_gamma_scalars_to_qt(
+            derivative[:, mu] += self._project_gamma_scalars_to_qt(
                 left_fields, phases_3pt, t0
             )
             del D_raw_seq, left_fields
@@ -346,7 +325,12 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         prop_fw_flow = None
         raw_seq_prop_flow = None
         try:
-            prop_fw = self._make_source_prop(dirac, U, src_pos)
+            prop_fw = self._make_source_prop(
+                dirac,
+                U,
+                src_pos,
+                restore_original_gauge=source_job.get("restore_source_gauge", True),
+            )
             mass, csw, tol, maxiter = self._connected_invPara
             c2_attrs = {
                 "measurement": "proton_2pt",
@@ -362,6 +346,9 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 "source_interpolator": interpolator,
                 "sink_interpolator": "all_16_gamma_scan",
                 "gaussian_smearing": self.CG_GaussSmear,
+                "source_smearing": self.CG_GaussSmear,
+                "sink_smearing": self.CG_GaussSmear,
+                "sequential_smearing": self.CG_GaussSmear,
                 "smearing_width": self.width,
                 "source_boost": np.asarray(self.boost_in, dtype=np.int32),
                 "sink_boost": np.asarray(self.boost_out, dtype=np.int32),
@@ -398,22 +385,24 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                 for flavor_idx, flavor in enumerate([1, 2]):
                     flavor_name = "U" if flavor == 1 else "D"
                     mpi_print(latt_info, f"create proton sequential source flavor={flavor_name} t_sep={t_sep}")
-                    restore_t0 = perf_counter()
-                    dirac.loadGauge(U, thin_update_only=True)
-                    mpi_timer_print(
-                        latt_info,
-                        "proton_emt_sequential_restore",
-                        perf_counter() - restore_t0,
-                        flavor=flavor_name,
-                        t_sep=t_sep,
-                    )
+                    first_sequential = t_sep == t_separations[0] and flavor_idx == 0
+                    if not first_sequential:
+                        restore_t0 = perf_counter()
+                        dirac.loadGauge(U, thin_update_only=True)
+                        mpi_timer_print(
+                            latt_info,
+                            "proton_emt_sequential_restore",
+                            perf_counter() - restore_t0,
+                            flavor=flavor_name,
+                            t_sep=t_sep,
+                        )
                     inversion_t0 = perf_counter()
                     raw_seq_bw = create_bw_seq_raw_pyquda(
                         dirac,
                         prop_fw.copy(),
                         src_pos,
-                        self.width,
-                        self.boost_out,
+                        self.width if self.CG_GaussSmear else None,
+                        self.boost_out if self.CG_GaussSmear else None,
                         self.pf,
                         t_sep,
                         self.pol_list,
@@ -515,6 +504,9 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                     "qext": np.asarray(self.qlist, dtype=np.int32),
                     "p_2pt": np.asarray(self.pilist, dtype=np.int32),
                     "gaussian_smearing": self.CG_GaussSmear,
+                    "source_smearing": self.CG_GaussSmear,
+                    "sink_smearing": self.CG_GaussSmear,
+                    "sequential_smearing": self.CG_GaussSmear,
                     "smearing_width": self.width,
                     "source_boost": np.asarray(self.boost_in, dtype=np.int32),
                     "sink_boost": np.asarray(self.boost_out, dtype=np.int32),
@@ -580,14 +572,18 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
         latt_info = U.latt_info
         mass, csw, tol, maxiter = invPara
         self._connected_invPara = tuple(invPara)
-        multigrid = _parse_mg_block([[8, 8, 4, 4]])
-        mpi_print(latt_info, f"Proton EMT multigrid block: {multigrid}")
-        dirac = core.getDirac(latt_info, mass, tol, maxiter, 1.0, csw, csw, multigrid)
+        mpi_print(latt_info, f"Proton EMT multigrid block: {self.multigrid_blocks}")
+        dirac = core.getDirac(
+            latt_info, mass, tol, maxiter, 1.0, csw, csw,
+            self.multigrid_blocks,
+        )
         dirac.loadGauge(U)
         mpi_print(latt_info, "Proton EMT inverter ready.")
 
         results = []
         for source_job in source_jobs:
+            source_job = dict(source_job)
+            source_job["restore_source_gauge"] = bool(results)
             src_idx = source_job.get("src_idx", len(results))
             src_pos = source_job["src_pos"]
             source_t0 = perf_counter()

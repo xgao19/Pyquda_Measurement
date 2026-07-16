@@ -318,6 +318,28 @@ def test_connected_emt_shell_wrappers_require_named_configuration():
         assert "--config_num" in result.stderr
 
 
+def test_connected_emt_entrypoints_share_cli_multigrid_default():
+    drivers = [
+        "application/EMT_meson/perlmutter/Pyquda_EMT_quark_3pt.py",
+        "application/EMT_proton/perlmutter/Pyquda_EMT_proton_quark_3pt.py",
+        "application/EMT_proton/Aurora/Pyquda_EMT_proton_quark_3pt.py",
+        "application/EMT_disconnected_1pt/perlmutter/Pyquda_EMT_disconnected_proton_2pt.py",
+    ]
+    for relpath in drivers:
+        arguments = _parser_arguments(relpath)
+        assert _keyword_constant(arguments["--mg-block"], "default") == "8.8.4.4"
+        source = _source(relpath)
+        assert "parse_optional_multigrid_blocks(args.mg_block)" in source
+        assert "EMT_PROTON_MG_BLOCK" not in source
+
+    for relpath in (
+        "pyquda_measurement_utils/pion_EMT_vibe_develop.py",
+        "pyquda_measurement_utils/proton_EMT_vibe_develop.py",
+    ):
+        source = _source(relpath)
+        assert "self.multigrid_blocks" in source
+
+
 def test_disconnected_shell_wrappers_reject_missing_or_unknown_configuration():
     wrappers = [
         "application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh",

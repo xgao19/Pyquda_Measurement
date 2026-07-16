@@ -10,8 +10,8 @@
 #SBATCH -o logs/proton_emt_q3pt.%j.out
 
 set -euo pipefail
-if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
-  echo "Usage: sbatch $0 --config_num CFG" >&2
+if [[ $# -lt 2 ]]; then
+  echo "Usage: sbatch $0 --config_num CFG [--mg-block X.Y.Z.T[;...]]" >&2
   exit 2
 fi
 mkdir -p logs

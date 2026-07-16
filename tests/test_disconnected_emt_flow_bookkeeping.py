@@ -12,6 +12,7 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     _unique_zero_momentum_index,
     emt_tensor_from_derivative_bilinear,
     parse_multigrid_blocks,
+    parse_optional_multigrid_blocks,
     ringed_kinetic_pervec_from_derivative,
     validate_quark_gluon_loop_axes,
 )
@@ -120,12 +121,14 @@ def test_multigrid_block_parser_supports_one_and_two_coarsening_levels():
         [4, 4, 4, 4], [4, 4, 4, 4]
     ]
     assert parse_multigrid_blocks([[8, 8, 4, 4]]) == [[8, 8, 4, 4]]
+    assert parse_optional_multigrid_blocks("none") is None
+    assert parse_optional_multigrid_blocks("8.8.4.4") == [[8, 8, 4, 4]]
     for invalid in ("", "4.4.4", "4.4.x.4", "4.4.0.4"):
         with pytest.raises(ValueError):
             parse_multigrid_blocks(invalid)
 
 
-def test_multigrid_blocks_are_measurement_identity():
+def test_solver_controls_are_absent_from_measurement_attrs():
     common = {
         "config_num": 7,
         "qext": [[0, 0, 0, 0]],
@@ -140,18 +143,21 @@ def test_multigrid_blocks_are_measurement_identity():
 
     class Info:
         t_boundary = -1
+        global_size = [64, 64, 64, 64]
 
     inv = [-0.015, 1.0372, 1e-10, 1000]
     rand = [8, 4, 0]
     attrs_one = one._measurement_attrs(Info(), inv, rand, 7, 0, 8, 64**3)
     attrs_two = two._measurement_attrs(Info(), inv, rand, 7, 0, 8, 64**3)
-    np.testing.assert_array_equal(attrs_one["multigrid_blocks"], [[4, 4, 4, 4]])
-    np.testing.assert_array_equal(
-        attrs_two["multigrid_blocks"], [[4, 4, 4, 4], [4, 4, 4, 4]]
-    )
+    assert "multigrid_blocks" not in attrs_one
+    assert "multigrid_blocks" not in attrs_two
+    assert "tol" not in attrs_one
+    assert "maxiter" not in attrs_one
+    assert "tol" not in attrs_two
+    assert "maxiter" not in attrs_two
     assert "flow_batch_size" not in attrs_one
     assert "flow_batch_size" not in attrs_two
-    assert sample_log_fingerprint(attrs_one) != sample_log_fingerprint(attrs_two)
+    assert sample_log_fingerprint(attrs_one) == sample_log_fingerprint(attrs_two)
 
 
 def test_ringed_kinetic_is_extracted_from_vector_derivative_diagonal():
@@ -459,7 +465,10 @@ def test_plain_noise_batches_across_bases_and_logs_only_successful_batches(
         ),
     )
 
-    def fake_measure(_gauge, _dirac, records, _phases, timers=None):
+    def fake_measure(
+        _gauge, _dirac, records, _phases, timers=None,
+        restore_original_gauge=True,
+    ):
         bases = [record[1] for record in records]
         batches.append(bases)
         if bases == [2, 3]:
@@ -475,7 +484,7 @@ def test_plain_noise_batches_across_bases_and_logs_only_successful_batches(
     monkeypatch.setattr(
         emt_module,
         "append_completed_base",
-        lambda _log, _tag, _attrs, base: completed.append(base),
+        lambda _log, _tag, _attrs, base, **_kwargs: completed.append(base),
     )
     attrs = {
         "config_num": 3,
@@ -516,7 +525,10 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
         ),
     )
 
-    def fake_measure(_gauge, _dirac, records, _phases, timers=None):
+    def fake_measure(
+        _gauge, _dirac, records, _phases, timers=None,
+        restore_original_gauge=True,
+    ):
         records = list(records)
         batches.append([(record[1], record[2]) for record in records])
         return zero_batch_output(len(records))
@@ -528,7 +540,7 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         emt_module, "append_completed_base",
-        lambda _log, _tag, _attrs, base: completed.append(base),
+        lambda _log, _tag, _attrs, base, **_kwargs: completed.append(base),
     )
     attrs = {
         "config_num": 4,
@@ -601,4 +613,4 @@ def test_source_loop_uses_one_full_mg_setup_then_thin_restores(tmp_path, monkeyp
         base_start=0,
         base_stop=2,
     )
-    assert fake_dirac.load_calls == [False, True, True]
+    assert fake_dirac.load_calls == [False, True]
