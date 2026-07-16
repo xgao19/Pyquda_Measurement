@@ -9,7 +9,9 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedQuark1pt,
     parse_multigrid_blocks,
 )
-from pyquda_measurement_utils.disconnected_shards import disconnected_sample_log_path
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
+    disconnected_sample_log_path,
+)
 from pyquda_measurement_utils.io_corr import (
     get_emt_quark_loop_file_tag,
 )

@@ -1,89 +1,78 @@
-# Standalone flowed-quark ringed normalization
+# Standalone flowed-quark ringed kinetic measurement
 
-The standalone workflow measures
-
-```text
-K(t_f) = <bar chi(t_f) overleftrightarrow{Dslash} chi(t_f)>
-```
-
-with full-volume counter-based `Z4` sources. It is useful for dedicated
-high-statistics studies and optional point spin-color dilution. `config_num` is
-required; the stream salt is stored as `noise_stream`.
-
-## Checkpoint model
-
-Standalone ringed now uses exactly the same base/HP-part infrastructure as EMT
-and disconnected qTMD. A part contains a contiguous HP interval from one base,
-raw `kinetic_pervec`, and global source/base/HP/spin/color bookkeeping. Rank 0
-writes atomically. Only after all parts close does it append one exact base line
-to a fingerprinted text log under `sample_log_disconnected/`. Resume reads only
-this log and does not require transferred HDF5 files to remain locally. There
-is no JSON completion marker or `.block*.h5` compatibility path.
-
-Point spin-color dilution costs 12 solves per HP pattern. A part boundary never
-splits those 12 projectors. The finalized trace multiplies the raw channel
-average by `spin_color_trace_factor=12`.
-
-## Flow batching and resident gauges
-
-The production API accepts `flow_batch_size`, and the platform drivers expose
-it as `--flow-batch-size`. For a batch of (B) sources, inversions remain
-sequential while QUDA flows
+The standalone workflow measures the per-configuration kinetic trace
 
 ```text
-[xi_1, eta_1, ..., xi_B, eta_B],  eta_b = D^-1 xi_b
+K_r(t_f,tau) = 1 / Vs * sum_mu
+               xi_r^dag gamma_mu (Dplus_mu-Dminus_mu) eta_r,
+eta_r = D^-1 xi_r.
 ```
 
-in one double-precision call. Each batch restores the unchanged inversion
-gauge once with a thin multigrid update. At each output flow time all sources
-share one loaded flowed-gauge context for the eight forward/backward
-derivatives. Plain undiluted noise may batch across bases; hierarchical
-probing and point spin-color dilution batch only within one base and shard
-part. In all cases, source order and complete-base sample-log semantics remain
-unchanged.
+It uses full-volume, global-coordinate counter-based `Z4` noise. Plain noise,
+4D HP16, and 4D HP256 are supported. Time and spin-color dilution are not part
+of this workflow.
 
-`flow_batch_size=1` is the conservative default. Larger batches can improve
-throughput but scale device memory with the number of flowed fermion fields.
-There is no automatic retry after OOM. Because batching changes only execution
-scheduling, it is intentionally absent from HDF5 attrs and sample-log
-fingerprints.
+## Relation to disconnected EMT
 
-On the cfg1050 light-quark \(64^4\) benchmark with 16 A100 GPUs, the warmed
-median end-to-end source costs for `B=1,2,4,8` were respectively 5.31, 4.32,
-3.88, and 3.64 seconds, with measured device-memory use of 26.6, 28.7, 34.0,
-and 44.8 GiB/GPU. The measured 80-GB starting point is therefore `B=8`; the
-34.0-GiB `B=4` result is a reasonable 40-GB starting point subject to a local
-smoke test. The default remains `B=1` because these limits are lattice-, MG-,
-and build-dependent.
+`RingedQuark1pt` inherits the production runner from
+`EMTDisconnectedQuark1pt`. The shared runner owns counter-noise generation,
+base/HP-part scheduling, inversions, source batching, double-precision fermion
+flow, one flowed-gauge context per flow time, sample-log resume, and atomic
+shard writes.
 
-## Finalization and ensemble analysis
+The contraction remains independent and kinetic-only. It evaluates four
+vector-diagonal covariant derivatives directly and never constructs the 16
+local or `16x4` derivative EMT primitive arrays. For identical sources and
+parameters it obeys
 
-Measurement jobs write shards only. Transfer the parts, then publish one
-configuration at the destination after all bases are available:
+```text
+K_r = -2 / Vs * sum_mu L_D[gamma_mu,mu](q=0).
+```
+
+This equality is both a convention statement and the primary numerical
+cross-check against `EMTc/derived/ringed`.
+
+## Resume and batching
+
+Each complete stochastic base is recorded in the shared fingerprinted text
+sample log. Resume trusts the log and does not require already transferred
+HDF5 parts to remain on the production filesystem. HP parts are checkpoints;
+only a complete HP base is an estimator.
+
+`--flow-batch-size B` controls how many `[xi,D^-1 xi]` pairs are passed to one
+QUDA fermion-flow call. The default is one. It is a performance-only choice and
+does not enter physics provenance or the sample-log fingerprint. Increase it
+only after checking GPU memory; MPI jobs do not automatically recover from
+OOM.
+
+Detailed restore/inversion/flow/contraction/write timers are disabled by
+default. Set `PYQUDA_MEASUREMENT_TIMERS=1` to print them.
+
+## Finalization and schema
+
+Finalize complete shards with
 
 ```bash
 python application/flowed_quark_ringed_norm/finalize_ringed_shards.py \
-  --shard-dir <dir> --canonical-tag <tag-without-.h5> --n-base-noise <N>
+  --shard-dir <dir> \
+  --canonical-tag <tag-without-.h5> \
+  --n-base-noise <N>
 ```
 
-The canonical file contains `flow_times`, `raw/kinetic_pervec`, source
-bookkeeping, and `avg/kinetic_spacetime`. It deliberately contains no ringed
-factors and records `ringed_factors_stored=False`.
-
-The nonlinear factor must be formed after an equal-weight configuration
-average:
+The canonical file contains only
 
 ```text
-Z_bilinear(t_f) = -2 Nc / ((4 pi)^2 t_f^2 <K(t_f)>_cfg)
-Z_field_sqrt(t_f) = sqrt(Z_bilinear(t_f))
+flow_times
+raw/kinetic_pervec
+raw/source_index
+raw/base_noise_index
+raw/hp_index
+avg/kinetic_spacetime
 ```
 
-Use explicit inputs and output:
+It stores no ringed factor. Any nonlinear normalization must be constructed in
+downstream ensemble analysis after averaging `K` over gauge configurations;
+never average configuration-local `1/K` values.
 
-```bash
-python application/flowed_quark_ringed_norm/analyze_ringed_ensemble.py \
-  --input cfg1.h5 --input cfg2.h5 --output ringed_ensemble.h5
-```
-
-Never average configuration-local `1/K`. The `t_f=0` factor is undefined and
-is stored as NaN in the ensemble result.
+The removed spin-color-diluted schema, factor datasets, analyzer, and former
+`.block*.h5` workflow are unsupported and are not migrated.

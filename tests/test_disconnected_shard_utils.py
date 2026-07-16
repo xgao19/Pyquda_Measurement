@@ -1,3 +1,5 @@
+"""Tests for shared disconnected noise, shard, and sample-log utilities."""
+
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
@@ -5,7 +7,7 @@ import h5py
 import numpy as np
 import pytest
 
-import pyquda_measurement_utils.disconnected_shards as shard_module
+import pyquda_measurement_utils.Disconnected_utils_vibe_develop as shard_module
 
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     emt_tensor_from_derivative_bilinear,
@@ -19,7 +21,7 @@ from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
     QTMD_TRACE_TARGET,
     finalize_disconnected_qtmd_1pt_shards,
 )
-from pyquda_measurement_utils.disconnected_shards import (
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     SHARD_SCHEMA,
     append_completed_base,
     base_part_ranges,

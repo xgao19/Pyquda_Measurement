@@ -104,14 +104,14 @@ The practical differences are summarized below.
 | resolved variables | flow time, with absolute time retained in raw data and averaged for `K` | Gamma, derivative direction, momentum, flow time, and absolute insertion time |
 | contraction per flow time | four vector-diagonal derivative terms summed directly | 16 local plus `16x4` derivative channels; `Tmunu` and `K` are derived from them |
 | inversion, flow, and derivative count | one inversion and one common flow per source; four derivative directions | the same counts per source; extra work is Gamma contraction, momentum projection, and I/O |
-| spin-color dilution | optional point spin-color dilution with 12 exact channels | not enabled in the current EMT production workflow |
+| spin-color dilution | not used | not used |
 | canonical output | kinetic-only `FlowedQuarkRinged` file | full primitive `EMTc` file with averaged `Tmunu` and `derived/ringed` kinetic data |
 | typical use | dedicated high-statistics normalization study | reuse one quark loop for several hadron source times and study EMT or other bilinears |
 
 The EMT file is therefore much larger. Its 64 derivative channels dominate
 the storage, while the embedded kinetic data are a small derived view. The
 standalone calculation is preferable when only `K` is needed, particularly
-for dedicated high statistics or point spin-color dilution. The EMT workflow
+for dedicated high statistics. The EMT workflow
 is preferable when the inversions should also support `Tmunu`, axial
 one-derivative operators, tensor currents, or later three-point analyses.
 
@@ -132,6 +132,12 @@ never average configuration- or block-local values of 1/K
 This EMT benchmark still compares convergence using the embedded `K`, but it
 does not publish a ringed factor and does not turn a one-gauge stochastic test
 into a normalization measurement.
+
+The current standalone implementation is a kinetic-only subclass of the EMT
+shared production runner. It shares noise, base/HP scheduling, inversions,
+fermion flow, resume, and shard I/O with EMT, while its independent contraction
+computes only the four vector-diagonal terms and never allocates the full EMT
+primitive basis.
 
 ## Physics Targets
 
@@ -952,10 +958,8 @@ pyquda_measurement_utils/Disconnected_1pt_EMT_vibe_develop.py
   Flowed quark contraction, shard production, and EMTc finalizer.
 
 pyquda_measurement_utils/Disconnected_utils_vibe_develop.py
-  Counter noise, HP sign patterns, and shared disconnected utilities.
-
-pyquda_measurement_utils/disconnected_shards.py
-  Base/HP-part paths, atomic writes, sample log, and finalizer validation.
+  Counter noise, HP sign patterns, base/HP-part paths, atomic shard writes,
+  sample-log resume, and streaming finalizer validation.
 
 pyquda_measurement_utils/fermion_bilinear_basis.py
   Shared 16-Gamma basis and derived-operator helpers.

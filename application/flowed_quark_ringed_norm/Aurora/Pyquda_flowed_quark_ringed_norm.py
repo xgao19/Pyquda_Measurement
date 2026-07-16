@@ -3,7 +3,9 @@ import os
 
 from pyquda import init
 from pyquda_utils import io
-from pyquda_measurement_utils.disconnected_shards import disconnected_sample_log_path
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
+    disconnected_sample_log_path,
+)
 
 
 def parse_triplet(text):
@@ -59,19 +61,11 @@ parameters = {
     "noise_scheme": os.environ.get("FLOWED_RINGED_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("FLOWED_RINGED_HP_NUM_VECTORS", "1")),
     "hp_ordering": os.environ.get("FLOWED_RINGED_HP_ORDERING", "global_xyzt_gray_projected_to_evenodd"),
-    "spin_color_dilution": os.environ.get("FLOWED_RINGED_SPIN_COLOR_DILUTION", "none"),
-    "Nc": int(os.environ.get("FLOWED_RINGED_NC", "3")),
     "multigrid": parse_mg_block(os.environ.get("FLOWED_RINGED_MG_BLOCK", "8.8.4.4")),
     "gauge_preprocessing": gauge_preprocessing,
     "flavor_convention": os.environ.get(
         "FLOWED_RINGED_FLAVOR_CONVENTION",
         "single_flavor_trace_for_this_dirac_operator",
-    ),
-    "block_interval_solves": int(os.environ.get("FLOWED_RINGED_BLOCK_INTERVAL_SOLVES", "64")),
-    "base_start": int(os.environ.get("FLOWED_RINGED_BASE_START", "0")),
-    "base_stop": int(os.environ.get("FLOWED_RINGED_BASE_STOP", os.environ.get("FLOWED_RINGED_N_VEC", "1"))),
-    "shard_dir": os.environ.get(
-        "FLOWED_RINGED_SHARD_DIR", os.path.join(data_dir, "FlowedQuarkRinged", "shards")
     ),
 }
 
@@ -83,7 +77,7 @@ init(
     resource_path=os.environ.get("QUDA_RESOURCE_PATH", ".cache"),
 )
 
-from pyquda_measurement_utils.flowed_quark_ringed_norm import FlowedQuarkRingedNorm  # noqa: E402
+from pyquda_measurement_utils.flowed_quark_ringed_norm import RingedQuark1pt  # noqa: E402
 from pyquda_measurement_utils.io_corr import get_flowed_quark_ringed_norm_file_tag  # noqa: E402
 from pyquda_measurement_utils.tools import mpi_print  # noqa: E402
 
@@ -91,6 +85,12 @@ from pyquda_measurement_utils.tools import mpi_print  # noqa: E402
 tag = get_flowed_quark_ringed_norm_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
 output_tag = os.environ.get("FLOWED_RINGED_OUT", tag)
 parameters["sample_log_file"] = disconnected_sample_log_path(data_dir, output_tag)
+shard_dir = os.environ.get(
+    "FLOWED_RINGED_SHARD_DIR", os.path.join(data_dir, "FlowedQuarkRinged", "shards")
+)
+base_start = int(os.environ.get("FLOWED_RINGED_BASE_START", "0"))
+base_stop = int(os.environ.get("FLOWED_RINGED_BASE_STOP", os.environ.get("FLOWED_RINGED_N_VEC", "1")))
+block_interval_solves = int(os.environ.get("FLOWED_RINGED_BLOCK_INTERVAL_SOLVES", "64"))
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 gauge.hypSmear(1, 0.75, 0.6, 0.3, hyp_project)
@@ -120,16 +120,20 @@ mpi_print(latt_info, f"--flow_epsilon {parameters['flow_epsilon']}")
 mpi_print(latt_info, f"--flow_steps {parameters['flow_steps']}")
 mpi_print(latt_info, f"--noise_scheme {parameters['noise_scheme']}")
 mpi_print(latt_info, f"--hp_num_vectors {parameters['hp_num_vectors']}")
-mpi_print(latt_info, f"--spin_color_dilution {parameters['spin_color_dilution']}")
-mpi_print(latt_info, f"--block_interval_solves {parameters['block_interval_solves']}")
+mpi_print(latt_info, f"--block_interval_solves {block_interval_solves}")
 mpi_print(latt_info, f"--gauge_preprocessing {gauge_preprocessing}")
 mpi_print(latt_info, f"--flow_batch_size {args.flow_batch_size}")
 
-ringed_norm = FlowedQuarkRingedNorm(parameters)
-ringed_norm.flowed_kinetic_norm(
+ringed_norm = RingedQuark1pt(parameters)
+ringed_norm.measure(
     gauge,
     invPara,
     randPara,
     tag=output_tag,
+    shard_dir=shard_dir,
+    sample_log_file=parameters["sample_log_file"],
+    base_start=base_start,
+    base_stop=base_stop,
+    block_interval_solves=block_interval_solves,
     flow_batch_size=args.flow_batch_size,
 )

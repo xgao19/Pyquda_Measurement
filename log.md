@@ -703,3 +703,47 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   forward/sequential flow exhausted an 80-GB GPU in both the reference and
   optimized pion paths. This is an independent connected-memory limitation;
   S8T8 remains the numerical validation for this change.
+
+## 2026-07-15: Share the EMT runner with kinetic-only standalone ringed
+
+- Refactored `EMTDisconnectedQuark1pt` so counter noise, base/HP-part
+  scheduling, inversion, batched fermion flow, flowed-gauge contexts, sample
+  logs, and shard writes are inherited production infrastructure.
+- Replaced the standalone implementation with `RingedQuark1pt`, which emits
+  only the direct four-vector-diagonal kinetic contraction and never allocates
+  the full 16-local/64-derivative EMT primitive output.
+- Removed standalone spin-color dilution, stored/computed ringed factors, the
+  ensemble analyzer, and the old public class/function APIs. The canonical
+  file now contains only kinetic data and source/base/HP bookkeeping.
+- Detailed production timers remain available with
+  `PYQUDA_MEASUREMENT_TIMERS=1` but are disabled by default.
+- The S8T8 reference/candidate matrix covered full EMT and kinetic-only
+  standalone pure, HP16, and HP256 measurements through batch sizes up to
+  eight, plus pure/HP16 two-rank checks. Full EMT was bitwise identical; the
+  largest standalone/embedded-ringed difference was `8.92e-16`, and the
+  largest recorded true residual was `2.54e-16`.
+- A 16-rank cfg1050 light-quark l64 validation on four 80-GiB A100 nodes then
+  passed full EMT pure/HP16 at `B=8` and standalone pure `B=1/8` plus HP16
+  `B=8`. Full EMT remained bitwise identical; standalone maximum absolute and
+  relative-L2 differences were `8.88e-16` and `5.23e-17`, and the maximum true
+  residual was `9.85e-13` at solver tolerance `1e-12`.
+- Standalone warmed costs were statistically unchanged by the refactor:
+  reference/candidate values were `3.586/3.573 s/source` for pure `B=1`,
+  `2.109/2.120 s/source` for pure `B=8`, and `2.053/2.063 s/source` for HP16
+  `B=8`. The sampled B=8 peak was `60705 MiB/GPU` on 80-GiB A100s. An otherwise
+  identical 40-GiB run failed in `performGFlowQuda` after all inversions, so
+  B=8 is not safe for this l64/two-level-MG setup on 40-GiB nodes.
+# 2026-07-15: consolidate disconnected shard utilities
+
+- Merged the base/HP-part shard, atomic HDF5, sample-log, and finalizer
+  validation helpers into `Disconnected_utils_vibe_develop.py` alongside the
+  counter-noise and HP bookkeeping they consume.
+- Removed the old `disconnected_shards.py` module and updated EMT, qTMD,
+  standalone ringed, application entrypoints, and tests to use the consolidated
+  utility API without an import compatibility layer.
+- S8T8 reference/candidate validation used solver tolerance `1e-15`.  The
+  single-rank matrix covered EMT/ringed pure and HP16 plus GI-PDF qTMD: all
+  127 numerical datasets were bitwise identical across 42 solves per runtime,
+  with maximum true residual `6.30e-16`.  A two-rank, two-GPU smoke covered all
+  three workflows: all 84 numerical datasets were bitwise identical and the
+  maximum true residual was `2.15e-16`.

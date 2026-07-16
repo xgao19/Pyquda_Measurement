@@ -44,7 +44,7 @@ def mpi_print(latt_info, message):
 
 
 def timing_enabled():
-    value = os.environ.get("PYQUDA_MEASUREMENT_TIMERS", "1").strip().lower()
+    value = os.environ.get("PYQUDA_MEASUREMENT_TIMERS", "0").strip().lower()
     return value not in {"0", "false", "off", "no"}
 
 

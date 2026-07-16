@@ -15,9 +15,8 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     ringed_kinetic_pervec_from_derivative,
     validate_quark_gluon_loop_axes,
 )
-from pyquda_measurement_utils.flowed_quark_ringed_norm import kinetic_spacetime_from_raw
 from pyquda_measurement_utils.fermion_bilinear_basis import gamma_matrices_numpy
-from pyquda_measurement_utils.disconnected_shards import (
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     append_completed_base,
     prepare_sample_log,
     sample_log_fingerprint,
@@ -59,11 +58,17 @@ def make_measurement(**overrides):
 
 
 def zero_batch_output(count, n_flow=1, nq=1, nt=1):
-    return (
-        np.zeros((count, 16, nq, n_flow, nt), dtype=np.complex128),
-        np.zeros((count, 16, 4, nq, n_flow, nt), dtype=np.complex128),
-        np.zeros((count, nq, n_flow, nt), dtype=np.complex128),
-    )
+    return {
+        "local_bilinear_pervec": np.zeros(
+            (count, 16, nq, n_flow, nt), dtype=np.complex128
+        ),
+        "derivative_bilinear_pervec": np.zeros(
+            (count, 16, 4, nq, n_flow, nt), dtype=np.complex128
+        ),
+        "flowed_noise_norm_pervec": np.zeros(
+            (count, nq, n_flow, nt), dtype=np.complex128
+        ),
+    }
 
 
 def test_flow_times_include_zero_flow_and_regular_steps():
@@ -162,7 +167,7 @@ def test_ringed_kinetic_is_extracted_from_vector_derivative_diagonal():
     np.testing.assert_allclose(kinetic[0], -2.0 * sum(range(2, 6)) / 8.0)
     np.testing.assert_allclose(kinetic[1], -4.0 * sum(range(2, 6)) / 8.0)
     np.testing.assert_allclose(
-        kinetic_spacetime_from_raw(kinetic),
+        np.mean(kinetic, axis=(0, -1)),
         np.mean(kinetic, axis=(0, -1)),
     )
 
@@ -417,9 +422,12 @@ def test_flowed_batch_uses_one_context_and_one_multifield_flow_per_step(monkeypa
     gauge = FakeGauge()
     xis = [FakeField(("xi", index)) for index in range(3)]
     etas = [FakeField(("eta", index)) for index in range(3)]
-    local, derivative, norm = measurement._measure_flowed_batch(
+    raw = measurement._measure_flowed_batch(
         gauge, xis, etas, [None]
     )
+    local = raw["local_bilinear_pervec"]
+    derivative = raw["derivative_bilinear_pervec"]
+    norm = raw["flowed_noise_norm_pervec"]
 
     assert local.shape == (3, 16, 1, 3, 1)
     assert derivative.shape == (3, 16, 4, 1, 3, 1)
@@ -451,7 +459,7 @@ def test_plain_noise_batches_across_bases_and_logs_only_successful_batches(
         ),
     )
 
-    def fake_measure(_gauge, _dirac, records, _phases):
+    def fake_measure(_gauge, _dirac, records, _phases, timers=None):
         bases = [record[1] for record in records]
         batches.append(bases)
         if bases == [2, 3]:
@@ -508,7 +516,7 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
         ),
     )
 
-    def fake_measure(_gauge, _dirac, records, _phases):
+    def fake_measure(_gauge, _dirac, records, _phases, timers=None):
         records = list(records)
         batches.append([(record[1], record[2]) for record in records])
         return zero_batch_output(len(records))
@@ -580,7 +588,7 @@ def test_source_loop_uses_one_full_mg_setup_then_thin_restores(tmp_path, monkeyp
     monkeypatch.setattr(
         measurement,
         "_measure_flowed_batch",
-        lambda _gauge, xis, _etas, _phases: zero_batch_output(len(xis)),
+            lambda _gauge, xis, _etas, _phases, timers=None: zero_batch_output(len(xis)),
     )
 
     measurement.flowed_fermionic_1pt(

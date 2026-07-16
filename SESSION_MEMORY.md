@@ -181,9 +181,7 @@ python tests/run_smoke_tests.py
 - Standalone ringed, EMT, and qTMD resume only from a fingerprinted base-level
   text sample log; production must not require local shards to remain after a
   base is logged. Finalizers validate parts once while merging at the destination.
-- Point spin-color dilution has 12 channels and a shard part must never split
-  one HP pattern across those channels.  The finalized kinetic observable uses
-  `spin_color_trace_factor=12`; a plain channel average is wrong.
-- Per-configuration canonical files store kinetic data only.  Average `K`
-  equally across configurations before evaluating the nonlinear ringed factors;
-  never average per-configuration `1/K`.
+- Standalone ringed uses `RingedQuark1pt`, a kinetic-only subclass of the EMT
+  shared runner. It supports full-volume plain/HP counter noise but no
+  spin-color dilution or stored ringed factors. Average `K` over configurations
+  before any nonlinear normalization; never average per-configuration `1/K`.

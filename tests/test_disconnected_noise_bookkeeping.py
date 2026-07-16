@@ -4,7 +4,6 @@ import pytest
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     VALID_HP_ORDERINGS,
     apply_hierarchical_probe,
-    apply_spin_color_point_dilution,
     ceil_log2,
     counter_zn_phase_indices,
     effective_n_inversions,
@@ -12,10 +11,8 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     is_power_of_two,
     iter_noise_base_hp_interval,
     normalize_noise_scheme,
-    normalize_spin_color_dilution,
     part_source_bookkeeping,
     source_bookkeeping_arrays,
-    spin_color_dilution_factor,
     validate_hierarchical_probing_options,
 )
 
@@ -74,9 +71,6 @@ def _hp_displacement_correlation(latt_info, hp_count, ordering, mu, distance):
 def test_noise_scheme_and_hp_validation():
     assert normalize_noise_scheme(" ZN ") == "zn"
     assert normalize_noise_scheme("Hierarchical_Probing") == "hierarchical_probing"
-    assert normalize_spin_color_dilution(" Point ") == "point"
-    assert spin_color_dilution_factor("none") == 1
-    assert spin_color_dilution_factor("point") == 12
     assert is_power_of_two(1)
     assert is_power_of_two(8)
     assert not is_power_of_two(0)
@@ -86,14 +80,6 @@ def test_noise_scheme_and_hp_validation():
 
     for ordering in VALID_HP_ORDERINGS:
         validate_hierarchical_probing_options(4, ordering)
-
-    try:
-        normalize_spin_color_dilution("spin")
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("invalid spin-color dilution mode should fail")
-
 
 def test_counter_z4_is_deterministic_and_uses_all_counter_fields():
     latt_info = TinyLatticeInfo()
@@ -145,17 +131,11 @@ def test_noise_iterator_requires_counter_configuration():
         ))
 
 
-def test_direct_part_bookkeeping_plain_hp_and_point_dilution():
+def test_direct_part_bookkeeping_plain_and_hp():
     plain = part_source_bookkeeping(3, 2, 5, 8)
     np.testing.assert_array_equal(plain["source_index"], [26, 27, 28])
     np.testing.assert_array_equal(plain["base_noise_index"], [3, 3, 3])
     np.testing.assert_array_equal(plain["hp_index"], [2, 3, 4])
-
-    point = part_source_bookkeeping(1, 1, 2, 4, "point")
-    np.testing.assert_array_equal(point["source_index"], np.arange(60, 72))
-    np.testing.assert_array_equal(point["spin_index"], np.repeat(np.arange(4), 3))
-    np.testing.assert_array_equal(point["color_index"], np.tile(np.arange(3), 4))
-
 
 def test_hierarchical_probes_reuse_one_counter_base_source():
     latt_info = TinyLatticeInfo()
@@ -172,16 +152,11 @@ def test_hierarchical_probes_reuse_one_counter_base_source():
 def test_effective_inversions_and_source_bookkeeping_arrays():
     assert effective_n_inversions(3, "zn", 8) == 3
     assert effective_n_inversions(3, "hierarchical_probing", 8) == 24
-    assert effective_n_inversions(3, "zn", 8, "point") == 36
-    assert effective_n_inversions(3, "hierarchical_probing", 8, "point") == 288
 
     bookkeeping = source_bookkeeping_arrays(4)
     np.testing.assert_array_equal(bookkeeping["source_index"], np.arange(4, dtype=np.int32))
     np.testing.assert_array_equal(bookkeeping["base_noise_index"], np.zeros(4, dtype=np.int32))
     np.testing.assert_array_equal(bookkeeping["hp_index"], np.zeros(4, dtype=np.int32))
-    sc_bookkeeping = source_bookkeeping_arrays(4, include_spin_color=True)
-    np.testing.assert_array_equal(sc_bookkeeping["spin_index"], -np.ones(4, dtype=np.int32))
-    np.testing.assert_array_equal(sc_bookkeeping["color_index"], -np.ones(4, dtype=np.int32))
 
 
 def test_hierarchical_probe_patterns_are_rademacher():
@@ -236,26 +211,3 @@ def test_interleaved_xyz_leaves_all_temporal_displacements_uncancelled(hp_count)
         assert _hp_displacement_correlation(
             latt_info, hp_count, ordering, 3, distance
         ) == pytest.approx(1.0, abs=1e-15)
-
-
-def test_spin_color_point_dilution_keeps_one_channel():
-    data = np.ones((2, 2, 2, 2, 4, 3), dtype=np.complex128)
-    diluted = apply_spin_color_point_dilution(FakeFermion(data), spin_idx=2, color_idx=1)
-
-    mask = np.zeros_like(data, dtype=bool)
-    mask[..., 2, 1] = True
-    assert np.all(diluted.data[mask] == 1)
-    assert np.all(diluted.data[~mask] == 0)
-
-
-def test_hp_pattern_is_site_only_before_spin_color_point_dilution():
-    latt_info = TinyLatticeInfo()
-    data = np.ones((2, 2, 2, 2, 4, 3), dtype=np.complex128)
-    hp_source = apply_hierarchical_probe(FakeFermion(data, latt_info), 1, "interleaved_xyzt_binary_projected_to_evenodd")
-    diluted = apply_spin_color_point_dilution(hp_source, spin_idx=1, color_idx=2)
-    pattern = hierarchical_probe_pattern(latt_info, 1, "interleaved_xyzt_binary_projected_to_evenodd")
-
-    np.testing.assert_allclose(diluted.data[..., 1, 2], pattern)
-    assert np.count_nonzero(diluted.data[..., :1, :]) == 0
-    assert np.count_nonzero(diluted.data[..., 2:, :]) == 0
-    assert np.count_nonzero(diluted.data[..., 1, :2]) == 0

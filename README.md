@@ -296,12 +296,15 @@ For quark/gluon one-point data:
 - EMT-derived ringed kinetic data live under `derived/ringed` in the same EMTc
   file, so one atomic rename publishes the loop and kinetic data together.
 - The standalone `application/flowed_quark_ringed_norm` workflow remains
-  available for dedicated high-statistics and dilution runs.  It uses the same
-  base/HP-part shards, base-level sample log, and explicit finalization as
+  available for dedicated kinetic-only high-statistics runs. Its
+  `RingedQuark1pt` implementation inherits the EMT production runner but uses
+  an independent four-vector-diagonal contraction, so it does not allocate the
+  full EMT primitive basis. It uses the same base/HP-part shards, base-level
+  sample log, and explicit finalization as
   EMT/qTMD.  Production resume trusts the log and does not probe shard files,
-  so completed parts may be moved before the remaining bases run. Final ringed factors are
-  computed from the ensemble-averaged kinetic
-  expectation value, not by averaging per-configuration inverse factors.
+  so completed parts may be moved before the remaining bases run. Final ringed
+  factors are computed from the ensemble-averaged kinetic expectation value,
+  not by averaging per-configuration inverse factors.
 - Production quark 1pt wrappers default to base/HP interval shards.  Completed
   bases are recorded as exact lines in a lightweight text log. An explicit
   destination-side streaming finalizer checks parts while merging and publishes

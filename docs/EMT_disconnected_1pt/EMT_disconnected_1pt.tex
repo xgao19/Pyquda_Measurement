@@ -419,12 +419,13 @@ factor \(Z_{\mathrm{ring}}\), because the square roots from \(\chi\) and
 \(\bar\chi\) multiply to this single bilinear factor.  The \(\Tf=0\) output step
 is kept as an unflowed diagnostic and must be excluded from Eq.~\eqref{eq:ringed_z_single_flavor}.
 The standalone \code{application/flowed\_quark\_ringed\_norm} workflow remains
-available for dedicated high-statistics and spin--color-diluted calculations.
-It uses the same base/HP-part files and fingerprinted base-level text sample
-log as EMT.  Production resume trusts this log without probing HDF5, so a
-logged base may be transferred immediately.  Finalization is performed where
-all parts are collected and checks each part once while streaming the canonical
-file.
+available for dedicated kinetic-only high-statistics calculations.  Its
+\code{RingedQuark1pt} class inherits the EMT counter-noise, base/HP scheduling,
+inversion, fermion-flow, sample-log, and shard runner, but supplies an
+independent four-vector-diagonal contraction.  It therefore does not allocate
+the 16 local or 64 derivative EMT primitive arrays.  Production resume trusts
+the fingerprinted base log without probing HDF5, so a logged base may be
+transferred immediately.
 
 \subsection{Gradient-Flow Schedule for Quarks}
 
@@ -701,8 +702,8 @@ derived/ringed/kinetic_spacetime
 EMT uses full spin--color noise rather than point spin--color dilution.
 The group attributes record the unique zero-momentum index, the
 \(-2/\Vthree\) relation, and that ringed factors are not stored.
-\code{ringed\_factors\_stored=False} distinguishes this subset from a full
-standalone output.  The counter-noise configuration, stream, algorithm, HP
+\code{ringed\_factors\_stored=False} states that nonlinear normalization is an
+ensemble-analysis responsibility.  The counter-noise configuration, stream, algorithm, HP
 ordering, Dirac parameters, gauge preprocessing, boundary condition, flow
 schedule, and exact EMT-to-kinetic relation are recorded alongside it.
 

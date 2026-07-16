@@ -1551,8 +1551,9 @@ over gauge configurations first, then evaluate the nonlinear factor; averaging
 the inverses formed on separate configurations is incorrect.  The unflowed
 step \(t=0\) must not be used for ringed normalization because the formula
 contains \(t^{-2}\).  The standalone ringed-normalization workflow remains
-available for dedicated high-statistics and spin--color-diluted runs, using the
-same base/HP-part files and fingerprinted base-level sample-log model as EMT.
+available for dedicated kinetic-only high-statistics runs.  Its independent
+kinetic contraction inherits the EMT base/HP-part runner and fingerprinted
+base-level sample-log model, without constructing the full EMT primitive basis.
 The production quark one-point wrapper uses base-oriented HP-interval shards;
 an explicit streaming finalizer validates complete base coverage before
 publishing one canonical EMTc with embedded kinetic data.

@@ -5,7 +5,9 @@ from pyquda import init
 from pyquda_utils import io
 
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import DisconnectedQuarkqTMD1pt
-from pyquda_measurement_utils.disconnected_shards import disconnected_sample_log_path
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
+    disconnected_sample_log_path,
+)
 from pyquda_measurement_utils.io_corr import get_disconnected_qTMD_loop_file_tag
 
 

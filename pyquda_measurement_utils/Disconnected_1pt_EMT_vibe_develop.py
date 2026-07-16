@@ -10,6 +10,7 @@ disconnected diagrams in analysis:
 import os
 import operator
 from pathlib import Path
+from time import perf_counter
 
 import h5py
 import numpy as np
@@ -23,20 +24,13 @@ from pyquda_comm.array import arrayIdentity, arrayZeros
 from pyquda_measurement_utils.io_corr import (
     save_emt_gluon_1pt_hdf5,
 )
-from pyquda_measurement_utils.disconnected_shards import (
-    append_completed_base,
-    base_part_ranges,
-    canonical_temp_path,
-    discover_shard_layout,
-    hp_vectors_per_base,
-    iter_validated_shard_parts,
-    prepare_sample_log,
-    selected_base_range,
-    shard_part_attrs,
-    shard_part_path,
-    write_raw_part_hdf5,
+from pyquda_measurement_utils.tools import (
+    _asarray_on_queue,
+    _get_xp_from_array,
+    mpi_print,
+    mpi_timer_print,
+    timing_enabled,
 )
-from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.fermion_bilinear_basis import (
     GAMMA_LABELS,
     PYQUDA_GAMMA_IDS,
@@ -48,12 +42,23 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
+    append_completed_base,
     array_to_numpy,
+    base_part_ranges,
+    canonical_temp_path,
+    discover_shard_layout,
     effective_n_inversions,
+    hp_vectors_per_base,
     iter_noise_base_hp_interval,
+    iter_validated_shard_parts,
     normalize_noise_scheme,
     part_source_bookkeeping,
+    prepare_sample_log,
+    selected_base_range,
+    shard_part_attrs,
+    shard_part_path,
     validate_hierarchical_probing_options,
+    write_raw_part_hdf5,
 )
 
 _VALID_FLOW_TYPES = {"wilson", "symanzik"}
@@ -116,6 +121,54 @@ def _interval_batches(start, stop, batch_size):
         (batch_start, min(batch_start + batch_size, int(stop)))
         for batch_start in range(int(start), int(stop), batch_size)
     ]
+
+
+def _sync_backend_object(obj):
+    """Synchronize a field/backend only when coarse production timers are on."""
+    if obj is None:
+        return
+    if isinstance(obj, (list, tuple)):
+        for item in obj:
+            _sync_backend_object(item)
+        return
+    data = getattr(obj, "data", obj)
+    queue = getattr(data, "sycl_queue", None)
+    if queue is not None:
+        queue.wait()
+        return
+    stream = getattr(data, "stream", None)
+    if stream is not None and hasattr(stream, "synchronize"):
+        stream.synchronize()
+        return
+    synchronize = getattr(data, "synchronize", None)
+    if synchronize is not None:
+        synchronize()
+        return
+    if type(data).__module__.split(".")[0] == "cupy":
+        try:
+            import cupy
+
+            cupy.cuda.get_current_stream().synchronize()
+        except Exception:
+            pass
+
+
+def _timer_start(*objects):
+    if not timing_enabled():
+        return None
+    for obj in objects:
+        _sync_backend_object(obj)
+    getMPIComm().Barrier()
+    return perf_counter()
+
+
+def _timer_stop(start, *objects):
+    if start is None:
+        return 0.0
+    for obj in objects:
+        _sync_backend_object(obj)
+    getMPIComm().Barrier()
+    return perf_counter() - start
 
 
 def parse_multigrid_blocks(value):
@@ -221,8 +274,9 @@ class EMTDisconnectedQuark1pt:
             "flavor_convention",
             "single_flavor_trace_for_this_dirac_operator",
         )
-        self.multigrid_blocks = parse_multigrid_blocks(
-            parameters.get("multigrid", [[8, 8, 4, 4]])
+        multigrid = parameters.get("multigrid", [[8, 8, 4, 4]])
+        self.multigrid_blocks = (
+            None if multigrid is None else parse_multigrid_blocks(multigrid)
         )
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
 
@@ -244,7 +298,9 @@ class EMTDisconnectedQuark1pt:
     def _impose_P_Breit_slice(complex_field, phases_3pt):
         """Project a local scalar field to spatial momenta and keep time."""
         slice_t = core.gatherLattice(
-            contract("qwtzyx, wtzyx -> qt", phases_3pt, complex_field).get(),
+            array_to_numpy(
+                contract("qwtzyx, wtzyx -> qt", phases_3pt, complex_field)
+            ),
             [1, -1, -1, -1],
         )
         return getMPIComm().bcast(slice_t, root=0)
@@ -299,41 +355,116 @@ class EMTDisconnectedQuark1pt:
 
         return local, derivative, flowed_noise_norm
 
-    def _measure_flowed_batch(self, U, xis, etas, phases_3pt):
+    def _raw_step_tail_shapes(self, latt_info):
+        """Shapes emitted by one source at one flow time, with time last."""
+        nt = int(latt_info.global_size[3])
+        nq = len(self.qlist)
+        return {
+            "local_bilinear_pervec": (16, nq, nt),
+            "derivative_bilinear_pervec": (16, 4, nq, nt),
+            "flowed_noise_norm_pervec": (nq, nt),
+        }
+
+    def _raw_batch_shapes(self, latt_info, source_count):
+        """Insert the flow axis immediately before time for every raw field."""
+        n_flow = self.flow_steps + 1
+        return {
+            name: (int(source_count),) + tail[:-1] + (n_flow, tail[-1])
+            for name, tail in self._raw_step_tail_shapes(latt_info).items()
+        }
+
+    def _metadata_datasets(self):
+        return basis_metadata()
+
+    def _output_kind(self):
+        return "emt_quark_1pt"
+
+    def _completion_label(self):
+        return "EMT"
+
+    def _contract_flowed_source(
+        self, U_f, gauge_dirac, xi, eta, phases_3pt
+    ):
+        local, derivative, norm = self._get_primitive_bilinears_P_Breit_slice(
+            U_f, gauge_dirac, xi, eta, phases_3pt
+        )
+        return {
+            "local_bilinear_pervec": local,
+            "derivative_bilinear_pervec": derivative,
+            "flowed_noise_norm_pervec": norm,
+        }
+
+    def _new_batch_timers(self):
+        return {
+            "restore": 0.0,
+            "invert": 0.0,
+            "contract": np.zeros(self.flow_steps + 1, dtype=np.float64),
+            "flow": np.zeros(max(self.flow_steps, 0), dtype=np.float64),
+            "write": 0.0,
+        }
+
+    def _print_batch_timers(self, latt_info, batch_index, source_count, timers, total):
+        prefix = self._output_kind()
+        mpi_timer_print(
+            latt_info, f"{prefix}_batch", total,
+            batch=batch_index, sources=source_count,
+            per_source=total / source_count,
+        )
+        for name in ("restore", "invert", "write"):
+            seconds = float(timers[name])
+            mpi_timer_print(
+                latt_info, f"{prefix}_{name}", seconds,
+                batch=batch_index, sources=source_count,
+                per_source=seconds / source_count,
+            )
+        for step, seconds in enumerate(timers["contract"]):
+            mpi_timer_print(
+                latt_info, f"{prefix}_contract", float(seconds),
+                batch=batch_index, step=step, sources=source_count,
+                per_source=float(seconds) / source_count,
+            )
+        for step, seconds in enumerate(timers["flow"]):
+            mpi_timer_print(
+                latt_info, f"{prefix}_flow", float(seconds),
+                batch=batch_index, step=f"{step}_to_{step + 1}",
+                sources=source_count, per_source=float(seconds) / source_count,
+            )
+
+    def _measure_flowed_batch(self, U, xis, etas, phases_3pt, timers=None):
         """Flow and contract a non-empty source batch in its original order."""
         xis = list(xis)
         etas = list(etas)
         if not xis or len(xis) != len(etas):
             raise ValueError("xis and etas should be non-empty lists of equal length")
+        if timers is None:
+            timers = self._new_batch_timers()
         batch_size = len(xis)
-        n_flow = self.flow_steps + 1
-        nt = U.latt_info.global_size[3]
-        local = np.zeros(
-            (batch_size, 16, len(self.qlist), n_flow, nt), dtype=np.complex128
-        )
-        derivative = np.zeros(
-            (batch_size, 16, 4, len(self.qlist), n_flow, nt),
-            dtype=np.complex128,
-        )
-        flowed_noise_norm = np.zeros(
-            (batch_size, len(self.qlist), n_flow, nt), dtype=np.complex128
-        )
+        raw = {
+            name: np.zeros(shape, dtype=np.complex128)
+            for name, shape in self._raw_batch_shapes(U.latt_info, batch_size).items()
+        }
         U_f = U.copy()
         U_f.setAntiPeriodicT()
         flowed_owner = None
-        for step in range(n_flow):
-            mpi_print(U_f.latt_info, f"calc primitive bilinears, step = {step}")
+        for step in range(self.flow_steps + 1):
+            mpi_print(U_f.latt_info, f"calc {self._completion_label()} contraction, step = {step}")
+            contract_t0 = _timer_start(xis, etas)
             # All sources at this flow time reuse one resident flowed gauge.
             with U_f.use() as gauge_dirac:
                 for source_idx, (xi, eta) in enumerate(zip(xis, etas)):
-                    (
-                        local[source_idx, :, :, step],
-                        derivative[source_idx, :, :, :, step],
-                        flowed_noise_norm[source_idx, :, step],
-                    ) = self._get_primitive_bilinears_P_Breit_slice(
+                    values = self._contract_flowed_source(
                         U_f, gauge_dirac, xi, eta, phases_3pt
                     )
+                    if set(values) != set(raw):
+                        raise RuntimeError(
+                            f"contraction datasets {sorted(values)} do not match "
+                            f"declared datasets {sorted(raw)}"
+                        )
+                    for name, value in values.items():
+                        raw[name][source_idx, ..., step, :] = value
+            timers["contract"][step] += _timer_stop(contract_t0, xis, etas)
             if step < self.flow_steps:
+                flow_t0 = _timer_start(xis, etas)
                 if step == 0:
                     n_steps, step_size = 10, self.flow_epsilon / 10
                 else:
@@ -346,19 +477,31 @@ class EMTDisconnectedQuark1pt:
                 )
                 xis = [flowed_owner[2 * idx] for idx in range(batch_size)]
                 etas = [flowed_owner[2 * idx + 1] for idx in range(batch_size)]
-        return local, derivative, flowed_noise_norm
+                timers["flow"][step] += _timer_stop(flow_t0, xis, etas)
+        del flowed_owner, U_f
+        return raw
 
-    def _invert_and_measure_batch(self, U, dirac, source_records, phases_3pt):
+    def _invert_and_measure_batch(
+        self, U, dirac, source_records, phases_3pt, timers=None
+    ):
         """Restore the original gauge once, then invert and flow one source batch."""
         source_records = list(source_records)
         if not source_records:
             raise ValueError("source_records should not be empty")
-        # Fermion flow leaves a flowed gauge resident.  Restore the unchanged
-        # original thin gauge once for all sequential inversions in this batch.
+        if timers is None:
+            timers = self._new_batch_timers()
+        # Preserve the established production sequence: one thin restore at the
+        # start of every batch, including the first batch after the full load.
+        restore_t0 = _timer_start(U)
         dirac.loadGauge(U, thin_update_only=True)
+        timers["restore"] += _timer_stop(restore_t0, U)
         xis = [record[3] for record in source_records]
+        invert_t0 = _timer_start(xis)
         etas = [dirac.invert(xi) for xi in xis]
-        return self._measure_flowed_batch(U, xis, etas, phases_3pt)
+        timers["invert"] += _timer_stop(invert_t0, etas)
+        return self._measure_flowed_batch(
+            U, xis, etas, phases_3pt, timers=timers
+        )
 
     def _measurement_attrs(self, latt_info, invPara, randPara, counter_config, counter_stream, n_eff, spatial_volume):
         n_vec, n_zn, _ = randPara
@@ -389,7 +532,10 @@ class EMTDisconnectedQuark1pt:
             "csw": csw,
             "tol": tol,
             "maxiter": maxiter,
-            "multigrid_blocks": np.asarray(self.multigrid_blocks, dtype=np.int32),
+            "multigrid_blocks": np.asarray(
+                self.multigrid_blocks if self.multigrid_blocks is not None else [],
+                dtype=np.int32,
+            ).reshape(-1, 4),
             "gauge_preprocessing": self.gauge_preprocessing,
             "t_boundary": latt_info.t_boundary,
             "n_vec": n_vec,
@@ -419,11 +565,9 @@ class EMTDisconnectedQuark1pt:
             key: value for key, value in attrs.items()
             if key not in {"n_vec", "n_base_noise", "effective_n_inversions"}
         }
-        common_attrs["output_kind"] = "emt_quark_1pt"
+        common_attrs["output_kind"] = self._output_kind()
         common_attrs["block_interval_solves"] = int(block_interval_solves)
-        nt = U.latt_info.global_size[3]
-        n_flow = self.flow_steps + 1
-        operator_metadata = basis_metadata()
+        metadata_datasets = self._metadata_datasets()
         comm = getMPIComm()
 
         flow_batch_size = _positive_flow_batch_size(flow_batch_size)
@@ -431,11 +575,15 @@ class EMTDisconnectedQuark1pt:
         pending_bases = []
         for base_idx in selected_bases:
             if base_idx in completed_bases:
-                mpi_print(U.latt_info, f"EMT base SKIP from sample log: base{base_idx:06d}")
+                mpi_print(
+                    U.latt_info,
+                    f"{self._completion_label()} base SKIP from sample log: "
+                    f"base{base_idx:06d}",
+                )
             else:
                 pending_bases.append(base_idx)
 
-        def write_part(base_idx, part_idx, hp_start, hp_stop, local, derivative, norm):
+        def write_part(base_idx, part_idx, hp_start, hp_stop, raw_datasets):
             path = shard_part_path(
                 shard_dir, tag, base_idx, part_idx, hp_start, hp_stop
             )
@@ -448,14 +596,10 @@ class EMTDisconnectedQuark1pt:
             if U.latt_info.mpi_rank == 0:
                 write_raw_part_hdf5(
                     path,
-                    {
-                        "local_bilinear_pervec": local,
-                        "derivative_bilinear_pervec": derivative,
-                        "flowed_noise_norm_pervec": norm,
-                    },
+                    raw_datasets,
                     write_attrs,
                     bookkeeping,
-                    metadata_datasets=operator_metadata,
+                    metadata_datasets=metadata_datasets,
                 )
             comm.Barrier()
 
@@ -467,9 +611,9 @@ class EMTDisconnectedQuark1pt:
         if self.noise_scheme != "hierarchical_probing":
             # A plain-noise base contains one source, so batching across pending
             # bases is required for pure Z_N to benefit from source batching.
-            for batch_start, batch_stop in _interval_batches(
+            for batch_index, (batch_start, batch_stop) in enumerate(_interval_batches(
                 0, len(pending_bases), flow_batch_size
-            ):
+            )):
                 batch_bases = pending_bases[batch_start:batch_stop]
                 source_records = []
                 for base_idx in batch_bases:
@@ -484,33 +628,40 @@ class EMTDisconnectedQuark1pt:
                             f"plain noise base {base_idx} generated {len(records)} sources"
                         )
                     source_records.extend(records)
-                local, derivative, norm = self._invert_and_measure_batch(
-                    U, dirac, source_records, phases_3pt
+                timers = self._new_batch_timers()
+                batch_t0 = _timer_start()
+                raw = self._invert_and_measure_batch(
+                    U, dirac, source_records, phases_3pt, timers=timers
                 )
+                write_t0 = _timer_start()
                 for source_offset, base_idx in enumerate(batch_bases):
                     source_slice = slice(source_offset, source_offset + 1)
                     write_part(
                         base_idx, 0, 0, 1,
-                        local[source_slice], derivative[source_slice], norm[source_slice],
+                        {
+                            name: values[source_slice]
+                            for name, values in raw.items()
+                        },
                     )
                     complete_base(base_idx)
+                timers["write"] += _timer_stop(write_t0)
+                total = _timer_stop(batch_t0)
+                self._print_batch_timers(
+                    U.latt_info, batch_index, len(source_records), timers, total
+                )
             return None, None
 
         for base_idx in pending_bases:
             for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
                 count = hp_stop - hp_start
-                local_part = np.zeros(
-                    (count, 16, len(self.qlist), n_flow, nt),
-                    dtype=np.complex128,
-                )
-                derivative_part = np.zeros(
-                    (count, 16, 4, len(self.qlist), n_flow, nt),
-                    dtype=np.complex128,
-                )
-                norm_part = np.zeros(
-                    (count, len(self.qlist), n_flow, nt),
-                    dtype=np.complex128,
-                )
+                raw_part = {
+                    name: np.zeros(shape, dtype=np.complex128)
+                    for name, shape in self._raw_batch_shapes(
+                        U.latt_info, count
+                    ).items()
+                }
+                timers = self._new_batch_timers()
+                part_t0 = _timer_start()
                 for batch_hp_start, batch_hp_stop in _interval_batches(
                     hp_start, hp_stop, flow_batch_size
                 ):
@@ -520,18 +671,22 @@ class EMTDisconnectedQuark1pt:
                         config_num=int(attrs["config_num"]),
                         noise_stream=int(attrs["noise_stream"]),
                     ))
-                    local, derivative, norm = self._invert_and_measure_batch(
-                        U, dirac, source_records, phases_3pt
+                    raw = self._invert_and_measure_batch(
+                        U, dirac, source_records, phases_3pt, timers=timers
                     )
                     destination = slice(
                         batch_hp_start - hp_start, batch_hp_stop - hp_start
                     )
-                    local_part[destination] = local
-                    derivative_part[destination] = derivative
-                    norm_part[destination] = norm
+                    for name, values in raw.items():
+                        raw_part[name][destination] = values
+                write_t0 = _timer_start()
                 write_part(
-                    base_idx, part_idx, hp_start, hp_stop,
-                    local_part, derivative_part, norm_part,
+                    base_idx, part_idx, hp_start, hp_stop, raw_part
+                )
+                timers["write"] += _timer_stop(write_t0)
+                total = _timer_stop(part_t0)
+                self._print_batch_timers(
+                    U.latt_info, part_idx, count, timers, total
                 )
             complete_base(base_idx)
         return None, None
@@ -549,7 +704,36 @@ class EMTDisconnectedQuark1pt:
         block_interval_solves=64,
         flow_batch_size=1,
     ):
-        """Compute stochastic quark 1pt observables with optional batched flow."""
+        """Compute full stochastic EMT primitives with optional batched flow."""
+        return self._run_sharded_measurement(
+            gauge,
+            invPara,
+            randPara,
+            tag=tag,
+            shard_dir=shard_dir,
+            sample_log_file=sample_log_file,
+            base_start=base_start,
+            base_stop=base_stop,
+            block_interval_solves=block_interval_solves,
+            flow_batch_size=flow_batch_size,
+        )
+
+    def _run_sharded_measurement(
+        self,
+        gauge: LatticeGauge,
+        invPara,
+        randPara,
+        tag: str,
+        shard_dir=None,
+        sample_log_file=None,
+        base_start=0,
+        base_stop=None,
+        block_interval_solves=64,
+        flow_batch_size=1,
+    ):
+        """Shared counter-noise, inversion, flow, shard, and resume runner."""
+        if not tag:
+            raise ValueError("a non-empty canonical output tag is required")
         flow_batch_size = _positive_flow_batch_size(flow_batch_size)
         n_vec, n_zn, randseed = randPara
         mass, csw, tol, maxiter = invPara
@@ -574,7 +758,7 @@ class EMTDisconnectedQuark1pt:
             key: value for key, value in attrs.items()
             if key not in {"n_vec", "n_base_noise", "effective_n_inversions"}
         }
-        common_attrs["output_kind"] = "emt_quark_1pt"
+        common_attrs["output_kind"] = self._output_kind()
         common_attrs["block_interval_solves"] = int(block_interval_solves)
         comm = getMPIComm()
         if latt_info.mpi_rank == 0:
@@ -584,7 +768,11 @@ class EMTDisconnectedQuark1pt:
         completed_bases = set(comm.bcast(completed_bases, root=0))
         selected_bases = list(selected_base_range(n_vec, base_start, base_stop))
         if all(base_idx in completed_bases for base_idx in selected_bases):
-            mpi_print(latt_info, "All selected EMT bases are complete in the sample log.")
+            mpi_print(
+                latt_info,
+                f"All selected {self._completion_label()} bases are complete "
+                "in the sample log.",
+            )
             return None, None
 
         mpi_print(latt_info, f"t_boundary = {latt_info.t_boundary}")

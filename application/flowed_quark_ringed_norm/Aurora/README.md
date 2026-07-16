@@ -11,11 +11,15 @@ double-precision fermion-flow call. The default is `B=1`; increase it only
 after checking device-memory headroom. The value affects scheduling, not the
 estimator or HDF5 provenance, and there is no automatic OOM fallback.
 
-Finalize with `../finalize_ringed_shards.py`; compute factors from explicit
-canonical configuration files with `../analyze_ringed_ensemble.py`. The
-per-configuration file stores kinetic data only. Full conventions are in
+Finalize with `../finalize_ringed_shards.py`. The per-configuration file stores
+kinetic data only; ensemble normalization is outside this production workflow.
+Full conventions are in
 `docs/flowed_quark_ringed_norm/flowed_quark_ringed_norm.md`.
 
 The old platform-specific HP convergence scripts were removed. Resume now
 uses the shared fingerprinted base-level sample log and does not probe HDF5,
 so logged shards may be transferred before later bases run.
+
+Production uses the `RingedQuark1pt` kinetic-only subclass of the EMT shared
+runner. The runner infrastructure is shared, while the standalone contraction
+does not construct the full EMT primitive basis.

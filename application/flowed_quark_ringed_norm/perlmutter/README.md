@@ -27,12 +27,18 @@ point based on its measured 34.0-GiB footprint, but it should still be checked
 with a short local smoke because the lattice, multigrid hierarchy, and QUDA
 build all affect memory. These values are guidance, not automatic defaults.
 
-Finalize with `../finalize_ringed_shards.py`; combine explicit canonical
-configuration files with `../analyze_ringed_ensemble.py`. Per-configuration
-files are kinetic-only. See
+Finalize with `../finalize_ringed_shards.py`. Per-configuration files are
+kinetic-only; ensemble normalization is intentionally outside this production
+workflow. See
 `docs/flowed_quark_ringed_norm/flowed_quark_ringed_norm.md` for schema and
 normalization rules.
 
 The former `.block*.h5` format is not supported. Resume uses the same
 fingerprinted base-level text log as EMT and qTMD and deliberately does not
 probe HDF5 files, allowing completed shards to be transferred immediately.
+
+The implementation is `RingedQuark1pt`, a kinetic-only subclass of the EMT
+disconnected runner. It reuses counter noise, base/HP scheduling, inversion,
+fermion flow, sample logs, and shard I/O, but its independent contraction
+computes only the four vector-diagonal derivative terms. It does not allocate
+the 16 local or 64 derivative EMT primitive arrays.
