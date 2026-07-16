@@ -101,12 +101,15 @@ for tslice in tslice_list:
             prop_fw = measurement.load_wall_propagator(latt_info, prop_fw_tag)
             prop_bw_src = measurement.load_wall_propagator(latt_info, prop_bw_src_tag)
 
-            src_keys_diag = list(measurement.pion_src.keys())
-            sink_keys_diag = list(measurement.pion_sink.keys())
-            for src_key in src_keys_diag:
+            pion_pair_labels = list(measurement.pion_channel_pairs)
+            for pion_pair_label in pion_pair_labels:
                 t0 = time.time()
-                c2pt = measurement.contract_wall_2pt(latt_info, prop_fw, prop_bw_src, meson_mom, src_key, sink_keys_diag)
-                qTMDWF = measurement.contract_tmdwf_check(latt_info, prop_fw, prop_bw_src, meson_mom, src_key)
+                c2pt = measurement.contract_wall_2pt(
+                    latt_info, prop_fw, prop_bw_src, meson_mom, pion_pair_label
+                )
+                qTMDWF = measurement.contract_tmdwf_check(
+                    latt_info, prop_fw, prop_bw_src, meson_mom, pion_pair_label
+                )
                 if latt_info.mpi_rank == 0:
                     c2pt = np.roll(c2pt, -tslice, axis=-1)
                     qTMDWF = np.roll(qTMDWF, -tslice, axis=-1)
@@ -116,7 +119,7 @@ for tslice in tslice_list:
                         conf,
                         "CG.wall",
                         pos,
-                        sm_tag + ".src" + src_key,
+                        sm_tag + ".pion_pair" + pion_pair_label,
                         quark_mom_fw,
                         [-quark_mom_bw[0], -quark_mom_bw[1], -quark_mom_bw[2]],
                     )
@@ -126,25 +129,26 @@ for tslice in tslice_list:
                         conf,
                         "CG.wall",
                         pos,
-                        sm_tag + ".src" + src_key,
+                        sm_tag + ".pion_pair" + pion_pair_label,
                         quark_mom_fw,
                         [-quark_mom_bw[0], -quark_mom_bw[1], -quark_mom_bw[2]],
                     )
-                    save_pion_soft_factor_c2pt_hdf5_noRoll(c2pt, c2pt_tag, src_key, sink_keys_diag, meson_mom, latt_info)
+                    save_pion_soft_factor_c2pt_hdf5_noRoll(
+                        c2pt, c2pt_tag, pion_pair_label, meson_mom, latt_info
+                    )
                     save_pion_soft_factor_qTMDWF_hdf5_noRoll(
                         qTMDWF,
                         qTMDWF_tag,
-                        src_key,
+                        pion_pair_label,
                         meson_mom,
                         bT_dir,
                         args.bT_length,
                         args.bz_length,
                         latt_info,
                     )
-                mpi_print(latt_info, f"DONE diagnostic c2pt/qTMDWF src={src_key} time={time.time() - t0}s")
+                mpi_print(latt_info, f"DONE diagnostic c2pt/qTMDWF pion_pair={pion_pair_label} time={time.time() - t0}s")
 
             tsep_corrs = []
-            src_keys = sink_keys = gamma1_keys = gamma2_keys = None
             for tsep in tsep_list:
                 sink_t = (tslice + tsep) % Lt
                 sink_pos = [0, 0, 0, sink_t]
@@ -152,7 +156,7 @@ for tslice in tslice_list:
                 prop_sink_bw_tag = get_pion_soft_factor_prop_file_tag(str(data_dir), lat_tag, conf, "CG.wall", sink_pos, sm_tag, quark_mom_bw)
                 prop_sink_fw = measurement.load_wall_propagator(latt_info, prop_sink_fw_tag)
                 prop_sink_bw = measurement.load_wall_propagator(latt_info, prop_sink_bw_tag)
-                corr, src_keys, sink_keys, gamma1_keys, gamma2_keys = measurement.contract_soft_factor(
+                corr, _, _ = measurement.contract_soft_factor(
                     latt_info,
                     prop_fw,
                     prop_bw_src,
@@ -180,10 +184,8 @@ for tslice in tslice_list:
                 save_pion_soft_factor_hdf5_noRoll(
                     corr_all,
                     tag,
-                    src_keys,
-                    sink_keys,
-                    gamma1_keys,
-                    gamma2_keys,
+                    measurement.pion_channel_pairs,
+                    measurement.gamma_channel_pairs,
                     bT_dir,
                     args.bT_length,
                     tsep_list,

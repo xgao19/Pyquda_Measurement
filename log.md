@@ -809,3 +809,76 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   gluon workflows. The one/four-rank maximum relative L2 difference was
   `8.31e-15`, and all 80 HDF5 files opened successfully with no per-rank
   duplicate outputs.
+
+## 2026-07-16: Make pion channel provenance explicit
+
+- Removed the unused proton qTMD `pos_boost`/`boost_out` measurement aliases
+  and `save_propagators` state.  Proton C2 now consumes `boost_in` directly;
+  application-owned sequential smearing continues to use `boost_out`.
+- Separated pion qTMD/PDF and EMFF smearing identity from channel identity.
+  C2 tags now encode the source interpolator, while three-point tags and
+  sample logs encode both source and sink interpolators.  HDF5 attrs record
+  source, sink and operator/current Gamma conventions explicitly.
+- Routed the active proton drivers through the centralized 16-Gamma basis and
+  made the Perlmutter proton qTMD/PDF serial HDF5 publication rank-0-only.  The
+  previous rank-distributed writer omitted one flavor in a one-rank run.
+- Rebuilt pion qTMD, pion EMFF and proton qTMD PDFs.  The S8T8 regression used
+  tolerance `1e-15` and both one rank (`1.1.1.1`) and four ranks (`2.2.1.1`).
+  Reference/candidate datasets were bitwise identical at fixed layout; the
+  largest one/four-rank relative L2 difference was `1.06e-13`, the maximum
+  absolute difference was `5.69e-14`, and the largest parsed true residual was
+  `9.78e-16`.
+
+## 2026-07-16: Unify pion C2 and soft-factor channel conventions
+
+- Replaced the duplicate qTMDWF C2 contraction with the shared pion C2 kernel,
+  which allocates the local time axis from `latt_info.size[3]` and records the
+  fixed source Gamma plus canonical 16-Gamma sink basis.
+- Removed the `dagger_of_sink` source mode. qDA now computes local C2 for each
+  explicit `da_src_gammalist` entry and writes one 16-sink-Gamma file per
+  source; the charm-mass workflow uses fixed source `5`.
+- Made soft-factor pion and insertion channels explicitly paired. Its Gamma
+  insertions now use the canonical raw PyQUDA basis, including raw `Y5`, and
+  the HDF5 schema stores pair members and the raw-to-physical transform.
+- Changed pion EMT C2 and pion qTMD contractions to process one sink Gamma at
+  a time, eliminating the approximately 16-fold propagator-sized temporary
+  while preserving the final Gamma axis.
+- Completed the S8T8 numerical gate with one rank (`1.1.1.1`), four ranks
+  using time decomposition (`1.1.1.4`), and an additional four-rank qTMDWF
+  spatial-decomposition smoke (`2.2.1.1`).  Across 14,546 compared numerical
+  datasets, the maximum absolute difference was `5.68e-14` and the maximum
+  relative L2 difference was `2.62e-13`.  The old qTMDWF implementation failed
+  in the four-rank time-decomposed run by attempting to store a local-time
+  array in a global-`Nt` buffer; the shared C2 kernel completed correctly.
+- An l64 cfg1050 light-quark memory smoke with a resident two-level multigrid
+  hierarchy completed on 80-GiB A100s.  Device allocation rose from about
+  `35.8 GiB` after inversion to `49.5 GiB` after the pion EMT C2 and remained
+  unchanged through the minimal pion qTMD contraction, confirming that neither
+  optimized path recreates a 16-Gamma propagator stack.  The same setup cannot
+  fit on 40-GiB A100s because the baseline propagators, sink smearing and
+  resident multigrid hierarchy already exceed that memory budget.
+
+## 2026-07-16: Repair the qDA straight-link GI operator
+
+- Restored the shared pion-C2 `dagger_of_sink` mode,
+  \(\Gamma_{\rm src}^{(g)}=\gamma_5\Gamma_g^\dagger\gamma_5\), as a
+  backend-aware relational source mode. qDA again uses this paired-channel C2
+  convention; its explicit `5/X/T` list remains specific to the nonlocal DA
+  outputs.
+- Replaced qDA's invalid reference to a nonexistent TMD staple transporter
+  with the existing `create_fw_prop_PDF_GI` straight-link transport. Both CG
+  and GI now act on the forward propagator, while the backward line remains
+  undisplaced. Positive and negative longitudinal branches restart from the
+  original forward propagator.
+- Kept the qDA HDF5 layout/provenance and sample-log identity unchanged. Old
+  nonzero-separation CG output used the opposite transported line and must be
+  regenerated; the former GI branch could not run.
+- The S8T8 numerical gate used tolerance `1e-15`, source Gammas `5/X/T`, all
+  16 sink Gammas, `z=0,+1,+2,-1,-2`, and `pz=0,1`. One rank (`1.1.1.1`) and
+  four ranks (`2.2.1.1`) agree with maximum relative L2 difference
+  `3.42e-16`; final true residuals were `5.35e-16` and `8.53e-16`.
+- A deterministic local SU(3) transformation applied after propagator
+  generation changed CG by at least `0.2606` in relative L2 while GI changed
+  by at most `1.50e-16`. The transformed gauge was explicitly loaded once
+  before its covDev calls, matching the resident-gauge precondition used by
+  the production helper.

@@ -374,17 +374,11 @@ during early tuning.
 
 ---
 
-### `src_2pt_mode`
+### Source Gamma
 
-This controls how the source gamma is chosen in the 2pt contraction.
-
-Allowed choices are:
-
-- `fixed_g5`
-- `same_as_sink`
-- `dagger_of_sink`
-
-For mass tuning, the exact choice is usually less central than `mass / width / boost`, but it should still be kept fixed during comparisons.
+The mass-tuning C2 uses the fixed canonical raw source label `5` and scans all
+16 sink Gamma channels.  The source label is part of the filename, sample-log
+identity and HDF5 provenance.
 
 ---
 

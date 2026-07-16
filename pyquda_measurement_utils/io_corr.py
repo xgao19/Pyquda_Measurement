@@ -3,7 +3,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from pyquda_measurement_utils.fermion_bilinear_basis import basis_metadata
+from pyquda_measurement_utils.fermion_bilinear_basis import basis_attrs, basis_metadata
 import re
 
 
@@ -21,6 +21,14 @@ def get_sample_log_tag(ama, src, sm):
     log_sample = ama_tag + "_" + src_tag + "_" + sm_tag
 
     return log_sample
+
+
+def get_pion_channel_tag(sm, src_interpolator, sink_interpolator=None):
+    """Append explicit pion source/sink interpolator identity to a setup tag."""
+    tag = f"{sm}.src{src_interpolator}"
+    if sink_interpolator is not None:
+        tag += f".sink{sink_interpolator}"
+    return tag
 
 
 # Build the standard point-source two-point output tag.
@@ -280,7 +288,14 @@ def save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=None):
 # -----------------------------------------------------------------------------
 
 # Save the standard baryon-style two-point function with source-time rolling.
-def save_proton_c2pt_hdf5(corr, tag, gammalist, plist, attrs=None):
+def save_proton_c2pt_hdf5(
+    corr,
+    tag,
+    gammalist,
+    plist,
+    attrs=None,
+    write_gamma_basis=False,
+):
 
     src_match = None
     for part in tag.split("."):
@@ -295,6 +310,9 @@ def save_proton_c2pt_hdf5(corr, tag, gammalist, plist, attrs=None):
     ensure_parent_dir(save_h5)
     f = h5py.File(save_h5, 'w')
     _write_h5_attrs(f, attrs)
+    if write_gamma_basis:
+        for name, values in basis_metadata().items():
+            f.create_dataset(name, data=values)
     sm = f.create_group("SS")
     for ig, gm in enumerate(gammalist):
         g = sm.create_group(gm)
@@ -343,11 +361,14 @@ def save_qTMD_pion_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, 
 # -----------------------------------------------------------------------------
 
 # Save pion electromagnetic form-factor three-point data.
-def save_pion_EMFF_hdf5_noRoll(corr, tag, gammalist, qlist, tsep, latt_info):
+def save_pion_EMFF_hdf5_noRoll(
+    corr, tag, gammalist, qlist, tsep, latt_info, attrs=None
+):
 
     save_h5 = tag + ".h5"
     ensure_parent_dir(save_h5)
     f = h5py.File(save_h5, 'w')
+    _write_h5_attrs(f, attrs)
 
     if latt_info.mpi_rank == 0:
         print(f"no roll")
@@ -367,21 +388,68 @@ def save_pion_EMFF_hdf5_noRoll(corr, tag, gammalist, qlist, tsep, latt_info):
 # -----------------------------------------------------------------------------
 
 # Save the pion soft-factor four-point correlator.
-def save_pion_soft_factor_hdf5_noRoll(corr, tag, pion_src_keys, pion_sink_keys, gamma1_keys, gamma2_keys, bT_dir, bT_length, tseplist, latt_info):
+def _matrix_for_hdf5(matrix):
+    matrix = matrix.matrix if hasattr(matrix, "matrix") else matrix
+    if hasattr(matrix, "get"):
+        matrix = matrix.get()
+    elif type(matrix).__module__.split(".")[0] == "dpnp":
+        import dpnp
+
+        matrix = dpnp.asnumpy(matrix)
+    return np.asarray(matrix)
+
+
+def save_pion_soft_factor_hdf5_noRoll(
+    corr,
+    tag,
+    pion_channel_pairs,
+    gamma_channel_pairs,
+    bT_dir,
+    bT_length,
+    tseplist,
+    latt_info,
+):
     save_h5 = tag + ".h5"
     ensure_parent_dir(save_h5)
     f = h5py.File(save_h5, 'w')
+    _write_h5_attrs(f, {
+        **basis_attrs(),
+        "soft_factor_schema": "paired_channels_v2",
+        "dataset_axes": "tsep,pion_pair,gamma_pair,bT_direction,bT,time",
+        "gamma_convention": "canonical_raw_pyquda",
+    })
+
+    pion_pair_labels = list(pion_channel_pairs)
+    gamma_pair_labels = list(gamma_channel_pairs)
+    f.create_dataset("pion_pair_labels", data=np.asarray(pion_pair_labels, dtype="S"))
+    f.create_dataset("gamma_pair_labels", data=np.asarray(gamma_pair_labels, dtype="S"))
+    f.create_dataset(
+        "pion_source_matrices",
+        data=np.stack([_matrix_for_hdf5(pion_channel_pairs[label][0]) for label in pion_pair_labels]),
+    )
+    f.create_dataset(
+        "pion_sink_matrices",
+        data=np.stack([_matrix_for_hdf5(pion_channel_pairs[label][1]) for label in pion_pair_labels]),
+    )
+    f.create_dataset(
+        "gamma1_labels",
+        data=np.asarray([gamma_channel_pairs[label][0] for label in gamma_pair_labels], dtype="S"),
+    )
+    f.create_dataset(
+        "gamma2_labels",
+        data=np.asarray([gamma_channel_pairs[label][1] for label in gamma_pair_labels], dtype="S"),
+    )
+    for name, values in basis_metadata().items():
+        f.create_dataset(name, data=values)
 
     bT_list = ["bX", "bY", "bZ"]
     if latt_info.mpi_rank == 0:
         print(f"no roll")
         print(f"corr.shape, {np.shape(corr)}")
-    for i, src_key in enumerate(pion_src_keys):
-        sink_key = pion_sink_keys[i]
-        g_src = f.require_group(f"src{src_key}_sink{sink_key}")
-        for j, gamma1_key in enumerate(gamma1_keys):
-            gamma2_key = gamma2_keys[j]
-            g_gm = g_src.require_group(f"{gamma1_key}_{gamma2_key}")
+    for i, pion_pair_label in enumerate(pion_pair_labels):
+        g_src = f.require_group("pion_pair").require_group(pion_pair_label)
+        for j, gamma_pair_label in enumerate(gamma_pair_labels):
+            g_gm = g_src.require_group("gamma_pair").require_group(gamma_pair_label)
             for k, direction in enumerate(bT_dir):
                 for bT in range(bT_length + 1):
                     g_bT = g_gm.require_group(bT_list[direction] + "_" + str(bT))
@@ -391,7 +459,7 @@ def save_pion_soft_factor_hdf5_noRoll(corr, tag, pion_src_keys, pion_sink_keys, 
 
 
 # Save the wall-source qTMDWF diagnostic used by the pion soft-factor workflow.
-def save_pion_soft_factor_qTMDWF_hdf5_noRoll(corr, tag, src_key, momentum, bT_dir, bT_length, bz_length, latt_info):
+def save_pion_soft_factor_qTMDWF_hdf5_noRoll(corr, tag, pion_pair_label, momentum, bT_dir, bT_length, bz_length, latt_info):
     save_h5 = tag + ".h5"
     ensure_parent_dir(save_h5)
     f = h5py.File(save_h5, 'w')
@@ -400,8 +468,9 @@ def save_pion_soft_factor_qTMDWF_hdf5_noRoll(corr, tag, src_key, momentum, bT_di
     if latt_info.mpi_rank == 0:
         print(f"no roll")
         print(f"corr.shape, {np.shape(corr)}")
+    f.attrs["channel_schema"] = "paired_channels_v2"
     sm = f.require_group("SP")
-    g_src = sm.require_group(str(src_key))
+    g_src = sm.require_group("pion_pair").require_group(str(pion_pair_label))
     p_tag = "PX"+str(momentum[0])+"PY"+str(momentum[1])+"PZ"+str(momentum[2])
     g_p = g_src.require_group(p_tag)
     idx = 0
@@ -416,7 +485,7 @@ def save_pion_soft_factor_qTMDWF_hdf5_noRoll(corr, tag, src_key, momentum, bT_di
 
 
 # Save the wall-to-wall two-point diagnostic used by the pion soft-factor workflow.
-def save_pion_soft_factor_c2pt_hdf5_noRoll(corr, tag, src_key, sink_keys, momentum, latt_info):
+def save_pion_soft_factor_c2pt_hdf5_noRoll(corr, tag, pion_pair_label, momentum, latt_info):
     save_h5 = tag + ".h5"
     ensure_parent_dir(save_h5)
     f = h5py.File(save_h5, 'w')
@@ -424,12 +493,11 @@ def save_pion_soft_factor_c2pt_hdf5_noRoll(corr, tag, src_key, sink_keys, moment
     if latt_info.mpi_rank == 0:
         print(f"no roll")
         print(f"corr.shape, {np.shape(corr)}")
+    f.attrs["channel_schema"] = "paired_channels_v2"
     sm = f.require_group("SS")
-    g_src = sm.require_group(str(src_key))
+    g_src = sm.require_group("pion_pair").require_group(str(pion_pair_label))
     p_tag = "PX"+str(momentum[0])+"PY"+str(momentum[1])+"PZ"+str(momentum[2])
-    for isink, sink_key in enumerate(sink_keys):
-        g_sink = g_src.require_group(str(sink_key))
-        g_sink.create_dataset(p_tag, data=corr[isink])
+    g_src.create_dataset(p_tag, data=corr)
     f.close()
 
 

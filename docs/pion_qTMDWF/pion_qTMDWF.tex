@@ -121,15 +121,22 @@ where $\Gamma_{\text{sink}}$ runs over the 16 bilinear gamma structures (see Sec
 
 \subsection{Source Gamma Modes}
 
-The mature implementation supports three source gamma modes, specified by the \texttt{src\_mode} parameter:
+The shared pion C2 kernel supports four source Gamma forms, selected by the
+\texttt{src\_gamma} argument:
 
 \begin{enumerate}
     \item \textbf{\texttt{"fixed\_g5"} (default):} $\Gamma_{\text{src}} = \gamma_5$ for all sink gamma structures. This is the standard pseudoscalar pion interpolator.
     \item \textbf{\texttt{"same\_as\_sink"}:} $\Gamma_{\text{src}} = \Gamma_{\text{sink}}$, i.e., the same gamma matrix used at the sink is also used at the source.
     \item \textbf{\texttt{"dagger\_of\_sink"}:} $\Gamma_{\text{src}} = \gamma_5 \, \Gamma_{\text{sink}}^\dagger \, \gamma_5$, the $\gamma_5$-hermitian conjugate of the sink gamma.
+    \item \textbf{A canonical Gamma label:} the selected raw PyQUDA Gamma is
+    held fixed while the sink scans all 16 channels.
 \end{enumerate}
 
-In contrast, the development version additionally supports an arbitrary specific gamma label (e.g., \texttt{"Z"}, \texttt{"X"}).
+The two relational modes, \texttt{same\_as\_sink} and
+\texttt{dagger\_of\_sink}, pair each sink channel with its own source matrix.
+Their output Gamma axis is therefore a paired sink/source axis, not a scan of
+sink operators at one fixed source Gamma. The qDA local C2 uses
+\texttt{dagger\_of\_sink}; qTMDWF production defaults remain unchanged.
 
 \subsection{Contraction Algorithm}
 
@@ -363,13 +370,15 @@ The mature reference implementation is located at:
 pyquda_measurement_utils/pion_qTMDWF_pyquda.py
 \end{verbatim}
 
-It defines the class \texttt{pion\_TMDWF\_measurement} and the following module-level structures:
+It defines the class \texttt{pion\_TMDWF\_measurement}.  The two-point
+contraction and canonical Gamma definitions are imported from
+\texttt{pion\_utils\_vibe\_develop.py}; qTMDWF does not maintain a duplicate
+implementation.
 
 \begin{itemize}
     \item \texttt{my\_gammas}: List of 16 gamma matrix label strings.
     \item \texttt{my\_pyquda\_gammas}: List of 16 \texttt{gamma.gamma()} objects in the canonical order.
     \item \texttt{pyquda\_gammas\_order}: List of 16 integer bitmask indices.
-    \item \texttt{G5}: The $\gamma_5$ matrix object, \texttt{gamma.gamma(15)}.
 \end{itemize}
 
 \subsection{Class: \texttt{pion\_TMDWF\_measurement}}
@@ -404,7 +413,8 @@ Parameters:
 
 \begin{lstlisting}
 def contract_2pt_pion(self, latt_info, prop_f, prop_b,
-                       phases, tag, src_mode="fixed_g5"):
+                       phases, tag, source_gamma_label="5",
+                       attrs=None):
 \end{lstlisting}
 
 Performs the connected pion two-point contraction with sink smearing. Arguments:
@@ -414,8 +424,16 @@ Performs the connected pion two-point contraction with sink smearing. Arguments:
     \item \texttt{prop\_b}: Backward (antiquark) propagator.
     \item \texttt{phases}: Momentum phases from \texttt{MomentumPhase.getPhases()}.
     \item \texttt{tag}: Output file tag for HDF5.
-    \item \texttt{src\_mode}: One of \texttt{"fixed\_g5"}, \texttt{"same\_as\_sink"}, \texttt{"dagger\_of\_sink"}.
+    \item \texttt{source\_gamma\_label}: A canonical raw PyQUDA source Gamma
+    label or one of the relational source modes described above.
 \end{itemize}
+
+After sink smearing this method calls the shared pion C2 kernel.  The kernel
+allocates its working correlator with the local time extent
+\texttt{latt\_info.size[3]}; only the MPI-gathered result has the global
+$N_t$.  For several explicit
+source labels, \texttt{contract\_2pt\_pion\_multi\_src\_gamma} constructs the
+backward line once and writes one C2 file per source label.
 
 \subsubsection{\texttt{create\_TMD\_Wilsonline\_index\_list\_CG()}}
 
@@ -514,7 +532,7 @@ Wilson index reordering & Duplicated inline as local function \texttt{reorder\_i
 \hline
 Momentum list & \texttt{plist} from \texttt{range(pzmin, pzmax)} in $z$ only & Explicit \texttt{p\_2pt}, \texttt{qext}, \texttt{qext\_PDF} lists with $x$, $y$, $z$ support \\
 \hline
-Source gamma & 3 modes only: \texttt{fixed\_g5}, \texttt{same\_as\_sink}, \texttt{dagger\_of\_sink} & 4 modes: the 3 above plus any specific gamma label (e.g., \texttt{"Z"}) \\
+Source gamma & \texttt{fixed\_g5}, \texttt{same\_as\_sink}, \texttt{dagger\_of\_sink}, or a canonical Gamma label & Same shared modes and labels \\
 \hline
 Contraction methods & \texttt{contract\_2pt\_pion()} only; 3pt contracted inline in application & \texttt{contract\_2pt\_pion()}, \texttt{contract\_qTMD\_CG()}, \texttt{contract\_PDF()} all as class methods \\
 \hline

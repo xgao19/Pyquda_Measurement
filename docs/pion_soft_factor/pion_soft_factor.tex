@@ -618,13 +618,21 @@ Key & Description \\
 \walltag{bT\_length} & Maximum $b_{T}$ \\
 \walltag{bz\_length} & Maximum $b_{z}$ (qTMDWF diagnostic) \\
 \walltag{tsep\_list} & List of sink separations \\
-\walltag{pion\_src}  & Dictionary of source interpolators (default: \walltag{Z5-X5}) \\
-\walltag{pion\_sink} & Dictionary of sink interpolators (default: same as src) \\
-\walltag{Gamma1}     & Dictionary of $\Gamma_{1}$ insertions (default: soft-factor set) \\
-\walltag{Gamma2}     & Dictionary of $\Gamma_{2}$ insertions (default: soft-factor set) \\
+\walltag{pion\_channel\_pairs} & Ordered pair label $\mapsto(\Gamma_{\rm src},\Gamma_{\rm sink})$ \\
+\walltag{gamma\_channel\_pairs} & Ordered pair label $\mapsto(\Gamma_1\text{ label},\Gamma_2\text{ label})$ \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+The channel axes are paired rather than Cartesian products.  The stored order
+is
+\texttt{[pion\_pair,gamma\_pair,bT\_direction,bT,time]} (with an outer
+\texttt{tsep} axis in the combined output).  Each pair label and both members
+are written explicitly to HDF5.  The insertion labels are resolved through the
+canonical raw PyQUDA basis
+\texttt{5,I,X,Y,X5,Y5}; in particular \texttt{Y5} is the raw bit-mask matrix,
+not a separately sign-adjusted physical axial matrix.  The file stores the raw
+basis, PyQUDA IDs, and \texttt{physical\_from\_pyquda} transform.
 
 \subsection{\walltag{create\_wall\_src(latt\_info, tslice, momentum)}}
 

@@ -76,21 +76,25 @@ import numpy as np
 
 from pyquda_utils import core, gamma, phase, source
 
+from pyquda_measurement_utils.fermion_bilinear_basis import (
+    GAMMA_LABELS,
+    PYQUDA_GAMMA_IDS,
+)
 from pyquda_measurement_utils.io_corr import ensure_parent_dir
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 
 
 soft_factor_gammas = ["5", "I", "X", "Y", "X5", "Y5"]
-soft_factor_pyquda_gammas = {
-    "5": gamma.gamma(15),
-    "I": gamma.gamma(0),
-    "X": gamma.gamma(1),
-    "Y": gamma.gamma(2),
-    "X5": gamma.gamma(1) @ gamma.gamma(15),
-    "Y5": gamma.gamma(2) @ gamma.gamma(15),
+_raw_gamma_by_label = {
+    label: gamma.gamma(gamma_id)
+    for label, gamma_id in zip(GAMMA_LABELS, PYQUDA_GAMMA_IDS)
 }
-soft_factor_pion_interpolators = {
-    "Z5-X5": gamma.gamma(4) @ gamma.gamma(15) - gamma.gamma(1) @ gamma.gamma(15),
+soft_factor_gamma_channel_pairs = {
+    label: (label, label) for label in soft_factor_gammas
+}
+_z5_minus_x5 = gamma.gamma(4) @ gamma.gamma(15) - gamma.gamma(1) @ gamma.gamma(15)
+soft_factor_pion_channel_pairs = {
+    "Z5-X5__Z5-X5": (_z5_minus_x5, _z5_minus_x5),
 }
 G5 = gamma.gamma(15)
 
@@ -146,10 +150,19 @@ class pion_soft_factor:
         self.bT_length = parameters["bT_length"]
         self.bz_length = parameters.get("bz_length", 0)
         self.tsep_list = parameters["tsep_list"]
-        self.pion_src = parameters.get("pion_src", soft_factor_pion_interpolators)
-        self.pion_sink = parameters.get("pion_sink", soft_factor_pion_interpolators)
-        self.Gamma1 = parameters.get("Gamma1", soft_factor_pyquda_gammas)
-        self.Gamma2 = parameters.get("Gamma2", soft_factor_pyquda_gammas)
+        self.pion_channel_pairs = parameters.get(
+            "pion_channel_pairs", soft_factor_pion_channel_pairs
+        )
+        self.gamma_channel_pairs = parameters.get(
+            "gamma_channel_pairs", soft_factor_gamma_channel_pairs
+        )
+        if not self.pion_channel_pairs or not self.gamma_channel_pairs:
+            raise ValueError("soft-factor channel-pair mappings must not be empty")
+        for pair_label, gamma_labels in self.gamma_channel_pairs.items():
+            if len(gamma_labels) != 2 or any(label not in _raw_gamma_by_label for label in gamma_labels):
+                raise ValueError(
+                    f"Invalid Gamma pair {pair_label!r}: expected two canonical raw labels"
+                )
 
     def create_wall_src(self, latt_info, tslice, momentum):
         source_phase = phase.MomentumPhase(latt_info).getPhase(as_momentum_3(momentum))
@@ -182,22 +195,24 @@ class pion_soft_factor:
         phased.data[:] = phased.data * mom_phase[:, :, :, :, :, None, None, None, None]
         return phased
 
-    def contract_wall_2pt(self, latt_info, prop_fw, prop_bw, pion_mom, src_key, sink_keys):
+    def contract_wall_2pt(self, latt_info, prop_fw, prop_bw, pion_mom, pion_pair_label):
         xp = _get_xp_from_array(prop_fw.data)
-        src_gamma = _matrix_on_backend(_gamma_matrix(self.pion_src[src_key]), xp, prop_fw.data)
-        sink_gamma_ls = _matrix_stack(self.pion_sink, sink_keys, prop_fw.data)
+        src_matrix, sink_matrix = self.pion_channel_pairs[pion_pair_label]
+        src_gamma = _matrix_on_backend(_gamma_matrix(src_matrix), xp, prop_fw.data)
+        sink_gamma = _matrix_on_backend(_gamma_matrix(sink_matrix), xp, prop_fw.data)
         gamma5 = _matrix_on_backend(_gamma_matrix(G5), xp, prop_fw.data)
         prop_fw_phase = self.apply_phase(prop_fw, [-pion_mom[0], -pion_mom[1], -pion_mom[2]], 1)
         prop_fw_t = prop_fw_phase.lexico(False)
         prop_bw_bar = xp.einsum("ij,tzyxmlca,kl->tzyxkjca", gamma5, prop_bw.lexico(False).conj(), gamma5, optimize=True)
-        prop_bw_src_sink = xp.einsum("ik,tzyxklca,gln->gtzyxinca", src_gamma, prop_bw_bar, sink_gamma_ls, optimize=True)
-        corr_local = xp.einsum("gtzyxjiab,tzyxilba->gtzyx", prop_bw_src_sink, prop_fw_t, optimize=True)
-        corr_t = xp.einsum("gtzyx->gt", corr_local, optimize=True)
-        return core.gatherLattice(_to_numpy(xp, corr_t), [1, -1, -1, -1])
+        prop_bw_src_sink = xp.einsum("ik,tzyxklca,ln->tzyxinca", src_gamma, prop_bw_bar, sink_gamma, optimize=True)
+        corr_local = xp.einsum("tzyxjiab,tzyxilba->tzyx", prop_bw_src_sink, prop_fw_t, optimize=True)
+        corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
+        return core.gatherLattice(_to_numpy(xp, corr_t), [0, -1, -1, -1])
 
-    def contract_tmdwf_check(self, latt_info, prop_fw, prop_bw, pion_mom, src_key):
+    def contract_tmdwf_check(self, latt_info, prop_fw, prop_bw, pion_mom, pion_pair_label):
         xp = _get_xp_from_array(prop_fw.data)
-        src_gamma = _matrix_on_backend(_gamma_matrix(self.pion_src[src_key]), xp, prop_fw.data)
+        src_matrix, _ = self.pion_channel_pairs[pion_pair_label]
+        src_gamma = _matrix_on_backend(_gamma_matrix(src_matrix), xp, prop_fw.data)
         gamma5 = _matrix_on_backend(_gamma_matrix(G5), xp, prop_fw.data)
         prop_fw_phase = self.apply_phase(prop_fw, [-pion_mom[0], -pion_mom[1], -pion_mom[2]], 1)
         prop_fw_t = prop_fw_phase.lexico(False)
@@ -219,14 +234,26 @@ class pion_soft_factor:
     def contract_soft_factor(self, latt_info, prop_fw, prop_bw_src, prop_sink_bw, prop_sink_fw, pion_mom):
         xp = _get_xp_from_array(prop_fw.data)
         gamma5 = _matrix_on_backend(_gamma_matrix(G5), xp, prop_fw.data)
-        src_keys = list(self.pion_src.keys())
-        sink_keys = list(self.pion_sink.keys())
-        gamma1_keys = list(self.Gamma1.keys())
-        gamma2_keys = list(self.Gamma2.keys())
-        src_ls = _matrix_stack(self.pion_src, src_keys, prop_fw.data)
-        sink_ls = _matrix_stack(self.pion_sink, sink_keys, prop_fw.data)
-        gamma1_ls = _matrix_stack(self.Gamma1, gamma1_keys, prop_fw.data)
-        gamma2_ls = _matrix_stack(self.Gamma2, gamma2_keys, prop_fw.data)
+        pion_pair_labels = list(self.pion_channel_pairs)
+        gamma_pair_labels = list(self.gamma_channel_pairs)
+        pion_src_matrices = {
+            label: matrices[0] for label, matrices in self.pion_channel_pairs.items()
+        }
+        pion_sink_matrices = {
+            label: matrices[1] for label, matrices in self.pion_channel_pairs.items()
+        }
+        gamma1_matrices = {
+            pair_label: _raw_gamma_by_label[labels[0]]
+            for pair_label, labels in self.gamma_channel_pairs.items()
+        }
+        gamma2_matrices = {
+            pair_label: _raw_gamma_by_label[labels[1]]
+            for pair_label, labels in self.gamma_channel_pairs.items()
+        }
+        src_ls = _matrix_stack(pion_src_matrices, pion_pair_labels, prop_fw.data)
+        sink_ls = _matrix_stack(pion_sink_matrices, pion_pair_labels, prop_fw.data)
+        gamma1_ls = _matrix_stack(gamma1_matrices, gamma_pair_labels, prop_fw.data)
+        gamma2_ls = _matrix_stack(gamma2_matrices, gamma_pair_labels, prop_fw.data)
 
         Gw = prop_fw.lexico(False)
         Gw_bperp_dagger = prop_bw_src.lexico(False)
@@ -234,7 +261,7 @@ class pion_soft_factor:
         Gw_bperp = self.apply_phase(prop_sink_bw, [-2 * pion_mom[0], -2 * pion_mom[1], -2 * pion_mom[2]], 1).lexico(False)
         Gw_dagger_conj = Gw_dagger.conj()
 
-        shape = (len(src_keys), len(gamma1_keys), len(self.bT_dir), self.bT_length + 1, latt_info.global_size[3])
+        shape = (len(pion_pair_labels), len(gamma_pair_labels), len(self.bT_dir), self.bT_length + 1, latt_info.global_size[3])
         corr_collect = np.empty(shape, dtype=np.complex128) if latt_info.mpi_rank == 0 else None
         for idir, bT_dir in enumerate(self.bT_dir):
             for bT in range(self.bT_length + 1):
@@ -243,9 +270,9 @@ class pion_soft_factor:
                 Gw_bperp_dagger_shift = xp.roll(Gw_bperp_dagger.conj(), shift=bT, axis=axis)
                 tmp_1 = xp.einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc", Gw, src_ls, gamma5, Gw_bperp_dagger_shift, gamma5, optimize=True)
                 tmp_2 = xp.einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc", Gw_bperp_shift, sink_ls, gamma5, Gw_dagger_conj, gamma5, optimize=True)
-                for isrc in range(len(src_keys)):
-                    for igm in range(len(gamma1_keys)):
-                        mpi_print(latt_info, f"Contract pion soft factor bT={bT} dir={bT_dir} src={src_keys[isrc]} gamma={gamma1_keys[igm]}")
+                for isrc in range(len(pion_pair_labels)):
+                    for igm in range(len(gamma_pair_labels)):
+                        mpi_print(latt_info, f"Contract pion soft factor bT={bT} dir={bT_dir} pion_pair={pion_pair_labels[isrc]} gamma_pair={gamma_pair_labels[igm]}")
                         corr_local = xp.einsum(
                             "tzyxjiba,ik,tzyxklba,lj->tzyx",
                             tmp_1[isrc],
@@ -258,4 +285,4 @@ class pion_soft_factor:
                         corr_global = core.gatherLattice(_to_numpy(xp, corr_t), [0, -1, -1, -1])
                         if latt_info.mpi_rank == 0:
                             corr_collect[isrc, igm, idir, bT] = corr_global
-        return corr_collect, src_keys, sink_keys, gamma1_keys, gamma2_keys
+        return corr_collect, pion_pair_labels, gamma_pair_labels

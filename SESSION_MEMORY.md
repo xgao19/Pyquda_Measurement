@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-07-13
+Last updated: 2026-07-16
 
 This file contains only reusable environment facts, stable conventions, and
 pitfalls that are easy to repeat.  Commit history and completed-work summaries
@@ -165,6 +165,12 @@ python tests/run_smoke_tests.py
 
 ## qTMD Conventions And Pitfalls
 
+- qTMDWF and qDA local pion C2 use explicit fixed source Gamma labels and a
+  full 16-Gamma sink scan.
+- For pion qTMD/PDF and EMFF, the smearing tag describes only the gauge and
+  smearing setup.  Encode source and sink interpolators explicitly in output
+  tags, HDF5 provenance and sample-log identity; do not hide the channel in a
+  user-overridable smearing tag.
 - Fixed-length GI staple index is
   `[b_T, b_z, eta, transverse_direction]`, with even `b_z`,
   `eta >= abs(b_z)/2`, `b_T >= 0`, and total length `2*eta + b_T`.

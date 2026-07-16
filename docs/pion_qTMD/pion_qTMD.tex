@@ -725,12 +725,9 @@ Workflow:
         (\verb|_source_gamma_stack|).
   \item Construct antiquark line via \verb|_meson_backward_line| (einsum with
         $\gamma_5$ front and back).
-  \item Attach sink gammas to backward line: einsum
-        \texttt{"wtzyxjicf,gim->gwtzyxjmcf"}.
-  \item Contract with forward propagator and source gammas: einsum
-        \texttt{"gwtzyxjiab,wtzyxilba,glj->gwtzyx"}.
-  \item Fourier-project with \texttt{phases}: einsum
-        \texttt{"qwtzyx,gwtzyx->gqt"}.
+  \item Loop over sink Gamma channels, attach one Gamma to the backward line,
+        contract it with the forward propagator and matching source Gamma,
+        and immediately Fourier-project the resulting scalar field.
   \item Gather across MPI ranks (\texttt{core.gatherLattice}).
   \item Save to HDF5 via \texttt{save\_proton\_c2pt\_hdf5}.
 \end{enumerate}
@@ -763,6 +760,11 @@ Workflow:
 Each Wilson index produces an output of shape \texttt{[gamma, momentum, time]};
 stacking across all $N_W$ Wilson indices yields shape \texttt{[N\_W, gamma,
 momentum, time]}.
+
+The per-shift kernel deliberately does not construct a
+\texttt{[16,propagator]} object.  It retains only one propagator-sized
+Gamma-inserted line at a time and accumulates the small
+\texttt{[gamma,momentum,time]} result.
 
 \subsection{\texttt{contract\_PDF}}
 
@@ -913,6 +915,17 @@ and additionally truncates to $\tau \in [0, t_{\rm sep}]$:
 \end{equation}
 
 \subsection{HDF5 Directory Layout}
+
+The smearing tag identifies only gauge preprocessing and smearing parameters.
+The pion channel is encoded separately and unambiguously.  The two-point file
+name contains \texttt{.src<SRC>}; its attributes store
+\texttt{src\_interpolator=<SRC>} and
+\texttt{sink\_interpolator=all\_16\_gamma\_scan}.  Connected qTMD and PDF
+three-point file names contain
+\texttt{.src<SRC>.sink<SINK>.<operator-gamma>}.  Their root attributes store
+the same source and sink labels together with \texttt{operator\_gamma}.  The
+source/sink channel identity also enters the sample-log name, so two channels
+cannot share resume state even when a custom smearing tag is reused.
 
 The HDF5 file hierarchy for the three-point function is:
 \begin{verbatim}

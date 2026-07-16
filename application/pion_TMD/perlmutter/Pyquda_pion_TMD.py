@@ -37,6 +37,7 @@ from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_meson_bw_seq_pyquda
 from pyquda_measurement_utils.io_corr import (
     get_c2pt_file_tag,
+    get_pion_channel_tag,
     get_qTMD_file_tag,
     get_sample_log_tag,
     save_qTMD_pion_hdf5_noRoll,
@@ -86,7 +87,11 @@ script_dir = Path(__file__).resolve().parent
 data_dir = Path(args.data_dir) if args.data_dir else script_dir / "data"
 gauge_path = args.gauge_path or str(software_root / "Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0")
 lat_tag = os.environ.get("PION_TMD_LAT_TAG", "S8T32")
-sm_tag = os.environ.get("PION_TMD_SM_TAG", f"1HYP_GSRC_W{args.width:g}_k0_{args.sink_interpolator}")
+sm_tag = os.environ.get("PION_TMD_SM_TAG", f"1HYP_GSRC_W{args.width:g}_k0")
+channel_tag = get_pion_channel_tag(
+    sm_tag, args.src_interpolator, args.sink_interpolator
+)
+c2_channel_tag = get_pion_channel_tag(sm_tag, args.src_interpolator)
 conf = args.config_num
 run_cg_qtmd = bool(args.run_cg_qtmd)
 run_gi_qtmd = bool(args.run_gi_qtmd)
@@ -151,7 +156,7 @@ src_shift = np.array([0, 0, 0, 0])
 src_origin = np.array([int(conf) % L[i] for i in range(4)]) + src_shift
 src_positions = srcLoc_distri_eq(L, src_origin)[: args.num_src]
 
-sample_log_file = data_dir / "sample_log_qtmd" / f"{conf}_{sm_tag}_{pf_tag}"
+sample_log_file = data_dir / "sample_log_qtmd" / f"{conf}_{channel_tag}_{pf_tag}"
 if latt_info.mpi_rank == 0:
     sample_log_file.touch(exist_ok=True)
 
@@ -159,7 +164,7 @@ sink_gamma = gamma_from_label(args.sink_interpolator)
 
 for pos in src_positions:
     t0_pos = time.time()
-    sample_log_tag = get_sample_log_tag(str(conf), pos, f"{sm_tag}_{pf_tag}")
+    sample_log_tag = get_sample_log_tag(str(conf), pos, f"{channel_tag}_{pf_tag}")
     mpi_print(latt_info, f"START: {sample_log_tag}")
 
     t0 = time.time()
@@ -172,10 +177,23 @@ for pos in src_positions:
     mpi_print(latt_info, f"TIME PyQUDA: Forward propagator inversion {time.time() - t0}s")
 
     t0 = time.time()
-    c2_tag = get_c2pt_file_tag(str(data_dir), lat_tag, conf, "CG.ex", pos, sm_tag)
+    c2_tag = get_c2pt_file_tag(
+        str(data_dir), lat_tag, conf, "CG.ex", pos, c2_channel_tag
+    )
     p_2pt_xyz = [[-v[0], -v[1], -v[2]] for v in parameters["p_2pt"]]
     phases_2pt = MomentumPhase(latt_info).getPhases(p_2pt_xyz, x0=pos)
-    measurement.contract_2pt_pion(latt_info, prop_fw, prop_fw, phases_2pt, c2_tag, src_gamma=args.src_interpolator)
+    measurement.contract_2pt_pion(
+        latt_info,
+        prop_fw,
+        prop_fw,
+        phases_2pt,
+        c2_tag,
+        src_gamma=args.src_interpolator,
+        attrs={
+            "src_interpolator": args.src_interpolator,
+            "sink_interpolator": "all_16_gamma_scan",
+        },
+    )
     mpi_print(latt_info, f"TIME PyQUDA: Pion 2pt contraction {time.time() - t0}s")
 
     t0 = time.time()
@@ -204,7 +222,6 @@ for pos in src_positions:
 
     tasks = list(range(len(my_gammas)))
     rank = latt_info.mpi_rank
-    size = getMPIComm().Get_size()
 
     if run_cg_qtmd:
         t0 = time.time()
@@ -225,7 +242,7 @@ for pos in src_positions:
             pion_TMDs = np.transpose(pion_TMDs, (0, 2, 1, 3))
         pion_TMDs = getMPIComm().bcast(pion_TMDs, root=0)
 
-        for gidx in tasks[rank::size]:
+        for gidx in tasks if rank == 0 else ():
             gm = my_gammas[gidx]
             tag = get_qTMD_file_tag(
                 str(data_dir),
@@ -233,7 +250,7 @@ for pos in src_positions:
                 conf,
                 "CG.ex",
                 pos,
-                f"{sm_tag}.{pf_tag}.{gm}",
+                f"{channel_tag}.{pf_tag}.{gm}",
             )
             mpi_print(latt_info, f"Saving pion qTMD gamma {gm}: {tag}")
             save_qTMD_pion_hdf5_noRoll(
@@ -244,6 +261,11 @@ for pos in src_positions:
                 W_index_list_CG,
                 parameters["t_insert"],
                 latt_info,
+                attrs={
+                    "src_interpolator": args.src_interpolator,
+                    "sink_interpolator": args.sink_interpolator,
+                    "operator_gamma": gm,
+                },
             )
 
     if run_gi_qtmd:
@@ -266,7 +288,7 @@ for pos in src_positions:
             pion_TMDs = np.transpose(pion_TMDs, (0, 2, 1, 3))
         pion_TMDs = getMPIComm().bcast(pion_TMDs, root=0)
 
-        for gidx in tasks[rank::size]:
+        for gidx in tasks if rank == 0 else ():
             gm = my_gammas[gidx]
             tag = get_qTMD_file_tag(
                 str(data_dir),
@@ -274,7 +296,7 @@ for pos in src_positions:
                 conf,
                 "GI_qTMD.ex",
                 pos,
-                f"{sm_tag}.{pf_tag}.{gm}",
+                f"{channel_tag}.{pf_tag}.{gm}",
             )
             mpi_print(latt_info, f"Saving pion GI_qTMD gamma {gm}: {tag}")
             save_qTMD_pion_hdf5_noRoll(
@@ -285,6 +307,11 @@ for pos in src_positions:
                 W_index_list_GI,
                 parameters["t_insert"],
                 latt_info,
+                attrs={
+                    "src_interpolator": args.src_interpolator,
+                    "sink_interpolator": args.sink_interpolator,
+                    "operator_gamma": gm,
+                },
             )
 
     if run_pdf:
@@ -308,7 +335,7 @@ for pos in src_positions:
                 pion_PDFs = np.transpose(pion_PDFs, (0, 2, 1, 3))
             pion_PDFs = getMPIComm().bcast(pion_PDFs, root=0)
 
-            for gidx in tasks[rank::size]:
+            for gidx in tasks if rank == 0 else ():
                 gm = my_gammas[gidx]
                 tag = get_qTMD_file_tag(
                     str(data_dir),
@@ -316,7 +343,7 @@ for pos in src_positions:
                     conf,
                     f"{pdf_kind}.ex",
                     pos,
-                    f"{sm_tag}.{pf_tag}.{gm}",
+                    f"{channel_tag}.{pf_tag}.{gm}",
                 )
                 mpi_print(latt_info, f"Saving pion {pdf_kind} gamma {gm}: {tag}")
                 save_qTMD_pion_hdf5_noRoll(
@@ -327,6 +354,11 @@ for pos in src_positions:
                     W_index_list_PDF,
                     parameters["t_insert"],
                     latt_info,
+                    attrs={
+                        "src_interpolator": args.src_interpolator,
+                        "sink_interpolator": args.sink_interpolator,
+                        "operator_gamma": gm,
+                    },
                 )
     sync_backend_array(prop_fw.data)
 

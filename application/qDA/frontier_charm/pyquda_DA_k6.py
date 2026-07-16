@@ -20,8 +20,8 @@ Here:
   into the covariant shift.
 - The sink gamma runs over the 16-element gamma basis in `gammalist`.
 - The source gamma is chosen from `da_src_gammalist`.
-- The 2pt correlator is also measured with an independent source convention
-  controlled by `src_2pt_mode`.
+- The local 2pt correlator uses the paired source convention
+  `gamma5 * Gamma_sink^dagger * gamma5`.
 
 Implementation goals
 --------------------
@@ -35,11 +35,11 @@ import numpy as np
 import cupy as cp
 
 from pyquda import init, getMPIComm
-from pyquda_utils import core, gamma, io, source
+from pyquda_utils import core, io, source
 from pyquda_utils.phase import MomentumPhase
 
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
-from pyquda_measurement_utils.pion_qTMDWF_pyquda import pion_TMDWF_measurement, my_pyquda_gammas
+from pyquda_measurement_utils.pion_qTMDWF_pyquda import pion_TMDWF_measurement
 from pyquda_measurement_utils.io_corr import get_sample_log_tag, get_c2pt_file_tag, get_qTMDWF_file_tag, save_qTMDWF_hdf5_noRoll
 from pyquda_measurement_utils.tools import srcLoc_distri_eq, mpi_print
 
@@ -68,11 +68,6 @@ smearing_width = 1.0   # corresponds to W10 in the tag
 smearing_boost_k = 6   # corresponds to k6 in the tag
 
 sm_tag = f"1HYP_GSRC_W{int(round(smearing_width * 10))}_k{smearing_boost_k}" # NOTE
-# Source-gamma construction rule used only in `contract_2pt_pion(...)`.
-# It sets how the 2pt source Dirac structure is built from the sink gamma:
-# `fixed_g5`, `same_as_sink`, or `dagger_of_sink`.
-src_2pt_mode = "dagger_of_sink" # NOTE
-
 # Source-gamma channels measured in the DA blocks (CG / GI).
 # This is a list of source choices, e.g. `["5"]`, `["5", "X", "T"]`, or `gammalist`;
 # for each chosen source, the sink still runs over the full `gammalist`.
@@ -80,7 +75,6 @@ da_src_gammalist = ["5", "X", "T"] # NOTE
 
 
 init(mpi_geometry, enable_mps=True)
-G5 = gamma.gamma(15)
 
 # ============================================================================
 # Physics / measurement setup
@@ -108,7 +102,6 @@ parameters = {
     "save_propagators" : False
 }
 Measurement = pion_TMDWF_measurement(parameters)
-xp = cp
 gammalist = ["5", "T", "T5", "X", "X5", "Y", "Y5", "Z", "Z5", "I", "SXT", "SXY", "SXZ", "SYT", "SYZ", "SZT"]
 momentum_list = [[0, 0, p, 0] for p in range(parameters["pzmin"], parameters["pzmax"])]
 
@@ -119,24 +112,6 @@ momentum_list = [[0, 0, p, 0] for p in range(parameters["pzmin"], parameters["pz
 # Synchronize CUDA work only where timing boundaries matter.
 def sync_cuda():
     cp.cuda.runtime.deviceSynchronize()
-
-
-# Build the full 16-gamma sink basis in the PyQUDA ordering used by this script.
-def build_pyquda_gamma_ls():
-    first_gamma = my_pyquda_gammas[0]
-    gamma_ls = xp.empty((len(my_pyquda_gammas),) + first_gamma.shape, dtype=first_gamma.dtype)
-    for gamma_idx, gamma_pyq in enumerate(my_pyquda_gammas):
-        gamma_ls[gamma_idx] = gamma_pyq
-    return gamma_ls
-
-
-# Validate the requested DA source gamma names and return their matrix list.
-def build_da_src_gamma_ls(pyquda_gamma_ls):
-    gamma_index = {name: idx for idx, name in enumerate(gammalist)}
-    invalid_src = [name for name in da_src_gammalist if name not in gamma_index]
-    if invalid_src:
-        raise ValueError(f"Invalid da_src_gammalist entries: {invalid_src}")
-    return [(name, pyquda_gamma_ls[gamma_index[name]]) for name in da_src_gammalist]
 
 
 # Save all sink-gamma channels for each chosen DA source gamma into one file.
@@ -164,61 +139,6 @@ def save_da_correlators(collect_by_src, pos, W_index_list, block_tag):
     mpi_print(latt_info, f"TIME: save {block_tag} DAs {time.time() - t0}")
 
 
-# Contract one DA block (CG or GI) and save the resulting correlators.
-def contract_da_block(propag_f, propag_b, phases_2pt, W_index_list, block_tag, shift_prop):
-    mpi_print(latt_info, f"Contraction: Start DA: {block_tag.upper()} no links (bT=0 TMDWF)")
-    # Common sink-side gamma structure for all source gamma choices.
-    G5_gamma = xp.einsum("ki,gim->gkm", G5, pyquda_gamma_ls)
-    collect_by_src = []
-
-    for src_name, Gsrc in da_src_gamma_ls:
-        collect_src = []
-        tmd_backward_prop = propag_b.copy()
-        # Source gamma is combined with gamma5 once and reused for all Wilson-line lengths.
-        Gsrc_G5 = xp.einsum("ij,jk->ik", Gsrc, G5)
-
-        for iW, WL_indices in enumerate(W_index_list):
-            t0 = time.time()
-            mpi_print(
-                latt_info,
-                f"TIME PyQUDA: contract {block_tag.upper()} src{src_name} {iW+1}/{len(W_index_list)} {WL_indices}",
-            )
-
-            if iW == 0:
-                WL_indices_previous = [0, 0, 0, 0]
-            else:
-                WL_indices_previous = W_index_list[iW - 1]
-
-            # Update the backward line to the next DA Wilson-line geometry.
-            tmd_backward_prop = shift_prop(tmd_backward_prop, WL_indices, WL_indices_previous)
-            mpi_print(latt_info, f"TIME PyQUDA: cshift {time.time() - t0}")
-
-            t0 = time.time()
-            # Spin/color contraction at fixed Wilson-line length.
-            temp = xp.einsum(
-                "ij,wtzyxkjba,wtzyxliba->wtzyxkl",
-                Gsrc_G5,
-                tmd_backward_prop.data.conj(),
-                propag_f.data,
-            )
-            # Insert the sink gamma basis and project to all sink channels.
-            temp = xp.einsum("wtzyxkl,gkl->gwtzyx", temp, G5_gamma)
-            # Fourier transform to the requested longitudinal momenta.
-            temp = xp.einsum("qwtzyx,gwtzyx->qgt", phases_2pt, temp)
-            # Gather the correlator from the distributed lattice onto the root rank.
-            temp2 = core.gatherLattice(xp.asnumpy(temp), [2, -1, -1, -1])
-            collect_src.append(temp2)
-            mpi_print(latt_info, f"TIME PyQUDA: contract {block_tag.upper()} src{src_name} {time.time() - t0}")
-
-            del temp, temp2
-
-        del tmd_backward_prop
-        collect_by_src.append((src_name, collect_src))
-
-    save_da_correlators(collect_by_src, pos, W_index_list, block_tag)
-    mpi_print(latt_info, f"Contraction: Done DA: {block_tag.upper()} no links (bT=0 TMDWF)")
-
-
 # ============================================================================
 # Lattice / inverter / gamma preparation
 # ============================================================================
@@ -242,9 +162,6 @@ mpi_print(latt_info, f"--mpi_geometry {mpi_geometry}")
 mpi_print(latt_info, f"--plaquette U_hyp: {gauge.plaquette()}")
 
 dirac = core.getClover(latt_info, mass, 1e-15, 10000, xi_0, csw_r, csw_t, multigrid)
-
-pyquda_gamma_ls = build_pyquda_gamma_ls()
-da_src_gamma_ls = build_da_src_gamma_ls(pyquda_gamma_ls)
 
 src_shift = np.array([0,0,0,0]) + np.array([7,11,13,23])
 src_origin = np.array([int(conf)%L[i] for i in range(4)]) + src_shift
@@ -297,10 +214,17 @@ for ipos, pos in enumerate(src_production):
     # Two-point correlator
     # ------------------------------------------------------------------------
     t0 = time.time()
-    tag = get_c2pt_file_tag(data_dir, lat_tag, conf, "ex", pos, sm_tag)
     p_2pt_xyz = [[0, 0, -v] for v in range(parameters["pzmin"], parameters["pzmax"])]
     phases_2pt = MomentumPhase(latt_info).getPhases(p_2pt_xyz, x0=pos)
-    Measurement.contract_2pt_pion(latt_info, propag_f, propag_b, phases_2pt, tag, src_mode=src_2pt_mode)
+    tag = get_c2pt_file_tag(data_dir, lat_tag, conf, "ex", pos, sm_tag)
+    Measurement.contract_2pt_pion(
+        latt_info,
+        propag_f,
+        propag_b,
+        phases_2pt,
+        tag,
+        source_gamma_label="dagger_of_sink",
+    )
 
     sync_cuda()
     mpi_print(latt_info, f"TIME Pyquda: Contraction 2pt (includes sink smearing) {time.time() - t0}")
@@ -313,26 +237,36 @@ for ipos, pos in enumerate(src_production):
     # ------------------------------------------------------------------------
     # CG DA block
     # ------------------------------------------------------------------------
-    contract_da_block(
+    mpi_print(latt_info, "Contraction: Start DA: CG (bT=0 TMDWF)")
+    collect_by_src = Measurement.contract_DA(
+        latt_info,
+        None,
         propag_f,
         propag_b,
         phases_2pt,
         W_index_list,
-        "CG",
-        Measurement.create_fw_prop_TMD_CG,
+        da_src_gammalist,
+        gauge_invariant=False,
     )
+    save_da_correlators(collect_by_src, pos, W_index_list, "CG")
+    mpi_print(latt_info, "Contraction: Done DA: CG (bT=0 TMDWF)")
 
     # ------------------------------------------------------------------------
     # GI DA block
     # ------------------------------------------------------------------------
-    contract_da_block(
+    mpi_print(latt_info, "Contraction: Start DA: GI straight link (bT=0 TMDWF)")
+    collect_by_src = Measurement.contract_DA(
+        latt_info,
+        gauge,
         propag_f,
         propag_b,
         phases_2pt,
         W_index_list,
-        "GI",
-        Measurement.create_fw_prop_TMD_GI,
+        da_src_gammalist,
+        gauge_invariant=True,
     )
+    save_da_correlators(collect_by_src, pos, W_index_list, "GI")
+    mpi_print(latt_info, "Contraction: Done DA: GI straight link (bT=0 TMDWF)")
 
     # ------------------------------------------------------------------------
     # Bookkeeping for completed source positions

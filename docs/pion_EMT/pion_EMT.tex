@@ -199,13 +199,18 @@ so the einsum pattern for forming $\text{bw\_prop}$ is
 \end{verbatim}
 where index \code{i,j,k,l} $\in \{0,1,2,3\}$ (spin) and \code{a,b} $\in \{0,1,2\}$ (color). The transpose of spin-sink and spin-source indices $(\texttt{ilab} \to \texttt{kjba})$ implements the dagger with spin-color reordering.
 
-The final scalar folding into $C_2$ reads
+To avoid a 16-fold propagator-sized intermediate, the sink Gamma insertion and
+scalar folding are performed one channel at a time:
 \begin{verbatim}
-  bw_prop = contract("wtzyxjicf, gim -> gwtzyxjmcf", bw_prop, sink_gammas)
-  scalar   = contract("gwtzyxjiab, wtzyxilba, lj -> gwtzyx",
-                      bw_prop, prop_fw, src_gamma)
+  for gamma_idx, sink_gamma in enumerate(sink_gammas):
+      sink_inserted = contract("wtzyxjicf,im->wtzyxjmcf",
+                               bw_prop, sink_gamma)
+      scalar = contract("wtzyxjiab,wtzyxilba,lj->wtzyx",
+                        sink_inserted, prop_fw, src_gamma)
+      C2_local[gamma_idx] = contract("qwtzyx,wtzyx->qt", phases, scalar)
 \end{verbatim}
-where the first line applies all 16 sink gamma matrices via a stacked index \code{g}, and the second line traces over spin-sink (\code{i}), spin-source (\code{l,j}), and color ($\Tr_c$ via repeated \code{a,b}).
+Thus the persistent result still has all 16 sink channels, but no temporary
+array has both a Gamma axis and all propagator spin--color indices.
 
 \textbf{Boosted smearing:} If \code{CG\_GaussSmear} is enabled, Gaussian smearing with a momentum boost is applied at both source and sink:
 \begin{itemize}[nosep]

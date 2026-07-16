@@ -29,6 +29,20 @@ Useful runtime switches:
 GI qTMD production always uses the cached transporter path.  The direct
 covariant-shift implementation is test/reference code only.
 
+## Pion Channel Identity
+
+The setup/smearing tag does not contain an interpolator label.  Output and
+resume identities encode the channel explicitly:
+
+```text
+C2:        <sm_tag>.src<SRC>
+qTMD/PDF:  <sm_tag>.src<SRC>.sink<SINK>.<operator-gamma>
+```
+
+The same source, sink, and operator labels are stored as HDF5 attributes.  C2
+stores `sink_interpolator=all_16_gamma_scan` because all 16 sink gamma channels
+are written into the file.
+
 The default smoke gauge is:
 
 ```text

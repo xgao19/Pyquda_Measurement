@@ -10,12 +10,30 @@ from pyquda_measurement_utils.io_corr import (
     get_emt_proton_quark_3pt_file_tag,
     get_flowed_quark_ringed_norm_file_tag,
     get_pion_EMFF_file_tag,
+    get_pion_channel_tag,
     get_pion_soft_factor_file_tag,
     get_pion_soft_factor_prop_file_tag,
     get_qTMD_file_tag,
     get_qTMDWF_file_tag,
     get_sample_log_tag,
 )
+
+
+def test_pion_channel_tag_keeps_interpolators_outside_setup_identity():
+    setup = "custom_smearing"
+
+    assert get_pion_channel_tag(setup, "fixed_g5") == (
+        "custom_smearing.srcfixed_g5"
+    )
+    assert get_pion_channel_tag(setup, "fixed_g5", "5") == (
+        "custom_smearing.srcfixed_g5.sink5"
+    )
+    assert get_pion_channel_tag(setup, "same_as_sink", "5") != (
+        get_pion_channel_tag(setup, "fixed_g5", "5")
+    )
+    assert get_pion_channel_tag(setup, "fixed_g5", "T5") != (
+        get_pion_channel_tag(setup, "fixed_g5", "5")
+    )
 
 
 def test_standard_measurement_tag_helpers_are_deterministic():

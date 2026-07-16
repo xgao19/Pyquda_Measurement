@@ -130,16 +130,23 @@ class pion_EMFF:
         self.t_insert = parameters["t_insert"]
         self.save_propagators = parameters["save_propagators"]
 
-    def contract_2pt_pion(self, latt_info, prop_pos, prop_neg, phases, tag, src_gamma="fixed_g5"):
+    def contract_2pt_pion(
+        self, latt_info, prop_pos, prop_neg, phases, tag,
+        src_gamma="fixed_g5", attrs=None,
+    ):
         self.contract_2pt_pion_multi_src_gamma(
             latt_info,
             prop_pos,
             prop_neg,
             phases,
             {src_gamma: tag},
+            {src_gamma: attrs},
         )
 
-    def contract_2pt_pion_multi_src_gamma(self, latt_info, prop_pos, prop_neg, phases, tags_by_src_gamma):
+    def contract_2pt_pion_multi_src_gamma(
+        self, latt_info, prop_pos, prop_neg, phases, tags_by_src_gamma,
+        attrs_by_src_gamma=None,
+    ):
         mpi_print(latt_info, "Begin pion EMFF sink smearing")
         prop_pos = boosted_smearing(prop_pos, w=self.width, boost=self.pos_boost_src)
         prop_neg = boosted_smearing(prop_neg, w=self.width, boost=self.neg_boost_src)
@@ -154,8 +161,15 @@ class pion_EMFF:
         )
 
         if latt_info.mpi_rank == 0:
+            attrs_by_src_gamma = attrs_by_src_gamma or {}
             for src_gamma, tag in tags_by_src_gamma.items():
-                save_proton_c2pt_hdf5(corr_by_src[src_gamma], tag, my_gammas, self.pilist)
+                save_proton_c2pt_hdf5(
+                    corr_by_src[src_gamma],
+                    tag,
+                    my_gammas,
+                    self.pilist,
+                    attrs=attrs_by_src_gamma.get(src_gamma),
+                )
         del corr_by_src
 
     def contract_EMFF(self, latt_info, prop_pos, seq_bw_prop, phases, src_gamma="fixed_g5"):

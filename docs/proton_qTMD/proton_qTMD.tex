@@ -910,9 +910,14 @@ The measurement is organized into a class \texttt{proton\_TMD} in
     \texttt{boost\_out} & Backward propagator boost smearing \\
     \texttt{pol\_list} & List of polarization projections \\
     \texttt{t\_insert} & Time separation $t_{\text{sep}}$ \\
-    \texttt{save\_propagators} & Whether to save propagators
   \end{tabular}
 \end{center}
+
+The production measurement object stores only the forward-line smearing
+parameter \texttt{boost\_in}, which is used by its two-point contraction.
+The application-level \texttt{boost\_out} remains the sequential/sink
+smearing parameter and is passed directly to sequential-source construction;
+it is not duplicated as an inactive measurement-class alias.
 
 \subsection{Method Summary}
 

@@ -46,7 +46,8 @@ from pyquda.field import LatticeGauge
 
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_bw_seq_pyquda
-from pyquda_measurement_utils.proton_qTMD_pyquda import proton_TMD, my_pyquda_gammas
+from pyquda_measurement_utils.fermion_bilinear_basis import gamma_stack
+from pyquda_measurement_utils.proton_qTMD_pyquda import proton_TMD
 from pyquda_measurement_utils.io_corr import (
     get_sample_log_tag,
     get_c2pt_file_tag,
@@ -78,7 +79,6 @@ parameters = {
     "width": 13.0,
     "pol": ["PpUnpol"],
     "t_insert": 9,  # time separation for TMD
-    "save_propagators": False,
 }
 
 pf = parameters["pf"]
@@ -157,17 +157,7 @@ mpi_print(latt_info, f"DEBUG plaquette U_hyp: {gauge.plaquette()}")
 # ============================================================
 # Prepare gamma matrices on device
 # ============================================================
-first_gamma = my_pyquda_gammas[0]
-n_gamma = len(my_pyquda_gammas)
-
-pyquda_gamma_ls = xp.empty(
-    (n_gamma,) + first_gamma.shape,
-    dtype=first_gamma.dtype,
-    device=first_gamma.device,
-)
-
-for gamma_idx, gamma_pyq in enumerate(my_pyquda_gammas):
-    pyquda_gamma_ls[gamma_idx] = gamma_pyq
+pyquda_gamma_ls = gamma_stack(gauge.data).astype(gauge.data.dtype, copy=False)
 
 
 # ============================================================

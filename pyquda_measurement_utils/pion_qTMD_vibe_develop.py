@@ -139,6 +139,7 @@ from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
     create_fermion_TMD_GI_from_link,
 )
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import create_gi_qtmd_wilsonline_index_lists
+from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
@@ -168,7 +169,10 @@ class pion_TMD:
         self.t_insert = parameters["t_insert"]
         self.save_propagators = parameters["save_propagators"]
 
-    def contract_2pt_pion(self, latt_info, prop_f, prop_b, phases, tag, src_gamma="fixed_g5"):
+    def contract_2pt_pion(
+        self, latt_info, prop_f, prop_b, phases, tag,
+        src_gamma="fixed_g5", attrs=None,
+    ):
         mpi_print(latt_info, "Begin pion sink smearing")
         prop_f = boosted_smearing(prop_f, w=self.width, boost=self.pos_boost)
         prop_b = boosted_smearing(prop_b, w=self.width, boost=self.neg_boost)
@@ -177,7 +181,9 @@ class pion_TMD:
         corr = contract_pion_2pt(latt_info, prop_f, prop_b, phases, src_gamma=src_gamma)
 
         if latt_info.mpi_rank == 0:
-            save_proton_c2pt_hdf5(corr, tag, my_gammas, self.pilist)
+            save_proton_c2pt_hdf5(
+                corr, tag, my_gammas, self.pilist, attrs=attrs
+            )
         del corr
 
     def contract_qTMD_CG(self, latt_info, prop_f, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="fixed_g5"):
@@ -262,16 +268,38 @@ class pion_TMD:
 
     def _contract_qTMD_one_shift(self, seq_bw_line, shifted_prop, sink_gamma_ls, source_gamma_ls, phases):
         xp = _get_xp_from_array(shifted_prop.data)
-        sink_inserted = xp.einsum("wtzyxjicf,gim->gwtzyxjmcf", seq_bw_line, sink_gamma_ls, optimize=True)
-        corr_local = xp.einsum(
-            "gwtzyxjiab,wtzyxilba,glj->gwtzyx",
-            sink_inserted,
-            shifted_prop.data,
-            source_gamma_ls,
-            optimize=True,
+        corr_shape = (
+            len(sink_gamma_ls), phases.shape[0], shifted_prop.latt_info.size[3]
         )
-        corr = xp.einsum("qwtzyx,gwtzyx->gqt", phases, corr_local, optimize=True)
-        return core.gatherLattice(xp.asnumpy(corr), [2, -1, -1, -1])
+        if xp.__name__ == "dpnp":
+            corr = xp.empty(
+                corr_shape,
+                dtype=shifted_prop.data.dtype,
+                device=shifted_prop.data.device,
+            )
+        else:
+            corr = xp.empty(corr_shape, dtype=shifted_prop.data.dtype)
+        for gamma_idx, sink_gamma in enumerate(sink_gamma_ls):
+            sink_inserted = xp.einsum(
+                "wtzyxjicf,im->wtzyxjmcf",
+                seq_bw_line,
+                sink_gamma,
+                optimize=True,
+            )
+            corr_site = xp.einsum(
+                "wtzyxjiab,wtzyxilba,lj->wtzyx",
+                sink_inserted,
+                shifted_prop.data,
+                source_gamma_ls[gamma_idx],
+                optimize=True,
+            )
+            corr[gamma_idx] = xp.einsum(
+                "qwtzyx,wtzyx->qt", phases, corr_site, optimize=True
+            )
+            del sink_inserted, corr_site
+        result = core.gatherLattice(array_to_numpy(corr), [2, -1, -1, -1])
+        del corr
+        return result
 
     def create_TMD_Wilsonline_index_list_CG(self):
         index_list_trans0 = []

@@ -41,6 +41,12 @@ def gamma_stack(reference_array):
     return canonical_gamma_stack(reference_array)
 
 
+def _zeros_on_backend(shape, dtype, xp, reference_array):
+    if xp.__name__ == "dpnp":
+        return xp.zeros(shape, dtype=dtype, device=reference_array.device)
+    return xp.zeros(shape, dtype=dtype)
+
+
 def gamma_from_label(label):
     if label not in my_gammas:
         raise ValueError(f"Invalid gamma label: {label}. Expected one of {my_gammas}.")
@@ -48,6 +54,12 @@ def gamma_from_label(label):
 
 
 def source_gamma_stack(src_gamma, sink_gamma_ls, reference_array):
+    """Return the source matrices paired with the sink Gamma axis.
+
+    A canonical Gamma label and ``fixed_g5`` produce a constant source
+    matrix.  ``same_as_sink`` and ``dagger_of_sink`` are relational modes;
+    their output Gamma axis is paired one-to-one with the sink Gamma axis.
+    """
     xp = _get_xp_from_array(reference_array)
     gamma5 = _gamma_on_backend(G5, xp, reference_array)
 
@@ -58,7 +70,13 @@ def source_gamma_stack(src_gamma, sink_gamma_ls, reference_array):
     if src_gamma == "same_as_sink":
         return sink_gamma_ls.copy()
     if src_gamma == "dagger_of_sink":
-        return xp.einsum("ab,gbc,cd->gad", gamma5, xp.swapaxes(sink_gamma_ls.conj(), 1, 2), gamma5, optimize=True)
+        return xp.einsum(
+            "ab,gbc,cd->gad",
+            gamma5,
+            xp.swapaxes(sink_gamma_ls.conj(), 1, 2),
+            gamma5,
+            optimize=True,
+        )
     if src_gamma in my_gammas:
         source_gamma = _gamma_on_backend(gamma_from_label(src_gamma), xp, reference_array)
         source_gamma_ls = sink_gamma_ls.copy()
@@ -67,7 +85,8 @@ def source_gamma_stack(src_gamma, sink_gamma_ls, reference_array):
 
     raise ValueError(
         f"Invalid src_gamma: {src_gamma}. "
-        "Use a gamma label or one of ['fixed_g5', 'same_as_sink', 'dagger_of_sink']."
+        "Use a gamma label or one of "
+        "['fixed_g5', 'same_as_sink', 'dagger_of_sink']."
     )
 
 
@@ -98,9 +117,11 @@ def contract_pion_2pt_multi_src_gamma(latt_info, prop_forward, prop_backward, ph
 
     backward_line = meson_backward_line(prop_backward)
     corr_local_by_src = {
-        src_gamma: xp.zeros(
+        src_gamma: _zeros_on_backend(
             (len(sink_gamma_ls), phases.shape[0], latt_info.size[3]),
-            dtype=prop_forward.data.dtype,
+            prop_forward.data.dtype,
+            xp,
+            prop_forward.data,
         )
         for src_gamma in src_gammas
     }

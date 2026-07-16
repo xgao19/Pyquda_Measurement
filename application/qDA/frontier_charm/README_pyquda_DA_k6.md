@@ -128,6 +128,15 @@ S_f(x)\,
 
 This 2pt part is used mainly as the standard meson correlator for spectroscopy / overlap / mass-related checks and for consistency with the DA workflow.
 
+For qDA it uses the shared `dagger_of_sink` relation
+
+\[
+\Gamma_{\rm src}^{(g)}=\gamma_5\Gamma_g^\dagger\gamma_5.
+\]
+
+Consequently, the stored Gamma index labels a paired sink/source channel. It
+does not mean that all sink channels share one fixed source Gamma.
+
 ---
 
 ## 3. Script Structure
@@ -152,7 +161,6 @@ This section contains the parameters most likely to be changed by a user:
 - `data_dir`
 - `lat_tag`
 - `sm_tag`
-- `src_2pt_mode`
 - `da_src_gammalist`
 
 These are the first things to inspect before running a new study.
@@ -183,14 +191,6 @@ The local helpers are:
 
 Used to force CUDA synchronization only at timing boundaries.
 
-#### `build_pyquda_gamma_ls()`
-
-Builds the full 16-element sink gamma basis in the PyQUDA ordering.
-
-#### `build_da_src_gamma_ls(pyquda_gamma_ls)`
-
-Checks that the requested source gamma names are valid and returns the corresponding matrices.
-
 #### `save_da_correlators(...)`
 
 Saves one DA output file for each chosen source gamma.
@@ -202,17 +202,22 @@ Each saved file contains:
 - all sink gamma channels,
 - all Euclidean times.
 
-#### `contract_da_block(...)`
+#### `Measurement.contract_DA(...)`
 
 This is the core DA contraction routine shared by both:
 
 - `CG`
 - `GI`
 
-The only difference between the two calls is the propagation-update function:
+The operator is always applied to the forward propagator. The only difference
+between the two branches is the propagation-update function:
 
 - `Measurement.create_fw_prop_TMD_CG`
-- `Measurement.create_fw_prop_TMD_GI`
+- `Measurement.create_fw_prop_PDF_GI`
+
+The latter is the existing straight-link, gauge-covariant PDF transport. A
+general staple transporter is neither needed nor used in the DA limit
+\(b_T=0\).
 
 ---
 
@@ -249,36 +254,9 @@ This is the main measurement workflow.
 
 ## 4. Important User Parameters
 
-### `src_2pt_mode`
-
-This affects only the local 2pt correlator measured by
-
-`Measurement.contract_2pt_pion(...)`.
-
-It tells the code how to build the source Dirac structure for the 2pt function.
-
-Allowed values are:
-
-- `fixed_g5`
-- `same_as_sink`
-- `dagger_of_sink`
-
-Interpretation:
-
-- `fixed_g5`
-  - source gamma is always `gamma5`
-- `same_as_sink`
-  - source gamma is taken equal to the sink gamma
-- `dagger_of_sink`
-  - source gamma is taken as `gamma5 * Gamma_g^\dagger * gamma5`
-
-This variable does **not** control the DA source channels.
-
----
-
 ### `da_src_gammalist`
 
-This affects only the `CG` and `GI` DA blocks.
+This controls the source Gamma channels in the `CG`/`GI` DA blocks only.
 
 It is a list of source gamma channels to be measured in the nonlocal DA correlators.
 
@@ -300,20 +278,33 @@ So one source choice corresponds to one DA output file, and inside that file the
 
 ## 5. Data Flow in the DA Blocks
 
-Inside `contract_da_block(...)`, the logic is:
+Inside `Measurement.contract_DA(...)`, the logic is:
 
 1. build the common sink gamma structure,
 2. loop over source gamma choices,
-3. initialize a backward propagator copy,
+3. initialize a forward propagator copy,
 4. loop over all Wilson-line separations,
-5. update the displaced / covariantly displaced propagator,
+5. shift or gauge-covariantly transport the forward propagator,
 6. do the spin-color contraction,
 7. project to all sink gamma channels,
 8. Fourier transform to momentum space,
 9. gather the result to the root rank,
 10. save the collected correlators.
 
-This function is shared between `CG` and `GI`; only the displacement rule changes.
+The backward propagator is not transported. The negative branch restarts from
+the original forward propagator, so the GI updates are the one-link sequence
+\(0,-1,-2,\ldots\) rather than a jump from the end of the positive branch.
+
+The local C2 uses the generic relational source mode
+`dagger_of_sink`. For every sink channel \(g\),
+
+```text
+Gamma_src(g) = gamma5 @ Gamma_sink(g).conj().T @ gamma5
+```
+
+Thus the C2 Gamma axis represents paired sink/source channels; it is not a
+scan of sink Gammas at one fixed source Gamma. This convention is independent
+of `da_src_gammalist`.
 
 ---
 
@@ -387,14 +378,6 @@ Edit:
 da_src_gammalist = [...]
 ```
 
-### To change the 2pt source convention
-
-Edit:
-
-```python
-src_2pt_mode = ...
-```
-
 ### To change momentum range
 
 Edit:
@@ -419,5 +402,5 @@ If someone only needs the shortest handover version:
 - `GI` means gauge-covariantly shifted propagator, i.e. Wilson line included.
 - The sink always runs over the full 16-gamma basis.
 - The source gamma choices are set by `da_src_gammalist`.
-- The local 2pt source convention is set independently by `src_2pt_mode`.
+- The local C2 uses the paired `dagger_of_sink` source convention.
 - The workflow is: smeared source -> inversion -> 2pt -> CG DA -> GI DA -> save.

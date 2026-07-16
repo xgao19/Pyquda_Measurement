@@ -160,13 +160,10 @@ class proton_TMD():
         self.pilist = parameters["p_2pt"]  # 2pt momentum
 
         self.width = parameters["width"] # Gaussian smearing width
-        self.boost_in = parameters["boost_in"] # ?? Forward propagator boost smearing
-        self.boost_out = parameters["boost_out"] # ?? Backward propagator boost smearing
-        self.pos_boost = self.boost_in # Forward propagator boost smearing for 2pt
+        self.boost_in = parameters["boost_in"] # Forward-propagator boost smearing
 
         self.pol_list = parameters["pol"] # projection of nucleon state
         self.t_insert = parameters["t_insert"] # time separation of three point function
-        self.save_propagators = parameters["save_propagators"] # if save propagators
         
     #! PyQUDA: contract 2pt TMD
     def contract_2pt_TMD(
@@ -180,7 +177,7 @@ class proton_TMD():
             interpolator=interpolator,
             sink_smearing=True,
             smearing_width=self.width,
-            smearing_boost=self.pos_boost,
+            smearing_boost=self.boost_in,
         )
         if latt_info.mpi_rank == 0:
             save_proton_c2pt_hdf5(

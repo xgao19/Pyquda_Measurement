@@ -762,7 +762,7 @@ data directory specified by the user (typically \texttt{./data/}).
 
 \textbf{Path template:}
 \begin{verbatim}
-  data/c2pt/<lat>.c2pt.<cfg>.<ama>.<src_pos>.<sm_tag>.h5
+  data/c2pt/<lat>.c2pt.<cfg>.<ama>.<src_pos>.<sm_tag>.src<SRC>.h5
 \end{verbatim}
 
 \textbf{Internal structure:}
@@ -782,16 +782,24 @@ momentum \texttt{PX<px>PY<py>PZ<pz>}.  Each dataset is a 1D complex array over
 time slices, already time-rolled so that the source is at \(t=0\).  The two-point
 function is saved via \(\texttt{save\_proton\_c2pt\_hdf5}\), which also parses
 the source time from the tag to perform the roll.
+The root attributes record \texttt{src\_interpolator=<SRC>} and
+\texttt{sink\_interpolator=all\_16\_gamma\_scan}.
 
 \subsection{Three-Point (EMFF) Data}
 
 \textbf{Path template:}
 \begin{verbatim}
-  data/pion_EMFF/<lat>.pion_EMFF.<cfg>.<ama>.<src_pos>.<sm_tag>.<pf_tag>.<gamma_label>.h5
+  data/pion_EMFF/<lat>.pion_EMFF.<cfg>.<ama>.<src_pos>.
+      <sm_tag>.src<SRC>.sink<SINK>.<pf_tag>.h5
 \end{verbatim}
 
 where \(\texttt{<pf\_tag>} = \texttt{PX<px>PY<py>PZ<pz>dt<t\_insert>}\)
-and \(\texttt{<gamma\_label>}\) is one of the 16 gamma labels.
+The file contains all 16 current gamma channels.  Its root attributes record
+\texttt{src\_interpolator}, \texttt{sink\_interpolator}, and
+\texttt{current\_gamma\_basis=all\_16}.  For a multi-source-interpolator run,
+the complete sorted source list and the sink interpolator enter the sample-log
+identity.  The \texttt{<sm\_tag>} itself describes only preprocessing,
+smearing, and boost parameters.
 
 \textbf{Internal structure:}
 \begin{verbatim}
@@ -824,10 +832,11 @@ post-processing).
 \(\texttt{<ama>}\)        & AMA label (e.g., \texttt{EMFF.ex}) \\
 \(\texttt{<src\_pos>}\)   & Source position
                           \texttt{x<x>y<y>z<z>t<t>} \\
-\(\texttt{<sm\_tag>}\)     & Smearing tag (HYP steps, source type, width,
+\(\texttt{<sm\_tag>}\)     & Smearing tag (HYP steps, width,
                           boost vectors) \\
+\(\texttt{<SRC>}\)        & Source interpolator label \\
+\(\texttt{<SINK>}\)       & Sink interpolator label \\
 \(\texttt{<pf\_tag>}\)     & Final momentum and time separation \\
-\(\texttt{<gamma\_label>}\) & Gamma matrix label (5, T, T5, ...) \\
 \bottomrule
 \end{tabular}
 \end{center}

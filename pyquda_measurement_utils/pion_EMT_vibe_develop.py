@@ -25,7 +25,7 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
     basis_attrs,
     symmetric_vector_emt,
 )
-from pyquda_measurement_utils.tools import mpi_print, mpi_timer_print
+from pyquda_measurement_utils.tools import _get_xp_from_array, mpi_print, mpi_timer_print
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_meson_bw_seq_pyquda
 
@@ -197,15 +197,30 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
         p_2pt_xyz = [[-p[0], -p[1], -p[2]] for p in self.pilist]
         phases_2pt = phase.MomentumPhase(latt_info).getPhases(p_2pt_xyz, src_pos)
 
+        xp = _get_xp_from_array(prop_fw.data)
         bw_prop = contract("ij, wtzyxilab, kl -> wtzyxkjba", G5_local, prop_bw.data.conj(), G5_local)
-        bw_prop = contract("wtzyxjicf, gim -> gwtzyxjmcf", bw_prop, sink_gammas)
-        scalar = contract("gwtzyxjiab, wtzyxilba, lj -> gwtzyx", bw_prop, prop_fw.data, src_gamma)
+        c2_shape = (len(sink_gammas), len(p_2pt_xyz), latt_info.size[3])
+        if xp.__name__ == "dpnp":
+            C2_local = xp.empty(
+                c2_shape, dtype=prop_fw.data.dtype, device=prop_fw.data.device
+            )
+        else:
+            C2_local = xp.empty(c2_shape, dtype=prop_fw.data.dtype)
+        for gamma_idx, sink_gamma in enumerate(sink_gammas):
+            sink_inserted = contract("wtzyxjicf,im->wtzyxjmcf", bw_prop, sink_gamma)
+            scalar = contract(
+                "wtzyxjiab,wtzyxilba,lj->wtzyx",
+                sink_inserted,
+                prop_fw.data,
+                src_gamma,
+            )
+            C2_local[gamma_idx] = contract("qwtzyx,wtzyx->qt", phases_2pt, scalar)
+            del sink_inserted, scalar
         C2 = core.gatherLattice(
-            array_to_numpy(
-                contract("qwtzyx, gwtzyx -> gqt", phases_2pt, scalar)
-            ),
+            array_to_numpy(C2_local),
             [2, -1, -1, -1],
         )
+        del C2_local, bw_prop
         C2 = getMPIComm().bcast(C2, root=0)
         C2 = np.roll(np.array(C2), -src_pos[3], axis=-1)
 

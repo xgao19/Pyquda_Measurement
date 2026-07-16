@@ -42,6 +42,7 @@ from pyquda_measurement_utils.bw_seq_pyquda import create_meson_bw_seq_pyquda
 from pyquda_measurement_utils.io_corr import (
     get_c2pt_file_tag,
     get_pion_EMFF_file_tag,
+    get_pion_channel_tag,
     get_sample_log_tag,
     save_pion_EMFF_hdf5_noRoll,
 )
@@ -128,9 +129,15 @@ c2_boost_tag = (
     f"posSrc{''.join(str(v) for v in parameters['pos_boost_src'])}"
     f"_negSrc{''.join(str(v) for v in parameters['neg_boost_src'])}"
 )
-sm_tag = os.environ.get("PION_EMFF_SM_TAG", f"1HYP_GSRC_W{args.width:g}_k0_{args.sink_interpolator}.{boost_tag}")
-c2_sm_tag = f"1HYP_GSRC_W{args.width:g}_k0_{args.sink_interpolator}.{c2_boost_tag}"
+sm_tag = os.environ.get(
+    "PION_EMFF_SM_TAG", f"1HYP_GSRC_W{args.width:g}_k0.{boost_tag}"
+)
+c2_sm_tag = f"1HYP_GSRC_W{args.width:g}_k0.{c2_boost_tag}"
 src_interpolators = parse_src_interpolators(args.src_interpolators, args.src_interpolator)
+source_set_tag = "-".join(sorted(src_interpolators))
+channel_set_tag = get_pion_channel_tag(
+    sm_tag, source_set_tag, args.sink_interpolator
+)
 measurement = pion_EMFF(parameters)
 
 if getMPIComm().Get_rank() == 0:
@@ -199,7 +206,21 @@ for pos in src_positions:
         src_interpolator: f"{c2_tag}.src{src_interpolator}"
         for src_interpolator in src_interpolators
     }
-    measurement.contract_2pt_pion_multi_src_gamma(latt_info, prop_pos.copy(), prop_neg.copy(), phases_2pt, c2_tags_by_src)
+    c2_attrs_by_src = {
+        src_interpolator: {
+            "src_interpolator": src_interpolator,
+            "sink_interpolator": "all_16_gamma_scan",
+        }
+        for src_interpolator in src_interpolators
+    }
+    measurement.contract_2pt_pion_multi_src_gamma(
+        latt_info,
+        prop_pos.copy(),
+        prop_neg.copy(),
+        phases_2pt,
+        c2_tags_by_src,
+        c2_attrs_by_src,
+    )
     mpi_print(latt_info, f"TIME PyQUDA: Pion 2pt contraction {time.time() - t0}s")
 
     t0 = time.time()
@@ -211,8 +232,12 @@ for pos in src_positions:
 
     for t_insert in t_insert_list:
         pf_tag = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{t_insert}"
-        sample_log_file = data_dir / "sample_log_emff" / f"{conf}_{sm_tag}_{pf_tag}"
-        sample_log_tag = get_sample_log_tag(str(conf), pos, f"{sm_tag}_{pf_tag}")
+        sample_log_file = (
+            data_dir / "sample_log_emff" / f"{conf}_{channel_set_tag}_{pf_tag}"
+        )
+        sample_log_tag = get_sample_log_tag(
+            str(conf), pos, f"{channel_set_tag}_{pf_tag}"
+        )
         if latt_info.mpi_rank == 0:
             sample_log_file.touch(exist_ok=True)
         mpi_print(latt_info, f"START: {sample_log_tag}")
@@ -254,7 +279,8 @@ for pos in src_positions:
                     conf,
                     "EMFF.ex",
                     pos,
-                    f"{sm_tag}.src{src_interpolator}.{pf_tag}",
+                    f"{get_pion_channel_tag(sm_tag, src_interpolator, args.sink_interpolator)}"
+                    f".{pf_tag}",
                 )
                 mpi_print(latt_info, f"Saving pion EMFF src {src_interpolator}: {tag}")
                 save_pion_EMFF_hdf5_noRoll(
@@ -264,6 +290,11 @@ for pos in src_positions:
                     parameters["qext"],
                     t_insert,
                     latt_info,
+                    attrs={
+                        "src_interpolator": src_interpolator,
+                        "sink_interpolator": args.sink_interpolator,
+                        "current_gamma_basis": "all_16",
+                    },
                 )
 
         if latt_info.mpi_rank == 0:

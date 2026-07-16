@@ -301,6 +301,50 @@ def test_proton_emt_parameters_use_only_canonical_boost_names():
     assert 'parameters["boost_out"]' in module
 
 
+def test_proton_qtmd_parameters_use_only_active_measurement_fields():
+    module = _source("pyquda_measurement_utils/proton_qTMD_pyquda.py")
+    assert "self.save_propagators" not in module
+    assert "self.pos_boost" not in module
+    assert "self.boost_out" not in module
+    assert 'parameters["boost_in"]' in module
+
+    for relpath in [
+        "application/nucleon_TMD/perlmutter/Pyquda_nucleon_TMD.py",
+        "application/nucleon_TMD/Aurora/pyquda_nucleon_TMD_GI.py",
+        "application/nucleon_TMD_CG/Aurora/pyquda_nucleon_TMD.py",
+    ]:
+        source = _source(relpath)
+        assert '"save_propagators"' not in source
+        assert "my_pyquda_gammas" not in source
+        assert "gamma_stack" in source
+
+    driver = _source(
+        "application/nucleon_TMD/perlmutter/Pyquda_nucleon_TMD.py"
+    )
+    assert driver.count("if latt_info.mpi_rank != 0:\n        return") >= 2
+    assert 'for flavor in ("D", "U")' in driver
+
+
+def test_pion_channel_provenance_is_explicit_and_rank_zero_writes_qtmd():
+    for relpath in [
+        "application/pion_TMD/perlmutter/Pyquda_pion_TMD.py",
+        "application/pion_TMD_CG/perlmutter/Pyquda_pion_TMD_CG.py",
+    ]:
+        source = _source(relpath)
+        assert "get_pion_channel_tag" in source
+        assert '"src_interpolator"' in source
+        assert '"sink_interpolator"' in source
+        assert '"operator_gamma"' in source
+        assert "tasks if rank == 0 else ()" in source
+
+    emff = _source("application/EMFF_pion/perlmutter/Pyquda_pion_EMFF.py")
+    assert "get_pion_channel_tag" in emff
+    assert '"src_interpolator"' in emff
+    assert '"sink_interpolator"' in emff
+    assert '"current_gamma_basis": "all_16"' in emff
+    assert "channel_set_tag" in emff
+
+
 def test_standalone_ringed_exposes_cli_only_flow_batch_size():
     drivers = [
         "application/flowed_quark_ringed_norm/perlmutter/Pyquda_flowed_quark_ringed_norm.py",

@@ -36,13 +36,14 @@ from pyquda_utils.phase import MomentumPhase
 from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import build_gi_qtmd_staple_links
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_bw_seq_pyquda
+from pyquda_measurement_utils.fermion_bilinear_basis import gamma_stack
 from pyquda_measurement_utils.io_corr import (
     get_c2pt_file_tag,
     get_qTMD_file_tag,
     get_sample_log_tag,
     save_qTMD_proton_hdf5_noRoll,
 )
-from pyquda_measurement_utils.proton_qTMD_pyquda import my_gammas, my_pyquda_gammas, proton_TMD
+from pyquda_measurement_utils.proton_qTMD_pyquda import my_gammas, proton_TMD
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print, srcLoc_distri_eq
 
 
@@ -56,12 +57,7 @@ def sync_backend_array(arr):
 
 
 def gamma_stack_like(reference):
-    xp = _get_xp_from_array(reference)
-    gamma_ls = xp.empty((len(my_pyquda_gammas),) + my_pyquda_gammas[0].shape, dtype=reference.dtype)
-    for gamma_idx, gamma_pyq in enumerate(my_pyquda_gammas):
-        gamma_host = gamma_pyq.get() if hasattr(gamma_pyq, "get") else np.asarray(gamma_pyq)
-        gamma_ls[gamma_idx] = _asarray_on_queue(gamma_host, xp, reference)
-    return gamma_ls
+    return gamma_stack(reference).astype(reference.dtype, copy=False)
 
 
 def contract_nucleon_operator_list(
@@ -168,12 +164,11 @@ def save_nucleon_qtmd_by_gamma(
     tsep,
     pol_idx=0,
 ):
-    rank = latt_info.mpi_rank
-    size = getMPIComm().Get_size()
+    if latt_info.mpi_rank != 0:
+        return
     tasks = [(gidx, flavor) for gidx in range(len(my_gammas)) for flavor in ("D", "U")]
 
-    for task_idx in range(rank, len(tasks), size):
-        gidx, flavor = tasks[task_idx]
+    for gidx, flavor in tasks:
         gm = my_gammas[gidx]
         tag = get_qTMD_file_tag(
             str(data_dir),
@@ -210,10 +205,9 @@ def save_nucleon_pdf(
     tsep,
     pol_idx=0,
 ):
-    rank = latt_info.mpi_rank
-    tasks = ["D", "U"]
-    if rank < len(tasks):
-        flavor = tasks[rank]
+    if latt_info.mpi_rank != 0:
+        return
+    for flavor in ("D", "U"):
         tag = get_qTMD_file_tag(
             str(data_dir),
             lat_tag,
@@ -267,7 +261,6 @@ parameters = {
     "width": args.width,
     "pol": pol_list,
     "t_insert": args.t_insert,
-    "save_propagators": False,
 }
 pf = parameters["pf"]
 pf_tag = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{parameters['t_insert']}"

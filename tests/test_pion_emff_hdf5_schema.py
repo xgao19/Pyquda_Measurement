@@ -26,7 +26,14 @@ def test_pion_emff_hdf5_schema_preserves_current_gamma_and_qext(tmp_path):
     corr = np.arange(len(qlist) * len(gammalist) * (tsep + 2), dtype=np.float64)
     corr = corr.reshape(len(qlist), len(gammalist), tsep + 2).astype(np.complex128)
 
-    save_pion_EMFF_hdf5_noRoll(corr, tag, gammalist, qlist, tsep, DummyLatticeInfo())
+    attrs = {
+        "src_interpolator": "fixed_g5",
+        "sink_interpolator": "5",
+        "current_gamma_basis": "all_16",
+    }
+    save_pion_EMFF_hdf5_noRoll(
+        corr, tag, gammalist, qlist, tsep, DummyLatticeInfo(), attrs=attrs
+    )
 
     with h5py.File(tag + ".h5", "r") as h5:
         assert "SS/T/PX0PY0PZ0" in h5
@@ -34,6 +41,9 @@ def test_pion_emff_hdf5_schema_preserves_current_gamma_and_qext(tmp_path):
         assert "SS/Z5/PX1PY-1PZ0" in h5
         assert h5["SS/T/PX0PY0PZ0"].shape == (tsep + 2,)
         np.testing.assert_array_equal(h5["SS/Z5/PX1PY-1PZ0"][...], corr[1, 1, :])
+        assert h5.attrs["src_interpolator"] == "fixed_g5"
+        assert h5.attrs["sink_interpolator"] == "5"
+        assert h5.attrs["current_gamma_basis"] == "all_16"
 
 
 def test_pion_emff_synthetic_ratio_plateau_is_one(tmp_path):
