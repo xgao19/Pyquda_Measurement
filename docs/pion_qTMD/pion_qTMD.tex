@@ -743,14 +743,9 @@ Workflow:
 \begin{enumerate}[nosep]
   \item Sink-smear \texttt{spectator\_prop} with \texttt{pos\_boost} and
         \texttt{active\_prop} with \texttt{neg\_boost}.
-  \item Build sink gamma stack (\verb|_gamma_stack|) and source gamma stack
-        (\verb|_source_gamma_stack|).
-  \item Construct antiquark line via \verb|_meson_backward_line| (einsum with
-        $\gamma_5$ front and back).
-  \item Loop over sink Gamma channels, attach one Gamma to the backward line,
-        contract it with the forward propagator and matching source Gamma,
-        and immediately Fourier-project the resulting scalar field.
-  \item Gather across MPI ranks (\texttt{core.gatherLattice}).
+  \item Call the shared pion C2 kernel, which constructs the
+        $\gamma_5$-hermitian backward line, scans the 16 sink Gamma channels
+        one at a time, Fourier-projects, and gathers across MPI ranks.
   \item Save to HDF5 via \texttt{save\_proton\_c2pt\_hdf5}.
 \end{enumerate}
 

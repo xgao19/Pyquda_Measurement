@@ -121,22 +121,19 @@ where $\Gamma_{\text{sink}}$ runs over the 16 bilinear gamma structures (see Sec
 
 \subsection{Source Gamma Modes}
 
-The shared pion C2 kernel supports four source Gamma forms, selected by the
+The shared pion C2 kernel supports two source Gamma forms, selected by the
 \texttt{src\_gamma} argument:
 
 \begin{enumerate}
-    \item \textbf{\texttt{"fixed\_g5"} (default):} $\Gamma_{\text{src}} = \gamma_5$ for all sink gamma structures. This is the standard pseudoscalar pion interpolator.
-    \item \textbf{\texttt{"same\_as\_sink"}:} $\Gamma_{\text{src}} = \Gamma_{\text{sink}}$, i.e., the same gamma matrix used at the sink is also used at the source.
-    \item \textbf{\texttt{"dagger\_of\_sink"}:} $\Gamma_{\text{src}} = \gamma_5 \, \Gamma_{\text{sink}}^\dagger \, \gamma_5$, the $\gamma_5$-hermitian conjugate of the sink gamma.
     \item \textbf{A canonical Gamma label:} the selected raw PyQUDA Gamma is
     held fixed while the sink scans all 16 channels.
+    \item \textbf{\texttt{"dagger\_of\_sink"}:} $\Gamma_{\text{src}} = \gamma_5 \, \Gamma_{\text{sink}}^\dagger \, \gamma_5$, the $\gamma_5$-hermitian conjugate of the sink gamma.
 \end{enumerate}
 
-The two relational modes, \texttt{same\_as\_sink} and
-\texttt{dagger\_of\_sink}, pair each sink channel with its own source matrix.
-Their output Gamma axis is therefore a paired sink/source axis, not a scan of
-sink operators at one fixed source Gamma. The qDA local C2 uses
-\texttt{dagger\_of\_sink}; qTMDWF production defaults remain unchanged.
+The \texttt{dagger\_of\_sink} mode pairs each sink channel with its own source
+matrix.  Its output Gamma axis is therefore a paired sink/source axis, not a
+scan of sink operators at one fixed source Gamma.  The qDA local C2 uses this
+mode; qTMDWF production uses the explicit source label \texttt{"5"}.
 
 \subsection{Contraction Algorithm}
 

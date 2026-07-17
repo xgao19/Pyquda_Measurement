@@ -329,7 +329,9 @@ code.
 % ===========================================================================
 
 The two-point contraction implemented in \texttt{contract\_2pt\_pion} follows
-Eq.~\eqref{eq:C2_trace}.  The procedure is:
+Eq.~\eqref{eq:C2_trace}.  After workflow-specific sink smearing, it calls the
+same shared pion C2 kernel used by pion EMT, qTMDWF, and qTMD.  The procedure
+inside that kernel is:
 
 \begin{enumerate}[nosep]
   \item Apply boosted smearing at the sink to both \(\Sq\) (positive) and

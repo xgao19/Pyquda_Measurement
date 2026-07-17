@@ -987,3 +987,20 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   opposite-boost single-source path differed in C2 and all four operator paths.
   The largest one/four-rank relative L2 difference was `3.22e-15`, and the
   largest true solver residual was `9.52e-16`.
+
+## 2026-07-16: Share the pion C2 contraction kernel
+
+- Removed the duplicate pion EMT C2 Gamma insertion, gamma5-hermitian backward
+  line, spin-color trace, momentum projection, and MPI gather implementation.
+  The EMT wrapper now handles only endpoint smearing, phase selection,
+  source-time rolling, and I/O around the shared pion C2 kernel.
+- Confirmed that pion qTMDWF, qTMD, and EMFF already use the same shared
+  contraction interfaces.  Added guards against reintroducing workflow-local
+  C2 contraction algebra or a 16-Gamma propagator-sized intermediate.
+- Soft-factor C2 was deliberately left unchanged for a later, separate audit.
+- The S8T8 gate used solver tolerance `1e-15`, fixed source labels `5/X/T`,
+  `dagger_of_sink`, equal and opposite boosts, one rank (`1.1.1.1`), four-rank
+  time decomposition (`1.1.1.4`), and four-rank spatial decomposition
+  (`2.2.1.1`).  Across 70 dataset comparisons, the largest
+  reference/candidate relative L2 difference was `2.84e-16`; the largest
+  one/four-rank relative L2 difference was `2.50e-16`.

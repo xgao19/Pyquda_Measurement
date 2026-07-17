@@ -132,7 +132,10 @@ where the antiquark line is built using gamma5 hermiticity:
   S_{\text{anti}}(x, x_0) = \gamma_5\, S_q(x, x_0)^\dagger\, \gamma_5.
 \end{equation}
 
-In the code (\code{contract\_meson\_2pt}), the independent backward propagator \code{prop\_bw} is used to form the antiquark line:
+The EMT wrapper applies its endpoint smearing and momentum list, then calls the
+shared pion C2 kernel in \code{pion\_utils\_vibe\_develop.py}.  The same kernel
+is used by the pion qTMDWF, qTMD, and EMFF workflows.  The independent backward
+propagator \code{prop\_bw} is used to form the antiquark line:
 
 \begin{equation}\label{eq:bw_prop}
   \text{bw\_prop}(x) = \gamma_5\; \texttt{prop\_bw}(x, x_0)^\dagger\; \gamma_5,
@@ -199,8 +202,9 @@ so the einsum pattern for forming $\text{bw\_prop}$ is
 \end{verbatim}
 where index \code{i,j,k,l} $\in \{0,1,2,3\}$ (spin) and \code{a,b} $\in \{0,1,2\}$ (color). The transpose of spin-sink and spin-source indices $(\texttt{ilab} \to \texttt{kjba})$ implements the dagger with spin-color reordering.
 
-To avoid a 16-fold propagator-sized intermediate, the sink Gamma insertion and
-scalar folding are performed one channel at a time:
+Inside the shared kernel, the sink Gamma insertion and scalar folding are
+performed one channel at a time, avoiding a 16-fold propagator-sized
+intermediate:
 \begin{verbatim}
   for gamma_idx, sink_gamma in enumerate(sink_gammas):
       sink_inserted = contract("wtzyxjicf,im->wtzyxjmcf",

@@ -27,8 +27,9 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
 )
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
     build_pion_source_propagators,
+    contract_pion_2pt,
 )
-from pyquda_measurement_utils.tools import _get_xp_from_array, mpi_print, mpi_timer_print
+from pyquda_measurement_utils.tools import mpi_print, mpi_timer_print
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_meson_bw_seq_pyquda
 
@@ -139,22 +140,12 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
         latt_info,
         prop_fw,
         prop_bw,
-        src_gamma,
+        src_gamma_label,
         src_pos,
         tag=None,
         attrs=None,
     ):
-        """Contract meson 2pt functions with one source gamma and all sink gammas.
-
-        The contraction follows the pion two-point convention
-
-            Tr[Gamma_sink S_bw Gamma_src S_fw]
-
-        where the backward line is built with gamma5 hermiticity from the
-        antiquark propagator.  The sink side scans all 16 gamma structures in
-        ``my_gammas`` while the source side keeps the requested
-        interpolating gamma fixed.
-        """
+        """Smear and contract the shared pion C2 kernel for EMT output."""
         if self.CG_GaussSmear:
             mpi_print(latt_info, f"2pt forward sink smearing starts, boost = {self.pos_boost}")
             prop_fw = boosted_smearing(prop_fw, w=self.width, boost=self.pos_boost)
@@ -162,35 +153,15 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             prop_bw = boosted_smearing(prop_bw, w=self.width, boost=self.neg_boost)
             mpi_print(latt_info, "2pt sink smearing ends")
 
-        sink_gammas = self._gamma_stack_for(prop_fw.data)
-        G5_local = self._gamma5_for(prop_bw.data)
         p_2pt_xyz = [[-p[0], -p[1], -p[2]] for p in self.pilist]
         phases_2pt = phase.MomentumPhase(latt_info).getPhases(p_2pt_xyz, src_pos)
-
-        xp = _get_xp_from_array(prop_fw.data)
-        bw_prop = contract("ij, wtzyxilab, kl -> wtzyxkjba", G5_local, prop_bw.data.conj(), G5_local)
-        c2_shape = (len(sink_gammas), len(p_2pt_xyz), latt_info.size[3])
-        if xp.__name__ == "dpnp":
-            C2_local = xp.empty(
-                c2_shape, dtype=prop_fw.data.dtype, device=prop_fw.data.device
-            )
-        else:
-            C2_local = xp.empty(c2_shape, dtype=prop_fw.data.dtype)
-        for gamma_idx, sink_gamma in enumerate(sink_gammas):
-            sink_inserted = contract("wtzyxjicf,im->wtzyxjmcf", bw_prop, sink_gamma)
-            scalar = contract(
-                "wtzyxjiab,wtzyxilba,lj->wtzyx",
-                sink_inserted,
-                prop_fw.data,
-                src_gamma,
-            )
-            C2_local[gamma_idx] = contract("qwtzyx,wtzyx->qt", phases_2pt, scalar)
-            del sink_inserted, scalar
-        C2 = core.gatherLattice(
-            array_to_numpy(C2_local),
-            [2, -1, -1, -1],
+        C2 = contract_pion_2pt(
+            latt_info,
+            prop_fw,
+            prop_bw,
+            phases_2pt,
+            src_gamma=src_gamma_label,
         )
-        del C2_local, bw_prop
         C2 = getMPIComm().bcast(C2, root=0)
         C2 = np.roll(np.array(C2), -src_pos[3], axis=-1)
 
@@ -308,7 +279,7 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             latt_info,
             prop_fw_SP.copy(),
             prop_bw_SP.copy(),
-            src_gamma,
+            src_interpolator,
             src_pos,
             tag=c2_tag,
             attrs=c2_attrs,
