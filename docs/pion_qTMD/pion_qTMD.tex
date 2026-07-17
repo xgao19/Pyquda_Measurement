@@ -944,6 +944,20 @@ the same source and sink labels together with \texttt{operator\_gamma}.  The
 source/sink channel identity also enters the sample-log name, so two channels
 cannot share resume state even when a custom smearing tag is reused.
 
+\subsection{Lightweight Source-Level Resume}
+
+At startup rank~0 reads the nonempty sample-log lines once and broadcasts the
+exact set of completed source tags.  A matching source is skipped before any
+source inversion.  The tag is durably appended only after the C2 file and all
+enabled CG/GI qTMD/PDF files have been closed.  The text log is the sole resume
+state; the workflow deliberately does not test whether HDF5 files remain in the
+production directory.
+
+This lightweight identity assumes that the enabled products, momentum range,
+\(b_T\), \(b_z\), \(\eta\), and the remaining operator grid are unchanged.
+Changing any such choice requires a new data/setup identity.  Concurrent jobs
+must not append to the same pion qTMD sample log.
+
 The HDF5 file hierarchy for the three-point function is:
 \begin{verbatim}
 SS/<gamma>/PX..PY..PZ../<b_X or b_Y>/eta0/bT<bT>/bz<bz>

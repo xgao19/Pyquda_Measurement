@@ -18,8 +18,10 @@ def test_current_current_response_hdf5_schema(tmp_path):
             "second_tau_window": "restricted",
             "first_tau_min": 1,
             "second_tau_min": 1,
-            "first_tau_list": [1, 2],
-            "second_tau_list": [1, 2],
+            "first_tau_relative_list": [1, 2],
+            "first_tau_absolute_list": [7, 0],
+            "second_tau_relative_list": [1, 2],
+            "second_tau_absolute_list": [7, 0],
             "response_sign": 1,
             "pf": [0, 0, 0],
             "first_qext": [0, 0, 1],
@@ -47,7 +49,8 @@ def test_current_current_response_hdf5_schema(tmp_path):
 
     with h5py.File(f"{tag}.h5", "r") as h5:
         assert h5.attrs["measurement"] == "pion_current_current_response"
-        assert h5.attrs["schema_version"] == "1"
+        assert h5.attrs["schema_version"] == "2"
+        assert h5.attrs["time_axis"] == "source_relative"
         assert h5.attrs["current_order"] == "Dinv_O2_Dinv_O1_S"
         assert h5.attrs["source_gamma_label"] == "5"
         assert h5.attrs["source_gamma_mode"] == "fixed"
@@ -59,7 +62,9 @@ def test_current_current_response_hdf5_schema(tmp_path):
         np.testing.assert_allclose(summary["response_R_sum"][:], [2 + 0.5j])
 
         record = h5["results/record_0000"]
-        np.testing.assert_array_equal(record["first_tau_list"][:], [1, 2])
-        np.testing.assert_array_equal(record["second_tau_list"][:], [1, 2])
+        np.testing.assert_array_equal(record["first_tau_relative_list"][:], [1, 2])
+        np.testing.assert_array_equal(record["first_tau_absolute_list"][:], [7, 0])
+        np.testing.assert_array_equal(record["second_tau_relative_list"][:], [1, 2])
+        np.testing.assert_array_equal(record["second_tau_absolute_list"][:], [7, 0])
         assert not record.attrs["first_tau_list_is_all_time_slices"]
         assert not record.attrs["second_tau_list_is_all_time_slices"]

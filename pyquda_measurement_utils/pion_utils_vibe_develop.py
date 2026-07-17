@@ -57,7 +57,7 @@ def _gamma_matrix(gamma_like):
     return gamma_like
 
 
-def _array_to_numpy(arr):
+def array_to_numpy(arr):
     if hasattr(arr, "get"):
         return arr.get()
     if type(arr).__module__.split(".")[0] == "cupy":
@@ -77,9 +77,13 @@ def gamma_stack(reference_array):
     return canonical_gamma_stack(reference_array)
 
 
-def _zeros_on_backend(shape, dtype, xp, reference_array):
-    if xp.__name__ == "dpnp":
-        return xp.zeros(shape, dtype=dtype, device=reference_array.device)
+def zeros_on_backend(shape, dtype, xp, reference_array):
+    if xp.__name__ == "dpnp" and hasattr(reference_array, "sycl_queue"):
+        return xp.zeros(
+            shape,
+            dtype=dtype,
+            sycl_queue=reference_array.sycl_queue,
+        )
     return xp.zeros(shape, dtype=dtype)
 
 
@@ -162,7 +166,7 @@ def contract_pion_2pt_multi_src_gamma(latt_info, prop_forward, prop_backward, ph
 
     backward_line = meson_backward_line(prop_backward)
     corr_local_by_src = {
-        src_gamma: _zeros_on_backend(
+        src_gamma: zeros_on_backend(
             (len(sink_gamma_ls), phases.shape[0], latt_info.size[3]),
             prop_forward.data.dtype,
             xp,
@@ -186,7 +190,7 @@ def contract_pion_2pt_multi_src_gamma(latt_info, prop_forward, prop_backward, ph
         del sink_inserted
 
     corr_by_src = {
-        src_gamma: core.gatherLattice(_array_to_numpy(corr_local), [2, -1, -1, -1])
+        src_gamma: core.gatherLattice(array_to_numpy(corr_local), [2, -1, -1, -1])
         for src_gamma, corr_local in corr_local_by_src.items()
     }
     del corr_local_by_src, source_gamma_ls_by_src, backward_line

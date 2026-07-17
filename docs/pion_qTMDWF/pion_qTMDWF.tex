@@ -512,7 +512,40 @@ from pyquda_measurement_utils.pion_qTMDWF_pyquda import (
 Measurement = pion_TMDWF_measurement(parameters)
 \end{lstlisting}
 
-The three-point qTMDWF contraction is performed inline in the application (not via a class method), iterating over Wilson line indices and performing explicit \texttt{xp.einsum} contractions for each shift.
+The application layer iterates over Wilson-line indices and transports the
+backward propagator.  Frontier and Aurora then call the same shared
+\texttt{contract\_qtmdwf\_gamma\_scan} kernel for the 16-Gamma contraction
+and momentum projection.
+
+\subsubsection{Memory-light platform Gamma scan}
+
+The Frontier and Aurora applications call the shared
+\texttt{contract\_qtmdwf\_gamma\_scan} helper for each displaced backward
+propagator.  The contraction is deliberately ordered in two stages:
+\begin{align}
+ M_{kl}(x)
+ &=
+ \sum_{\mathrm{spin,color}}
+ (\Gamma_{\mathrm{src}}\gamma_5)_{ij}
+ S_b(x)^\dagger_{kj}\,S_f(x)_{li},
+ \\
+ C_g(\mathbf q,t)
+ &=
+ \sum_{\mathbf x}e^{i\mathbf q\cdot\mathbf x}
+ \sum_{kl}M_{kl}(x)(\gamma_5\Gamma_g)_{kl}.
+\end{align}
+Consequently, the largest spin-bearing temporary has shape
+\texttt{[local sites,4,4]}, and the largest Gamma-dependent field has shape
+\texttt{[16,local sites]}.  The implementation must not first construct
+\texttt{[16,local sites,4,4,3,3]}, which is sixteen full propagators and is
+unnecessarily large.
+
+For the Frontier script's $64^4$ lattice and MPI geometry
+\texttt{2.2.2.4}, each rank owns $32\times32\times32\times16$ sites.  In
+complex double precision, a Gamma-stacked propagator alone would occupy
+approximately $18$~GiB per rank.  The two-stage ordering reduces the
+Gamma-dependent field to approximately $128$~MiB per rank while leaving the
+Gamma order, momentum phase, Wilson-index order, and HDF5 axes unchanged.
 
 %==========================================================================
 \section{Key Differences from \texttt{pion\_qTMD\_vibe\_develop.py}}

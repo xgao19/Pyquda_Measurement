@@ -803,6 +803,18 @@ the complete sorted source list and the sink interpolator enter the sample-log
 identity.  The \texttt{<sm\_tag>} itself describes only preprocessing,
 smearing, and boost parameters.
 
+\paragraph{Lightweight resume.}
+Each \(t_{\rm sep}\) has a text sample log.  Rank~0 reads all logs once and
+broadcasts their exact completed-source sets.  If every requested
+\(t_{\rm sep}\) is complete, the source is skipped before inversion; otherwise
+only the missing separations are contracted and written.  A completion line is
+durably appended only after every requested fixed-source-Gamma file for that
+source and separation has closed.  The log is the sole resume state and does
+not probe HDF5 files that may already have been transferred.
+The current log name assumes fixed run flags, \(q_{\max}\), momenta, source
+Gamma list, and separation list.  A changed physical grid must use a new
+data/setup identity, and concurrent writers to one log are unsupported.
+
 \textbf{Internal structure:}
 \begin{verbatim}
   SS/

@@ -69,7 +69,12 @@ from pyquda_measurement_utils.pion_utils_vibe_develop import (
     build_pion_source_propagators,
     source_gamma_provenance,
 )
-from pyquda_measurement_utils.tools import mpi_print, srcLoc_distri_eq
+from pyquda_measurement_utils.tools import (
+    append_sample_log_entry,
+    mpi_print,
+    read_sample_log_entries,
+    srcLoc_distri_eq,
+)
 
 
 def sync_backend_array(arr):
@@ -191,13 +196,19 @@ src_positions = srcLoc_distri_eq(L, src_origin)[: args.num_src]
 
 sample_log_file = data_dir / "sample_log_qtmd" / f"{conf}_{channel_tag}_{pf_tag}"
 if latt_info.mpi_rank == 0:
-    sample_log_file.touch(exist_ok=True)
+    completed_samples = read_sample_log_entries(sample_log_file)
+else:
+    completed_samples = None
+completed_samples = set(getMPIComm().bcast(completed_samples, root=0))
 
 sink_gamma = gamma_from_label(args.sink_interpolator)
 
 for pos in src_positions:
     t0_pos = time.time()
     sample_log_tag = get_sample_log_tag(str(conf), pos, f"{channel_tag}_{pf_tag}")
+    if sample_log_tag in completed_samples:
+        mpi_print(latt_info, f"SKIP completed: {sample_log_tag}")
+        continue
     mpi_print(latt_info, f"START: {sample_log_tag}")
 
     t0 = time.time()
@@ -422,6 +433,6 @@ for pos in src_positions:
     sync_backend_array(active_prop.data)
 
     if latt_info.mpi_rank == 0:
-        with sample_log_file.open("a+") as f:
-            f.write(sample_log_tag + "\n")
+        append_sample_log_entry(sample_log_file, sample_log_tag)
+    completed_samples.add(sample_log_tag)
     mpi_print(latt_info, f"DONE: {sample_log_tag} total {time.time() - t0_pos}s")

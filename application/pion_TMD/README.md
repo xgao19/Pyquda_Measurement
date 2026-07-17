@@ -78,6 +78,20 @@ contraction accepts any canonical Gamma label as a fixed source, or
 For the default source, new HDF5 files record `source_gamma_mode=fixed` and
 `source_gamma_label=5`, in addition to `src_interpolator=5`.
 
+## Lightweight Resume
+
+At startup rank 0 reads the existing text sample log once and broadcasts the
+exact set of completed source tags.  A completed source is skipped before any
+source inversion.  A tag is appended, with `flush` and `fsync`, only after C2
+and every enabled CG/GI qTMD/PDF output has closed successfully.  The log is the
+only resume state: moved HDF5 files are not checked.
+
+The log name intentionally remains lightweight and does not encode every run
+flag or operator-grid bound.  Reuse one log only when the enabled products,
+`qmax`, `b_T`, `b_z`, `eta`, momenta, and all other physical grids are unchanged.
+Use a new data/setup identity whenever any of those choices changes.  Multiple
+jobs must not update the same log concurrently.
+
 The default smoke gauge is:
 
 ```text

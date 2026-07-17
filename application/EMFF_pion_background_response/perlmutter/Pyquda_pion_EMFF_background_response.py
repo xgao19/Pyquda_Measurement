@@ -23,6 +23,13 @@ def parse_int_list(text):
     return [int(item) for item in str(text).replace(",", ".").split(".") if item]
 
 
+def parse_position(text):
+    values = [int(item) for item in str(text).replace(",", ".").split(".") if item]
+    if len(values) != 4:
+        raise ValueError(f"Expected four source-position components, got {text!r}")
+    return values
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, default=int(os.environ.get("PION_EMFF_BG_CONFIG_NUM", 0)))
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("PION_EMFF_BG_MPI_GEOMETRY", "1.1.1.1"))
@@ -40,6 +47,7 @@ parser.add_argument("--width", type=float, default=float(os.environ.get("PION_EM
 parser.add_argument("--mass", type=float, default=float(os.environ.get("PION_EMFF_BG_MASS", 0.236)))
 parser.add_argument("--tol", type=float, default=float(os.environ.get("PION_EMFF_BG_TOL", 1e-15)))
 parser.add_argument("--maxiter", type=int, default=int(os.environ.get("PION_EMFF_BG_MAXITER", 300)))
+parser.add_argument("--src_pos", type=str, default=os.environ.get("PION_EMFF_BG_SRC_POS", "0.0.0.0"))
 args, _unknown = parser.parse_known_args()
 
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -57,6 +65,8 @@ from pyquda_measurement_utils.pion_current_background_response_vibe_develop impo
     invert_local_current_response_propagator,
     response_at_sink_time,
     response_ratio,
+    relative_tau_to_absolute,
+    roll_to_source_relative,
     save_pion_EMFF_background_response_hdf5,
     summed_explicit_emff,
     tau_window_list,
@@ -81,7 +91,7 @@ pf = parse_momentum(args.pf)
 qext_list = parse_momentum_list(args.qext_list) if args.qext_list else [parse_momentum(args.qext)]
 tsep_list = parse_int_list(args.tsep_list) if args.tsep_list else [args.tsep]
 current_gammas = [item for item in args.current_gammas.replace(",", ".").split(".") if item]
-src_pos = [0, 0, 0, 0]
+src_pos = parse_position(args.src_pos)
 sink_gamma_label = "5"
 src_gamma = "5"
 
@@ -150,6 +160,8 @@ c2_corr = contract_pion_2pt_multi_src_gamma(
     sink_phases,
     [src_gamma],
 )[src_gamma]
+c2_corr = getMPIComm().bcast(c2_corr, root=0)
+c2_corr = roll_to_source_relative(c2_corr, src_pos[3])
 mpi_print(latt_info, f"TIME ordinary pion C2 {time.time() - t0}s")
 
 records = []
@@ -175,22 +187,39 @@ for iq, qext in enumerate(qext_list):
             q_phases,
             [src_gamma],
         )
-        c3 = c3_by_src[src_gamma]
+        c3 = getMPIComm().bcast(c3_by_src[src_gamma], root=0)
+        c3 = roll_to_source_relative(c3, src_pos[3])
         mpi_print(latt_info, f"TIME explicit EMFF q={qext} tsep={tsep}: {time.time() - t0}s")
 
-        tau_list = tau_window_list(tsep, latt_info.global_size[3], args.tau_window, args.tau_min)
+        tau_relative_list = tau_window_list(
+            tsep,
+            latt_info.global_size[3],
+            args.tau_window,
+            args.tau_min,
+        )
+        tau_absolute_list = relative_tau_to_absolute(
+            tau_relative_list,
+            src_pos[3],
+            latt_info.global_size[3],
+        )
         c2_value = response_at_sink_time(c2_corr, sink_gamma=sink_gamma_label, p_index=0, tsep=tsep)
 
         for current_gamma in current_gammas:
-            explicit_sum = summed_explicit_emff(c3, current_gamma=current_gamma, q_index=0, tau_list=tau_list)
+            explicit_sum = summed_explicit_emff(
+                c3,
+                current_gamma=current_gamma,
+                q_index=0,
+                tau_relative_list=tau_relative_list,
+            )
 
             t0 = time.time()
             response_prop = invert_local_current_response_propagator(
                 dirac,
                 prop_pos,
                 q_phases[0],
+                source_time=src_pos[3],
                 current_gamma=current_gamma,
-                tau_list=tau_list,
+                tau_relative_list=tau_relative_list,
                 response_sign=1,
             )
             response_prop = boosted_smearing(response_prop, w=args.width, boost=[0, 0, 0])
@@ -201,6 +230,8 @@ for iq, qext in enumerate(qext_list):
                 sink_phases,
                 src_gamma=src_gamma,
             )
+            response_corr = getMPIComm().bcast(response_corr, root=0)
+            response_corr = roll_to_source_relative(response_corr, src_pos[3])
             response_value = response_at_sink_time(
                 response_corr,
                 sink_gamma=sink_gamma_label,
@@ -222,7 +253,8 @@ for iq, qext in enumerate(qext_list):
                     "src_gamma": src_gamma,
                     "tau_window": args.tau_window,
                     "tau_min": args.tau_min,
-                    "tau_list": tau_list,
+                    "tau_relative_list": tau_relative_list,
+                    "tau_absolute_list": tau_absolute_list,
                     "response_sign": 1,
                     "finite_difference_derivative_sign": -1,
                     "pf": pf,
@@ -246,6 +278,7 @@ for iq, qext in enumerate(qext_list):
 if latt_info.mpi_rank == 0:
     out_tag = data_dir / "background_response" / (
         f"{lat_tag}.pion_EMFF_background_response.{conf}.src{src_gamma}"
+        f".x{src_pos[0]}y{src_pos[1]}z{src_pos[2]}t{src_pos[3]}"
         f".pf{pf[0]}_{pf[1]}_{pf[2]}"
         f".nq{len(qext_list)}.ntsep{len(tsep_list)}.{args.tau_window}"
     )
@@ -257,7 +290,9 @@ if latt_info.mpi_rank == 0:
         attrs={
             "lat_tag": lat_tag,
             "config_num": conf,
-            "src_pos": np.asarray(src_pos, dtype=np.int32),
+            "source_position": np.asarray(src_pos, dtype=np.int32),
+            "source_time": int(src_pos[3]),
+            "time_axis": "source_relative",
             "pf": np.asarray(pf, dtype=np.int32),
             "qext_list": np.asarray(qext_list, dtype=np.int32),
             "tsep_list": np.asarray(tsep_list, dtype=np.int32),

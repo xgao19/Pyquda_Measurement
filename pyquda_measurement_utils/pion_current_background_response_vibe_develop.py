@@ -53,24 +53,52 @@ def infer_source_momentum(pf, qext):
 
 
 def tau_window_list(tsep, Nt, window="all", tau_min=1):
-    """Build insertion-time windows for summed linear-response diagnostics."""
+    """Build a source-relative insertion-time window."""
     tsep = int(tsep)
     Nt = int(Nt)
     tau_min = int(tau_min)
+    if Nt <= 0:
+        raise ValueError("Nt must be positive")
+    if not 0 <= tsep < Nt:
+        raise ValueError(f"tsep={tsep} is outside the periodic time extent Nt={Nt}")
     if window == "all":
         return None
     if window == "source_sink":
-        return list(range(0, tsep + 1))
-    if window == "open":
-        return list(range(1, tsep))
-    if window == "restricted":
+        tau_relative_list = list(range(0, tsep + 1))
+    elif window == "open":
+        tau_relative_list = list(range(1, tsep))
+    elif window == "restricted":
         if tau_min < 0:
             raise ValueError("tau_min must be non-negative")
-        return list(range(tau_min, tsep - tau_min + 1))
-    if window.startswith("range:"):
+        tau_relative_list = list(range(tau_min, tsep - tau_min + 1))
+    elif window.startswith("range:"):
         start, stop = [int(item) for item in window.split(":", 1)[1].split("-")]
-        return list(range(start, stop + 1))
-    raise ValueError("window must be one of all, source_sink, open, restricted, or range:start-stop")
+        tau_relative_list = list(range(start, stop + 1))
+    else:
+        raise ValueError("window must be one of all, source_sink, open, restricted, or range:start-stop")
+    if any(tau < 0 or tau >= Nt for tau in tau_relative_list):
+        raise ValueError(
+            f"source-relative tau window {tau_relative_list} is outside the periodic time extent Nt={Nt}"
+        )
+    return tau_relative_list
+
+
+def relative_tau_to_absolute(tau_relative_list, source_time, Nt):
+    """Map source-relative insertion times to absolute lattice time."""
+    if tau_relative_list is None:
+        return None
+    Nt = int(Nt)
+    if Nt <= 0:
+        raise ValueError("Nt must be positive")
+    return [
+        int((int(source_time) + int(tau_relative)) % Nt)
+        for tau_relative in tau_relative_list
+    ]
+
+
+def roll_to_source_relative(values, source_time, axis=-1):
+    """Roll a global-time array so index zero is the source time."""
+    return np.roll(np.asarray(values), -int(source_time), axis=axis)
 
 
 def response_ratio(response_value, c2_value):
@@ -80,7 +108,14 @@ def response_ratio(response_value, c2_value):
     return response_value / c2_value
 
 
-def build_local_current_inserted_source(prop_forward, phase_q, current_gamma="T", tau=None):
+def build_local_current_inserted_source(
+    prop_forward,
+    phase_q,
+    *,
+    source_time,
+    current_gamma="T",
+    tau_relative_list=None,
+):
     """Build ``Gamma_current * phase_q * S`` as a propagator source.
 
     Parameters
@@ -93,10 +128,11 @@ def build_local_current_inserted_source(prop_forward, phase_q, current_gamma="T"
     current_gamma
         Gamma label or explicit gamma matrix.  The EMFF temporal vector current
         is label ``"T"``.
-    tau
-        Optional global time slice or list of time slices.  If provided, the
-        inserted source is masked to that time window before inversion.  If
-        omitted, all time slices are included, giving a summed-insertion source.
+    source_time
+        Absolute time coordinate of the pion source.
+    tau_relative_list
+        Optional insertion times relative to ``source_time``.  They are mapped
+        to absolute lattice time only when the projector is constructed.
     """
     xp = _get_xp_from_array(prop_forward.data)
     phase_q = _asarray_on_queue(phase_q, xp, prop_forward.data)
@@ -111,12 +147,15 @@ def build_local_current_inserted_source(prop_forward, phase_q, current_gamma="T"
         prop_forward.data,
         optimize=True,
     )
-    if tau is not None and np.ndim(tau) == 0:
-        src = source.sequential12(src, tau)
-    elif tau is not None:
+    tau_absolute_list = relative_tau_to_absolute(
+        tau_relative_list,
+        source_time,
+        prop_forward.latt_info.global_size[3],
+    )
+    if tau_absolute_list is not None:
         src_window = core.LatticePropagator(prop_forward.latt_info)
         src_window.data[:] = 0
-        for tau_i in tau:
+        for tau_i in tau_absolute_list:
             src_window.data[:] += source.sequential12(src, int(tau_i)).data
         src = src_window
     return src
@@ -126,24 +165,25 @@ def invert_local_current_response_propagator(
     dirac,
     prop_forward,
     phase_q,
+    *,
+    source_time,
     current_gamma="T",
-    tau_list=None,
+    tau_relative_list=None,
     response_sign=1,
     mrhs=1,
     restart=0,
 ):
     """Invert the local-current inserted source and return a response propagator.
 
-    If ``tau_list`` is ``None``, the inserted source covers all time slices.
-    If ``tau_list`` is provided, the time-window source is summed first and then
-    inverted once.  This supports restricted windows without introducing a
-    per-tau response-propagator cache.
+    If ``tau_relative_list`` is ``None``, the inserted source covers all time
+    slices.  Otherwise the relative-time window is summed before one inversion.
     """
     inserted_source = build_local_current_inserted_source(
         prop_forward,
         phase_q,
+        source_time=source_time,
         current_gamma=current_gamma,
-        tau=tau_list,
+        tau_relative_list=tau_relative_list,
     )
     response = core.invertPropagator(dirac, inserted_source, mrhs, restart)
     response.data[:] *= response_sign
@@ -155,10 +195,12 @@ def invert_current_current_response_propagator(
     prop_forward,
     first_phase_q,
     second_phase_q,
+    *,
+    source_time,
     first_current_gamma="T",
     second_current_gamma="T",
-    first_tau_list=None,
-    second_tau_list=None,
+    first_tau_relative_list=None,
+    second_tau_relative_list=None,
     response_sign=1,
     mrhs=1,
     restart=0,
@@ -174,8 +216,9 @@ def invert_current_current_response_propagator(
         dirac,
         prop_forward,
         first_phase_q,
+        source_time=source_time,
         current_gamma=first_current_gamma,
-        tau_list=first_tau_list,
+        tau_relative_list=first_tau_relative_list,
         response_sign=1,
         mrhs=mrhs,
         restart=restart,
@@ -184,8 +227,9 @@ def invert_current_current_response_propagator(
         dirac,
         first_response,
         second_phase_q,
+        source_time=source_time,
         current_gamma=second_current_gamma,
-        tau_list=second_tau_list,
+        tau_relative_list=second_tau_relative_list,
         response_sign=response_sign,
         mrhs=mrhs,
         restart=restart,
@@ -244,12 +288,12 @@ def contract_current_current_response_pion_2pt(
     )
 
 
-def summed_explicit_emff(c3, current_gamma="T", q_index=0, tau_list=None):
-    """Select one current gamma and q index from explicit EMFF C3 and sum tau."""
+def summed_explicit_emff(c3, current_gamma="T", q_index=0, tau_relative_list=None):
+    """Select one channel from source-relative EMFF C3 and sum relative tau."""
     gamma_idx = my_gammas.index(current_gamma)
     values = np.asarray(c3)[gamma_idx, q_index]
-    if tau_list is not None:
-        values = values[np.asarray(tau_list, dtype=np.int64)]
+    if tau_relative_list is not None:
+        values = values[np.asarray(tau_relative_list, dtype=np.int64)]
     return np.sum(values)
 
 
@@ -268,7 +312,8 @@ def save_pion_EMFF_background_response_hdf5(tag, records, attrs=None):
     """
     with _prepare_h5_file(f"{tag}.h5", attrs) as h5:
         h5.attrs["measurement"] = "pion_EMFF_background_response"
-        h5.attrs["schema_version"] = "2"
+        h5.attrs["schema_version"] = "3"
+        h5.attrs["time_axis"] = "source_relative"
 
         summary = h5.require_group("summary")
         summary.create_dataset("record_index", data=np.arange(len(records), dtype=np.int32))
@@ -305,12 +350,23 @@ def save_pion_EMFF_background_response_hdf5(tag, records, attrs=None):
             for key in ("pf", "qext", "pi", "tsep", "tau_min", "q_index"):
                 if key in record:
                     group.create_dataset(key, data=np.asarray(record[key]))
-            tau_list = record.get("tau_list")
+            tau_relative_list = record.get("tau_relative_list")
+            tau_absolute_list = record.get("tau_absolute_list")
             group.create_dataset(
-                "tau_list",
-                data=np.asarray([] if tau_list is None else tau_list, dtype=np.int32),
+                "tau_relative_list",
+                data=np.asarray(
+                    [] if tau_relative_list is None else tau_relative_list,
+                    dtype=np.int32,
+                ),
             )
-            group.attrs["tau_list_is_all_time_slices"] = tau_list is None
+            group.create_dataset(
+                "tau_absolute_list",
+                data=np.asarray(
+                    [] if tau_absolute_list is None else tau_absolute_list,
+                    dtype=np.int32,
+                ),
+            )
+            group.attrs["tau_list_is_all_time_slices"] = tau_relative_list is None
             for key in (
                 "c2_tsep",
                 "explicit_summed_c3",
@@ -336,8 +392,9 @@ def save_pion_current_current_response_hdf5(tag, records, attrs=None):
     """
     with _prepare_h5_file(f"{tag}.h5", attrs) as h5:
         h5.attrs["measurement"] = "pion_current_current_response"
-        h5.attrs["schema_version"] = "1"
+        h5.attrs["schema_version"] = "2"
         h5.attrs["current_order"] = "Dinv_O2_Dinv_O1_S"
+        h5.attrs["time_axis"] = "source_relative"
 
         summary = h5.require_group("summary")
         summary.create_dataset("record_index", data=np.arange(len(records), dtype=np.int32))
@@ -388,10 +445,23 @@ def save_pion_current_current_response_hdf5(tag, records, attrs=None):
             ):
                 if key in record:
                     group.create_dataset(key, data=record[key])
-            for key in ("first_tau_list", "second_tau_list"):
-                tau_list = record.get(key)
+            for prefix in ("first", "second"):
+                tau_relative_list = record.get(f"{prefix}_tau_relative_list")
+                tau_absolute_list = record.get(f"{prefix}_tau_absolute_list")
                 group.create_dataset(
-                    key,
-                    data=np.asarray([] if tau_list is None else tau_list, dtype=np.int32),
+                    f"{prefix}_tau_relative_list",
+                    data=np.asarray(
+                        [] if tau_relative_list is None else tau_relative_list,
+                        dtype=np.int32,
+                    ),
                 )
-                group.attrs[f"{key}_is_all_time_slices"] = tau_list is None
+                group.create_dataset(
+                    f"{prefix}_tau_absolute_list",
+                    data=np.asarray(
+                        [] if tau_absolute_list is None else tau_absolute_list,
+                        dtype=np.int32,
+                    ),
+                )
+                group.attrs[f"{prefix}_tau_list_is_all_time_slices"] = (
+                    tau_relative_list is None
+                )

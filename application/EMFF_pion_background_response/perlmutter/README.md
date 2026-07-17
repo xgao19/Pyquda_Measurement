@@ -29,6 +29,7 @@ current = T
 source gamma = gamma5
 sink gamma = gamma5
 tsep = 2
+source position = [0, 0, 0, 0]
 ```
 
 Useful optional controls:
@@ -41,10 +42,30 @@ export PION_EMFF_BG_TAU_WINDOW="restricted"
 export PION_EMFF_BG_TAU_MIN="1"
 ```
 
-The saved file uses schema version 2.  Each record stores `pf`, `qext`,
+The source can be moved explicitly, for example:
+
+```bash
+python Pyquda_pion_EMFF_background_response.py --src_pos 1.2.3.7
+```
+
+All tau windows are source-relative.  Immediately before constructing the
+time projector the code maps
+
+```text
+tau_abs = (source_time + tau_rel) mod Nt
+```
+
+and all saved C2, explicit C3, and response time axes are rolled so index zero
+is the source.  Sink separations and reported tau lists therefore remain
+source-relative even when the source wraps through the temporal boundary.
+
+The saved file uses schema version 3.  Each record stores `pf`, `qext`,
 `pi = pf - qext`, `tsep`, the current gamma, the tau-window definition, C2,
 the explicit summed C3, the response C2-like correlator, and both summed
-ratios.  The `summary/` group also stores table-like arrays for `rel_diff`,
+ratios.  It stores both `tau_relative_list` and the absolute projector
+coordinates `tau_absolute_list`, together with `source_position`,
+`source_time`, and `time_axis=source_relative`.  The `summary/` group also
+stores table-like arrays for `rel_diff`,
 `response_R_sum`, `explicit_R_sum`, momenta, gamma labels, and window labels so
 analysis code can scan all records directly.  The implementation intentionally
 does not save per-tau response propagators.

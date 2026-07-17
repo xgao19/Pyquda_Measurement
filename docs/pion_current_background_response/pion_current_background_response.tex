@@ -401,7 +401,12 @@ for the corresponding finite-field derivative convention.
 
 The full background-field energy-shift picture corresponds to an all-time
 insertion.  However, in the linearized response implementation one may restrict
-the insertion time,
+the source-relative insertion time \(\tau_{\rm rel}\).  For a source at
+absolute time \(t_0\), the projector is constructed only after applying
+\begin{equation}
+  \tau_{\rm abs}=(t_0+\tau_{\rm rel})\bmod N_t .
+\end{equation}
+Thus one writes
 \begin{equation}
   \Sresp^{W_\tau}
   =
@@ -444,7 +449,7 @@ They are analysis tools for the linearized method, useful for:
 
 The helper
 \begin{center}
-\texttt{build\_local\_current\_inserted\_source(prop\_forward, phase\_q, current\_gamma, tau)}
+\texttt{build\_local\_current\_inserted\_source(..., source\_time, tau\_relative\_list)}
 \end{center}
 constructs
 \begin{equation}
@@ -452,8 +457,9 @@ constructs
   =
   \Gamma_{\mathrm{cur}}\Phi_{\mathbf q}(x-\mathbf x_0)S(x,x_0).
 \end{equation}
-If \texttt{tau} is provided, the source is masked to that global insertion time.
-If \texttt{tau} is omitted, all time slices are included.
+If \texttt{tau\_relative\_list} is provided, each entry is mapped periodically
+to absolute lattice time immediately before calling the time-projector helper.
+If it is omitted, all time slices are included.
 
 \subsection{Response inversion}
 
@@ -462,7 +468,7 @@ The helper
 \texttt{invert\_local\_current\_response\_propagator(...)}
 \end{center}
 performs the ordinary \(\Dslash^{-1}\) inversion of the current-inserted
-source.  If a list of times \texttt{tau\_list} is given, the code first builds
+source.  If a list \texttt{tau\_relative\_list} is given, the code first builds
 the summed time-window source and then performs one inversion.  This deliberately
 avoids storing per-\(\tau\) response propagators.
 
@@ -600,12 +606,18 @@ HDF5 output stores one record for each
   current-response diagnostics without changing the first-order contraction.
 
   \item \textbf{HDF5 schema upgrade.}
-  Version-2 output stores file-level kinematics and one
+  Version-3 first-order output stores file-level kinematics and one
   \(\texttt{results/record\_XXXX}\) group per diagnostic.  Each record includes
   \(\mathbf p_f\), \(\mathbf q\), inferred \(\mathbf p_i\), \(t_{\mathrm{sep}}\),
   current gamma, source/sink gamma labels, the tau-window definition, \(C_2\),
   explicit summed \(C_3\), response \(C_2\)-like data, ratios, and the
-  response-explicit difference.
+  response-explicit difference.  It also stores
+  \texttt{source\_position}, \texttt{source\_time},
+  \texttt{tau\_relative\_list}, \texttt{tau\_absolute\_list}, and
+  \texttt{time\_axis=source\_relative}.  The explicit \(C_3\), response
+  correlator, and \(C_2\) arrays are rolled by \(-t_0\) before analysis and
+  saving.  The nested current-current diagnostic uses the same rule in its
+  version-2 schema for both insertion windows.
   For analysis convenience, the same per-record scalars are also collected in
   \(\texttt{summary/}\) datasets:
   \[

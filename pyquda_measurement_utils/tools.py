@@ -4,6 +4,7 @@
 #
 
 import os
+from pathlib import Path
 
 # ---------- Backend Helpers (consistent with boosted_smearing_pyquda) ----------
 def _get_xp_from_array(a):
@@ -37,6 +38,34 @@ def _asarray_on_queue(val, xp, ref_arr):
     
     # 2. Fallback for standard numpy/cupy or if ref_arr has no queue info
     return xp.asarray(val)
+
+
+def read_sample_log_entries(path):
+    """Read a lightweight sample log using exact non-empty lines."""
+    path = Path(path)
+    if not path.exists():
+        return set()
+    with path.open("r", encoding="utf-8") as handle:
+        return {line.strip() for line in handle if line.strip()}
+
+
+def append_sample_log_entry(path, entry):
+    """Durably append one exact sample-log entry without HDF5 validation."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entry = str(entry).strip()
+    if not entry:
+        raise ValueError("sample-log entry must not be empty")
+    with path.open("a+", encoding="utf-8") as handle:
+        handle.seek(0)
+        completed = {line.strip() for line in handle if line.strip()}
+        if entry in completed:
+            return False
+        handle.seek(0, os.SEEK_END)
+        handle.write(entry + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return True
 
 def mpi_print(latt_info, message):
     if latt_info.mpi_rank == 0:

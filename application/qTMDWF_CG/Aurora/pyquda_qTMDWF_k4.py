@@ -2,7 +2,6 @@
 # load python modules
 import time
 import numpy as np
-import dpnp as dnp
 
 from pyquda import init, getMPIComm
 
@@ -25,7 +24,10 @@ init(mpi_geometry, enable_mps=True, backend="dpnp", backend_target="sycl", resou
 from pyquda_utils import core, gamma, io, source
 from pyquda_utils.phase import MomentumPhase
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
-from pyquda_measurement_utils.pion_qTMDWF_pyquda import pion_TMDWF_measurement, pyquda_gammas_order, my_pyquda_gammas
+from pyquda_measurement_utils.pion_qTMDWF_pyquda import (
+    contract_qtmdwf_gamma_scan,
+    pion_TMDWF_measurement,
+)
 from pyquda_measurement_utils.io_corr import get_sample_log_tag, get_c2pt_file_tag, get_qTMDWF_file_tag, save_qTMDWF_hdf5_noRoll
 from pyquda_measurement_utils.tools import srcLoc_distri_eq, mpi_print
 
@@ -36,7 +38,6 @@ lat_tag = "l80c80a050" # NOTE
 interpolation = "5" # NOTE, change interpolation operator
 sm_tag = f"1HYP_M140_GSRC_W70_k4" # NOTE
 
-G5 = gamma.gamma(15)
 Gsrc = gamma.gamma(15) # NOTE, change interpolation operator
 
 # --------------------------
@@ -55,7 +56,6 @@ parameters = {
     "save_propagators" : False
 }
 Measurement = pion_TMDWF_measurement(parameters)
-xp = dnp
 gammalist = ["5", "T", "T5", "X", "X5", "Y", "Y5", "Z", "Z5", "I", "SXT", "SXY", "SXZ", "SYT", "SYZ", "SZT"]
 
 
@@ -88,19 +88,6 @@ mpi_print(latt_info, f"--plaquette U_hyp: {gauge.plaquette()}")
 
 dirac = core.getClover(latt_info, mass, 1e-10, 10000, xi_0, csw_r, csw_t, multigrid)
 
-
-###################### prepare gamma list ######################
-# use the first gamma's dtype and device to allocate the container
-first_gamma = my_pyquda_gammas[0]
-n_gamma = len(my_pyquda_gammas)
-# dpnp supports device in oneAPI environment
-pyquda_gamma_ls = xp.empty(
-    (n_gamma,) + first_gamma.shape,
-    dtype=first_gamma.dtype,
-    device=first_gamma.device,   # key: use the same device as gamma_pyq
-)
-for gamma_idx, gamma_pyq in enumerate(my_pyquda_gammas):
-    pyquda_gamma_ls[gamma_idx] = gamma_pyq
 
 ###################### setup source positions ######################
 src_shift = np.array([0,0,0,0]) + np.array([7,11,13,23])
@@ -199,21 +186,17 @@ for ipos, pos in enumerate(src_production):
         mpi_print(latt_info, f"TIME PyQUDA: cshift {time.time() - t0}")
 
         t0 = time.time()
-        Gsrc_G5 = xp.einsum("ij,jk->ik", Gsrc, G5)
-        G5_gamma = xp.einsum("ki,gim->gkm", G5, pyquda_gamma_ls)
-        temp = xp.einsum(
-            "ij,wtzyxkjba,wtzyxliba->wtzyxkl",
-            Gsrc_G5,
-            tmd_backward_prop_dir0.data.conj(),
-            propag_f.data,
+        corr = contract_qtmdwf_gamma_scan(
+            latt_info,
+            tmd_backward_prop_dir0,
+            propag_f,
+            phases_2pt,
+            Gsrc,
         )
-        temp = xp.einsum("wtzyxkl,gkl->gwtzyx", temp, G5_gamma)
-        temp = xp.einsum("qwtzyx,gwtzyx->qgt", phases_2pt, temp)
-        temp2 = core.gatherLattice(dnp.asnumpy(temp), [2, -1, -1, -1])
-        TMDWF_collect_src5.append(temp2)
+        TMDWF_collect_src5.append(corr)
         mpi_print(latt_info, f"TIME PyQUDA: contract TMDWF {time.time() - t0}")
 
-        del temp, temp2
+        del corr
     del tmd_backward_prop_dir0
         
     #! PyQUDA: contract TMD +Y direction
@@ -231,21 +214,17 @@ for ipos, pos in enumerate(src_production):
         mpi_print(latt_info, f"TIME PyQUDA: cshift {time.time() - t0}")
 
         t0 = time.time()
-        Gsrc_G5 = xp.einsum("ij,jk->ik", Gsrc, G5)
-        G5_gamma = xp.einsum("ki,gim->gkm", G5, pyquda_gamma_ls)
-        temp = xp.einsum(
-            "ij,wtzyxkjba,wtzyxliba->wtzyxkl",
-            Gsrc_G5,
-            tmd_backward_prop_dir1.data.conj(),
-            propag_f.data,
+        corr = contract_qtmdwf_gamma_scan(
+            latt_info,
+            tmd_backward_prop_dir1,
+            propag_f,
+            phases_2pt,
+            Gsrc,
         )
-        temp = xp.einsum("wtzyxkl,gkl->gwtzyx", temp, G5_gamma)
-        temp = xp.einsum("qwtzyx,gwtzyx->qgt", phases_2pt, temp)
-        temp2 = core.gatherLattice(dnp.asnumpy(temp), [2, -1, -1, -1])
-        TMDWF_collect_src5.append(temp2)
+        TMDWF_collect_src5.append(corr)
         mpi_print(latt_info, f"TIME PyQUDA: contract TMDWF {time.time() - t0}")
         
-        del temp, temp2
+        del corr
     del tmd_backward_prop_dir1
     
     TMDWF_collect_src5 = np.array(TMDWF_collect_src5) # shape (N_W, N_pz, N_gamma, N_t)

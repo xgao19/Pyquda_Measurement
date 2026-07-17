@@ -81,6 +81,7 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
     PYQUDA_GAMMA_IDS,
 )
 from pyquda_measurement_utils.io_corr import ensure_parent_dir
+from pyquda_measurement_utils.pion_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 
 
@@ -123,24 +124,14 @@ def _matrix_on_backend(matrix, xp, reference_array):
     return _asarray_on_queue(matrix, xp, reference_array)
 
 
-def _to_numpy(xp, arr):
-    if hasattr(xp, "asnumpy"):
-        return xp.asnumpy(arr)
-    if hasattr(arr, "get"):
-        return arr.get()
-    return np.asarray(arr)
-
-
 def _matrix_stack(gamma_dict, keys, reference_array):
     xp = _get_xp_from_array(reference_array)
-    first_gamma = _gamma_matrix(gamma_dict[keys[0]])
-    if xp.__name__ == "dpnp":
-        matrix_ls = xp.empty((len(keys),) + first_gamma.shape, dtype=first_gamma.dtype, device=first_gamma.device)
-    else:
-        matrix_ls = xp.empty((len(keys),) + first_gamma.shape, dtype=first_gamma.dtype)
-    for idx, key in enumerate(keys):
-        matrix_ls[idx] = _matrix_on_backend(_gamma_matrix(gamma_dict[key]), xp, reference_array)
-    return matrix_ls
+    return xp.stack([
+        _matrix_on_backend(
+            _gamma_matrix(gamma_dict[key]), xp, reference_array
+        )
+        for key in keys
+    ])
 
 
 class pion_soft_factor:
@@ -207,7 +198,7 @@ class pion_soft_factor:
         prop_bw_src_sink = xp.einsum("ik,tzyxklca,ln->tzyxinca", src_gamma, prop_bw_bar, sink_gamma, optimize=True)
         corr_local = xp.einsum("tzyxjiab,tzyxilba->tzyx", prop_bw_src_sink, prop_fw_t, optimize=True)
         corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-        return core.gatherLattice(_to_numpy(xp, corr_t), [0, -1, -1, -1])
+        return core.gatherLattice(array_to_numpy(corr_t), [0, -1, -1, -1])
 
     def contract_tmdwf_check(self, latt_info, prop_fw, prop_bw, pion_mom, pion_pair_label):
         xp = _get_xp_from_array(prop_fw.data)
@@ -228,7 +219,7 @@ class pion_soft_factor:
                     left = xp.einsum("ij,tzyxjlca->tzyxilca", src_gamma, shifted_bar, optimize=True)
                     corr_local = xp.einsum("tzyxjiab,tzyxilba->tzyx", left, prop_fw_t, optimize=True)
                     corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-                    corr_list.append(core.gatherLattice(_to_numpy(xp, corr_t), [0, -1, -1, -1]))
+                    corr_list.append(core.gatherLattice(array_to_numpy(corr_t), [0, -1, -1, -1]))
         return np.asarray(corr_list)
 
     def contract_soft_factor(self, latt_info, prop_fw, prop_bw_src, prop_sink_bw, prop_sink_fw, pion_mom):
@@ -282,7 +273,7 @@ class pion_soft_factor:
                             optimize=True,
                         )
                         corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-                        corr_global = core.gatherLattice(_to_numpy(xp, corr_t), [0, -1, -1, -1])
+                        corr_global = core.gatherLattice(array_to_numpy(corr_t), [0, -1, -1, -1])
                         if latt_info.mpi_rank == 0:
                             corr_collect[isrc, igm, idir, bT] = corr_global
         return corr_collect, pion_pair_labels, gamma_pair_labels

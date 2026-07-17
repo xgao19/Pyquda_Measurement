@@ -48,7 +48,12 @@ from pyquda_measurement_utils.io_corr import (
 )
 from pyquda_measurement_utils.pion_EMFF_vibe_develop import my_gammas, pion_EMFF
 from pyquda_measurement_utils.pion_utils_vibe_develop import source_gamma_provenance
-from pyquda_measurement_utils.tools import mpi_print, srcLoc_distri_eq
+from pyquda_measurement_utils.tools import (
+    append_sample_log_entry,
+    mpi_print,
+    read_sample_log_entries,
+    srcLoc_distri_eq,
+)
 
 
 def sync_backend_array(arr):
@@ -177,9 +182,45 @@ src_origin = np.array([int(conf) % L[i] for i in range(4)]) + src_shift
 src_positions = srcLoc_distri_eq(L, src_origin)[: args.num_src]
 
 sink_gamma = gamma_from_label(args.sink_interpolator)
+sample_log_files = {}
+completed_by_tsep = {}
+for t_insert in t_insert_list:
+    pf_tag = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{t_insert}"
+    sample_log_file = (
+        data_dir / "sample_log_emff" / f"{conf}_{channel_set_tag}_{pf_tag}"
+    )
+    sample_log_files[t_insert] = sample_log_file
+    if latt_info.mpi_rank == 0:
+        completed_by_tsep[t_insert] = read_sample_log_entries(sample_log_file)
+completed_by_tsep = getMPIComm().bcast(
+    completed_by_tsep if latt_info.mpi_rank == 0 else None, root=0
+)
+completed_by_tsep = {
+    int(t_insert): set(entries)
+    for t_insert, entries in completed_by_tsep.items()
+}
 
 for pos in src_positions:
     t0_pos = time.time()
+    sample_tags = {
+        t_insert: get_sample_log_tag(
+            str(conf),
+            pos,
+            (
+                f"{channel_set_tag}_"
+                f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{t_insert}"
+            ),
+        )
+        for t_insert in t_insert_list
+    }
+    pending_tseps = [
+        t_insert
+        for t_insert in t_insert_list
+        if sample_tags[t_insert] not in completed_by_tsep[t_insert]
+    ]
+    if not pending_tseps:
+        mpi_print(latt_info, f"SKIP completed source: {pos}")
+        continue
     mpi_print(latt_info, f"START source: {pos} tseps {t_insert_list}")
 
     t0 = time.time()
@@ -234,14 +275,11 @@ for pos in src_positions:
 
     for t_insert in t_insert_list:
         pf_tag = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{t_insert}"
-        sample_log_file = (
-            data_dir / "sample_log_emff" / f"{conf}_{channel_set_tag}_{pf_tag}"
-        )
-        sample_log_tag = get_sample_log_tag(
-            str(conf), pos, f"{channel_set_tag}_{pf_tag}"
-        )
-        if latt_info.mpi_rank == 0:
-            sample_log_file.touch(exist_ok=True)
+        sample_log_file = sample_log_files[t_insert]
+        sample_log_tag = sample_tags[t_insert]
+        if sample_log_tag in completed_by_tsep[t_insert]:
+            mpi_print(latt_info, f"SKIP completed: {sample_log_tag}")
+            continue
         mpi_print(latt_info, f"START: {sample_log_tag}")
 
         t0_tsep = time.time()
@@ -301,8 +339,8 @@ for pos in src_positions:
                 )
 
         if latt_info.mpi_rank == 0:
-            with sample_log_file.open("a+") as f:
-                f.write(sample_log_tag + "\n")
+            append_sample_log_entry(sample_log_file, sample_log_tag)
+        completed_by_tsep[t_insert].add(sample_log_tag)
         mpi_print(latt_info, f"DONE: {sample_log_tag} total {time.time() - t0_tsep}s")
     sync_backend_array(prop_pos.data)
 

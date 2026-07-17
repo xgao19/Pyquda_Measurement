@@ -107,12 +107,14 @@ from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
+    array_to_numpy,
     contract_pion_2pt_multi_src_gamma,
     gamma_stack,
     meson_backward_line,
     my_gammas,
     source_gamma_stack,
     source_gamma_provenance,
+    zeros_on_backend,
 )
 
 
@@ -194,9 +196,11 @@ class pion_EMFF:
         }
         seq_bw_line = meson_backward_line(seq_bw_prop)
         corr_local_by_src = {
-            src_gamma: xp.zeros(
+            src_gamma: zeros_on_backend(
                 (len(current_gamma_ls), phases.shape[0], latt_info.size[3]),
                 dtype=prop_pos.data.dtype,
+                xp=xp,
+                reference_array=prop_pos.data,
             )
             for src_gamma in src_gammas
         }
@@ -216,7 +220,7 @@ class pion_EMFF:
             del current_inserted
 
         corr_by_src = {
-            src_gamma: core.gatherLattice(xp.asnumpy(corr_local), [2, -1, -1, -1])
+            src_gamma: core.gatherLattice(array_to_numpy(corr_local), [2, -1, -1, -1])
             for src_gamma, corr_local in corr_local_by_src.items()
         }
 

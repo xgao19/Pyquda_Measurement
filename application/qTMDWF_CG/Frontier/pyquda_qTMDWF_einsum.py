@@ -3,14 +3,16 @@
 import time
 import numpy as np
 import cupy as cp
-from opt_einsum import contract
 
 from pyquda import init, getMPIComm
 from pyquda_utils import core, gamma, io, source
 from pyquda_utils.phase import MomentumPhase
 
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
-from pyquda_measurement_utils.pion_qTMDWF_pyquda import pion_TMDWF_measurement, pyquda_gammas_order, my_pyquda_gammas
+from pyquda_measurement_utils.pion_qTMDWF_pyquda import (
+    contract_qtmdwf_gamma_scan,
+    pion_TMDWF_measurement,
+)
 from pyquda_measurement_utils.io_corr import get_sample_log_tag, get_c2pt_file_tag, get_qTMDWF_file_tag, save_qTMDWF_hdf5_noRoll
 from pyquda_measurement_utils.tools import srcLoc_distri_eq, mpi_print
 
@@ -35,7 +37,6 @@ sm_tag = "1HYP_M140_GSRC_W45_k6_einsum" # NOTE
 # --------------------------
 
 init(mpi_geometry, enable_mps=True)
-G5 = gamma.gamma(15)
 Gsrc = gamma.gamma(15)
 
 # --------------------------
@@ -86,18 +87,6 @@ mpi_print(latt_info, f"--plaquette U_hyp: {gauge.plaquette()}")
 
 dirac = core.getClover(latt_info, mass, 1e-10, 10000, xi_0, csw_r, csw_t, multigrid)
 
-
-###################### prepare gamma list ######################
-# use the first gamma's dtype and device to allocate the container
-first_gamma = my_pyquda_gammas[0]
-n_gamma = len(my_pyquda_gammas)
-    
-pyquda_gamma_ls = xp.empty(
-    (n_gamma,) + first_gamma.shape,
-    dtype=first_gamma.dtype,
-)       
-for gamma_idx, gamma_pyq in enumerate(my_pyquda_gammas):
-    pyquda_gamma_ls[gamma_idx] = gamma_pyq
 
 ###################### setup source positions ######################
 src_shift = np.array([0,0,0,0]) + np.array([7,11,13,23])
@@ -187,11 +176,6 @@ for ipos, pos in enumerate(src_production):
     cp.cuda.runtime.deviceSynchronize()
     t0 = time.time()
 
-    #! PyQUDA: prepare the common part of the contraction for TMDWF
-    fw_Gsrc = contract("wtzyxilab, lj -> wtzyxijab", propag_f.data, Gsrc)
-    G16_fw_Gsrc = contract("gim, wtzyxmjab -> gwtzyxijab", pyquda_gamma_ls, fw_Gsrc) 
-
-
     #! PyQUDA: contract TMD +X direction
     tmd_backward_prop_dir0 = propag_b.copy()
     for iW, WL_indices in enumerate(W_index_list_CG_dir0):
@@ -209,14 +193,18 @@ for ipos, pos in enumerate(src_production):
 
         cp.cuda.runtime.deviceSynchronize()
         t0 = time.time()
-        temp0 = contract("ki, wtzyxklab, jl -> wtzyxjiba", G5, tmd_backward_prop_dir0.data.conj(), G5)
-        temp1 = contract("wtzyxjiba, gwtzyxijab -> gwtzyx", temp0, G16_fw_Gsrc)
-        temp2 = core.gatherLattice(contract("qwtzyx, gwtzyx -> qgt", phases_2pt, temp1).get(), [2, -1, -1, -1])
-        TMDWF_collect_src5.append(temp2)
+        corr = contract_qtmdwf_gamma_scan(
+            latt_info,
+            tmd_backward_prop_dir0,
+            propag_f,
+            phases_2pt,
+            Gsrc,
+        )
+        TMDWF_collect_src5.append(corr)
     
         cp.cuda.runtime.deviceSynchronize()
         mpi_print(latt_info, f"TIME PyQUDA: contract TMDWF {time.time() - t0}")
-        del temp0, temp1, temp2
+        del corr
     del tmd_backward_prop_dir0
         
     #! PyQUDA: contract TMD +Y direction
@@ -237,14 +225,18 @@ for ipos, pos in enumerate(src_production):
 
         cp.cuda.runtime.deviceSynchronize()
         t0 = time.time()
-        temp0 = contract("ki, wtzyxklab, jl -> wtzyxjiba", G5, tmd_backward_prop_dir1.data.conj(), G5)
-        temp1 = contract("wtzyxjiba, gwtzyxijab -> gwtzyx", temp0, G16_fw_Gsrc)
-        temp2 = core.gatherLattice(contract("qwtzyx, gwtzyx -> qgt", phases_2pt, temp1).get(), [2, -1, -1, -1])
-        TMDWF_collect_src5.append(temp2)
+        corr = contract_qtmdwf_gamma_scan(
+            latt_info,
+            tmd_backward_prop_dir1,
+            propag_f,
+            phases_2pt,
+            Gsrc,
+        )
+        TMDWF_collect_src5.append(corr)
         
         cp.cuda.runtime.deviceSynchronize()
         mpi_print(latt_info, f"TIME PyQUDA: contract TMDWF {time.time() - t0}")
-        del temp0, temp1, temp2
+        del corr
     del tmd_backward_prop_dir1
     
     TMDWF_collect_src5 = np.array(TMDWF_collect_src5) # shape (N_W, N_pz, N_gamma, N_t)

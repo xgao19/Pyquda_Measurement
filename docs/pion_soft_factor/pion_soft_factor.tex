@@ -939,7 +939,11 @@ This implementation is a port from the GPT/PyQUDA mixed workflow
   \item \textbf{Backend abstraction}: All \einsum\ calls are dispatched through
         \walltag{xp} (which can be \walltag{numpy}, \walltag{cupy}, \walltag{dpnp},
         or \walltag{torch}), so the same code runs on CPU, NVIDIA GPU, Intel GPU,
-        or PyTorch backends without modification.
+        or PyTorch backends without modification.  Gamma stacks are first moved
+        to the backend and, for \walltag{dpnp}, the exact SYCL queue of the
+        reference propagator before stacking.  Gathered arrays use the shared
+        backend-aware host conversion rather than backend-specific
+        \walltag{asnumpy} calls.
 \end{enumerate}
 
 % ===========================================================================

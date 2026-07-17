@@ -5,10 +5,12 @@ from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.fermion_bilinear_basis import basis_attrs
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
-    _array_to_numpy,
+    array_to_numpy,
+    _gamma_on_backend,
     contract_pion_2pt,
     contract_pion_2pt_multi_src_gamma,
     gamma_stack,
+    G5,
     meson_backward_line,
     my_gammas,
     my_pyquda_gammas,
@@ -20,6 +22,62 @@ from pyquda_measurement_utils.tools import (
     _get_xp_from_array,
     mpi_print,
 )
+
+
+def contract_qtmdwf_gamma_scan(
+    latt_info,
+    shifted_backward,
+    fixed_forward,
+    phases,
+    source_gamma,
+):
+    """Contract all 16 qTMDWF Gamma channels without a Gamma-propagator stack.
+
+    The largest Gamma-dependent field produced here has shape
+    ``[gamma, local sites]``.  In particular, this routine never constructs
+    the historical ``[gamma, local sites, spin, spin, color, color]``
+    intermediate.
+    """
+    xp = _get_xp_from_array(fixed_forward.data)
+    phases = _asarray_on_queue(phases, xp, fixed_forward.data)
+    gamma5 = _gamma_on_backend(G5, xp, fixed_forward.data)
+    source_gamma = _gamma_on_backend(source_gamma, xp, fixed_forward.data)
+    sink_gamma_ls = gamma_stack(fixed_forward.data)
+
+    source_gamma_gamma5 = xp.einsum(
+        "ij,jk->ik", source_gamma, gamma5, optimize=True
+    )
+    gamma5_sink_gamma = xp.einsum(
+        "ki,gim->gkm", gamma5, sink_gamma_ls, optimize=True
+    )
+    spin_matrix_field = xp.einsum(
+        "ij,wtzyxkjba,wtzyxliba->wtzyxkl",
+        source_gamma_gamma5,
+        shifted_backward.data.conj(),
+        fixed_forward.data,
+        optimize=True,
+    )
+    gamma_site = xp.einsum(
+        "wtzyxkl,gkl->gwtzyx",
+        spin_matrix_field,
+        gamma5_sink_gamma,
+        optimize=True,
+    )
+    corr_local = xp.einsum(
+        "qwtzyx,gwtzyx->qgt", phases, gamma_site, optimize=True
+    )
+    corr = core.gatherLattice(
+        array_to_numpy(corr_local), [2, -1, -1, -1]
+    )
+    del (
+        corr_local,
+        gamma_site,
+        spin_matrix_field,
+        gamma5_sink_gamma,
+        source_gamma_gamma5,
+        sink_gamma_ls,
+    )
+    return corr
 
 
 """
@@ -223,7 +281,7 @@ class pion_TMDWF_measurement():
                     del sink_inserted, corr_site
 
                 corr = core.gatherLattice(
-                    _array_to_numpy(corr_local), [2, -1, -1, -1]
+                    array_to_numpy(corr_local), [2, -1, -1, -1]
                 )
                 if latt_info.mpi_rank == 0:
                     collected[source_label].append(corr)

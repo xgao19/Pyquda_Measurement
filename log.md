@@ -1004,3 +1004,48 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   (`2.2.1.1`).  Across 70 dataset comparisons, the largest
   reference/candidate relative L2 difference was `2.84e-16`; the largest
   one/four-rank relative L2 difference was `2.50e-16`.
+
+## 2026-07-17: Share the memory-light qTMDWF Gamma contraction
+
+- Replaced the Frontier qTMDWF `G16_fw_Gsrc` allocation with a shared
+  two-stage spin-color contraction.  The largest Gamma-dependent temporary is
+  now `[16, local sites]`, rather than sixteen complete propagators.
+- Switched both Aurora k0/k4 applications from duplicated inline contractions
+  to the same shared kernel.  Platform scripts now retain only Wilson-line
+  transport, scheduling and output responsibilities.
+- Kept the source Gamma, all 16 sink Gamma channels, momentum phases, CG
+  shifts, Wilson-index order, time rolling, and HDF5 layout unchanged.
+- Added an algebraic old/new estimator comparison and static memory guard.
+  Actual-field S8T8 one-rank and four-rank results are recorded under
+  `runs/TEST/frontier_qtmdwf_memory_s8t8_validation/`.
+- The actual-field gate used solver tolerance `1e-15`, both transverse
+  directions, `bT=0,1`, `bz=0,+/-1`, zero/nonzero momentum, all 16 Gamma
+  channels and every time slice.  Old/new relative L2 differences were
+  `9.99e-17` (one rank) and `2.27e-16` (four ranks, `2.2.1.1`); the new
+  one/four-rank difference was `8.11e-16`.
+
+## 2026-07-17: Fix pion resume, backend allocation, and response time
+
+- Made connected pion qTMD and EMFF sample logs actual source-level resume
+  state.  Rank 0 reads exact lines once, completed work is skipped before
+  inversion, and a line is durably appended only after all requested outputs
+  close.  No HDF5 probe, fingerprint, marker, or concurrent-log protocol was
+  added.
+- Centralized pion host conversion and queue-aware allocation.  EMFF no longer
+  uses backend-specific `asnumpy` or unbound `zeros`; soft-factor Gamma stacks
+  are constructed on the propagator backend and exact SYCL queue.
+- Defined every first-order and nested current-response tau window relative to
+  the source.  Projectors alone use
+  `tau_abs=(source_time+tau_rel) mod Nt`; saved C2/C3/response arrays are rolled
+  to source-relative time.  First-order/current-current schemas are now
+  versions 3/2 and store source position plus relative/absolute tau lists.
+- Fixed both response applications to broadcast rank-0 gathered C2/C3/response
+  arrays before all ranks select sink times.  The previous code failed on
+  non-root ranks in an actual four-rank run.
+- Added exact-log, queue-allocation, nonzero-source-time, periodic-wrap, and
+  schema tests.  The CPU test suite passes with 255 tests and 12 skips.
+- The S8T8 gate used tolerance `1e-15` with one rank and four ranks
+  (`2.2.1.1`).  Reference/candidate datasets were identical.  Candidate
+  one/four-rank relative L2 differences were at most `7.25e-14`; the maximum
+  absolute difference was `1.14e-13`.  Repeated qTMD/EMFF runs skipped before
+  inversion and did not change any HDF5 size or modification time.
