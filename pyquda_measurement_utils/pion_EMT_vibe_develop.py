@@ -457,6 +457,10 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             "quark_flow_scope": "inserted_operator_quark_legs_only",
             "hadron_interpolator_flowed": False,
             "derivative_convention": "symmetric_covdev_0p5_Dplus_minus_Dminus",
+            "one_derivative_operator": (
+                "0.5*bar_chi*Gamma_A*(rightD_mu-leftD_mu)*chi"
+            ),
+            "derivative_closed_fermion_loop_sign_included": False,
             "primitive_local_axes": "tsep,gamma,q,flow,t",
             "primitive_derivative_axes": "tsep,gamma,derivative,q,flow,t",
             "primitive_derivative_unsymmetrized": True,

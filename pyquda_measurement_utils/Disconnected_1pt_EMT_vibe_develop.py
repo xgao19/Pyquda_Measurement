@@ -9,6 +9,7 @@ disconnected diagrams in analysis:
 
 import os
 import operator
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
@@ -33,6 +34,8 @@ from pyquda_measurement_utils.tools import (
 )
 from pyquda_measurement_utils.fermion_bilinear_basis import (
     GAMMA_LABELS,
+    GAMMA5_HERMITICITY_PARTNERS,
+    GAMMA5_HERMITICITY_SIGNS,
     VECTOR_GAMMA_POSITIONS,
     basis_attrs,
     basis_metadata,
@@ -61,8 +64,42 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
 )
 
 _VALID_FLOW_TYPES = {"wilson", "symanzik"}
-EMT_OPERATOR_SCHEMA_VERSION = 4
+EMT_OPERATOR_SCHEMA_VERSION = 5
 my_gammas = list(GAMMA_LABELS)
+
+
+@dataclass(frozen=True)
+class _MomentumProjectors:
+    """Requested phases plus the internal ``-q`` phases for derivatives."""
+
+    requested_phases: object
+    derivative_phases: object
+    requested_indices: tuple
+    negative_indices: tuple
+
+
+def _build_momentum_projectors(latt_info, momentum_list, origin=(0, 0, 0, 0)):
+    """Build a stable union of requested spatial momenta and their negatives."""
+    requested = [
+        tuple(int(value) for value in momentum[:3])
+        for momentum in momentum_list
+    ]
+    augmented = []
+    index = {}
+    negative = [tuple(-value for value in momentum) for momentum in requested]
+    for momentum in requested + negative:
+        if momentum not in index:
+            index[momentum] = len(augmented)
+            augmented.append(momentum)
+    momentum_phase = phase.MomentumPhase(latt_info)
+    return _MomentumProjectors(
+        requested_phases=momentum_phase.getPhases(requested, origin),
+        derivative_phases=momentum_phase.getPhases(augmented, origin),
+        requested_indices=tuple(index[momentum] for momentum in requested),
+        negative_indices=tuple(
+            index[tuple(-value for value in momentum)] for momentum in requested
+        ),
+    )
 
 
 def _gamma_matrix(gamma_like):
@@ -351,17 +388,48 @@ class EMTDisconnectedQuark1pt:
         slice_t = core.gatherLattice(array_to_numpy(projected), [2, -1, -1, -1])
         return getMPIComm().bcast(slice_t, root=0)
 
+    @staticmethod
+    def _closed_loop_derivative_from_right_projection(
+        right_projected,
+        momentum_projectors,
+        gamma_partners=GAMMA5_HERMITICITY_PARTNERS,
+        gamma_signs=GAMMA5_HERMITICITY_SIGNS,
+    ):
+        """Complete the two-sided derivative using gamma5 hermiticity.
+
+        ``right_projected`` contains contractions with ``(Dplus-Dminus)``.
+        The factor ``-1/4`` combines the symmetric lattice derivative, the
+        conventional ``1/2`` in ``overleftrightarrow D``, and the closed-loop
+        Wick sign.
+        """
+        right_projected = np.asarray(right_projected)
+        requested = right_projected[
+            :, np.asarray(momentum_projectors.requested_indices, dtype=np.intp), :
+        ]
+        gamma_partners = np.asarray(gamma_partners, dtype=np.intp)
+        gamma_signs = np.asarray(gamma_signs, dtype=np.int8)
+        if gamma_partners.shape != (right_projected.shape[0],):
+            raise ValueError("gamma partner map does not match projected Gamma axis")
+        if gamma_signs.shape != gamma_partners.shape:
+            raise ValueError("gamma sign map does not match projected Gamma axis")
+        sharp_negative = right_projected[gamma_partners][
+            :, np.asarray(momentum_projectors.negative_indices, dtype=np.intp), :
+        ]
+        signs = gamma_signs.reshape(right_projected.shape[0], 1, 1)
+        return -0.25 * (requested - signs * sharp_negative.conj())
+
     def _get_primitive_bilinears_P_Breit_slice(
         self,
         U_f: LatticeGauge,
         gauge_dirac,
         xi: LatticeFermion,
         eta: LatticeFermion,
-        phases_3pt,
+        momentum_projectors,
     ):
         """Build primitive bilinears using an already resident flowed gauge."""
         Nt = U_f.latt_info.global_size[3]
-        Nq = len(phases_3pt)
+        phases_3pt = momentum_projectors.requested_phases
+        Nq = len(momentum_projectors.requested_indices)
 
         gamma_ls = self._gamma_stack_for(eta.data)
         local_fields = contract(
@@ -387,10 +455,19 @@ class EMTDisconnectedQuark1pt:
                 "wtzyxia,gij,wtzyxja->gwtzyx",
                 xi.data.conj(), gamma_ls, tmp.data,
             )
-            derivative[:, mu] = -0.5 * np.asarray(
-                self._project_gamma_fields(derivative_fields, phases_3pt)
+            right_projected = self._project_gamma_fields(
+                derivative_fields, momentum_projectors.derivative_phases
             )
-            del derivative_fields, tmp, derivative_right, derivative_left
+            derivative[:, mu] = self._closed_loop_derivative_from_right_projection(
+                right_projected, momentum_projectors
+            )
+            del (
+                right_projected,
+                derivative_fields,
+                tmp,
+                derivative_right,
+                derivative_left,
+            )
 
         return local, derivative, flowed_noise_norm
 
@@ -422,10 +499,10 @@ class EMTDisconnectedQuark1pt:
         return "EMT"
 
     def _contract_flowed_source(
-        self, U_f, gauge_dirac, xi, eta, phases_3pt
+        self, U_f, gauge_dirac, xi, eta, momentum_projectors
     ):
         local, derivative, norm = self._get_primitive_bilinears_P_Breit_slice(
-            U_f, gauge_dirac, xi, eta, phases_3pt
+            U_f, gauge_dirac, xi, eta, momentum_projectors
         )
         return {
             "local_bilinear_pervec": local,
@@ -469,7 +546,9 @@ class EMTDisconnectedQuark1pt:
                 sources=source_count, per_source=float(seconds) / source_count,
             )
 
-    def _measure_flowed_batch(self, U, xis, etas, phases_3pt, timers=None):
+    def _measure_flowed_batch(
+        self, U, xis, etas, momentum_projectors, timers=None
+    ):
         """Flow and contract a non-empty source batch in its original order."""
         xis = list(xis)
         etas = list(etas)
@@ -492,7 +571,7 @@ class EMTDisconnectedQuark1pt:
             with U_f.use() as gauge_dirac:
                 for source_idx, (xi, eta) in enumerate(zip(xis, etas)):
                     values = self._contract_flowed_source(
-                        U_f, gauge_dirac, xi, eta, phases_3pt
+                        U_f, gauge_dirac, xi, eta, momentum_projectors
                     )
                     if set(values) != set(raw):
                         raise RuntimeError(
@@ -521,7 +600,7 @@ class EMTDisconnectedQuark1pt:
         return raw
 
     def _invert_and_measure_batch(
-        self, U, dirac, source_records, phases_3pt, timers=None,
+        self, U, dirac, source_records, momentum_projectors, timers=None,
         restore_original_gauge=True,
     ):
         """Restore the original gauge once, then invert and flow one source batch."""
@@ -539,7 +618,7 @@ class EMTDisconnectedQuark1pt:
         etas = [dirac.invert(xi) for xi in xis]
         timers["invert"] += _timer_stop(invert_t0, etas)
         return self._measure_flowed_batch(
-            U, xis, etas, phases_3pt, timers=timers
+            U, xis, etas, momentum_projectors, timers=timers
         )
 
     def _measurement_attrs(self, latt_info, invPara, randPara, counter_config, counter_stream, n_eff, spatial_volume):
@@ -553,11 +632,11 @@ class EMTDisconnectedQuark1pt:
             "flow_steps": self.flow_steps,
             "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
             "qext": np.asarray(self.qlist, dtype=np.int32),
-            "loop_provenance_schema": "emt_disconnected_loop_provenance_v1",
+            "loop_provenance_schema": "emt_disconnected_loop_provenance_v2",
             "global_lattice_size": np.asarray(latt_info.global_size, dtype=np.int32),
             "momentum_phase_origin": np.zeros(4, dtype=np.int32),
             "spatial_momentum_phase_convention": (
-                "exp(-2pi*i*sum_j q_j*(x_j-origin_j)/L_j)"
+                "exp(+2pi*i*sum_j q_j*(x_j-origin_j)/L_j)"
             ),
             "loop_time_convention": "absolute_lattice_time",
             "volume_norm": spatial_volume,
@@ -572,7 +651,15 @@ class EMTDisconnectedQuark1pt:
             "renormalization_stage": "analysis_stage",
             "flavor_convention": self.flavor_convention,
             "local_bilinear_convention": "xi_dag*Gamma_A*eta",
-            "derivative_convention": "L_D[A,mu]=-0.5*xi_dag*Gamma_A*(Dplus_mu-Dminus_mu)*eta; unsymmetrized",
+            "one_derivative_operator": (
+                "0.5*bar_chi*Gamma_A*(rightD_mu-leftD_mu)*chi"
+            ),
+            "derivative_convention": (
+                "L_D[A,mu,q]=-0.25*(A_right[A,mu,q]-"
+                "conj(A_right[Gamma_sharp(A),mu,-q])); unsymmetrized"
+            ),
+            "gamma5_hermiticity_reconstruction": True,
+            "derivative_closed_fermion_loop_sign_included": True,
             "emt_derivation": "B[nu,mu]=L_D[gamma_nu,mu]; T=0.5*(B+B_transpose)",
             "mass": mass,
             "csw": csw,
@@ -594,7 +681,7 @@ class EMTDisconnectedQuark1pt:
         return attrs
 
     def _measure_base_shards(
-        self, U, dirac, randPara, tag, phases_3pt, attrs,
+        self, U, dirac, randPara, tag, momentum_projectors, attrs,
         shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
         completed_bases, flow_batch_size,
     ):
@@ -677,7 +764,7 @@ class EMTDisconnectedQuark1pt:
                 timers = self._new_batch_timers()
                 batch_t0 = _timer_start()
                 raw = self._invert_and_measure_batch(
-                    U, dirac, source_records, phases_3pt, timers=timers,
+                    U, dirac, source_records, momentum_projectors, timers=timers,
                     restore_original_gauge=not first_inversion_batch,
                 )
                 first_inversion_batch = False
@@ -720,7 +807,7 @@ class EMTDisconnectedQuark1pt:
                         noise_stream=int(attrs["noise_stream"]),
                     ))
                     raw = self._invert_and_measure_batch(
-                        U, dirac, source_records, phases_3pt, timers=timers,
+                        U, dirac, source_records, momentum_projectors, timers=timers,
                         restore_original_gauge=not first_inversion_batch,
                     )
                     first_inversion_batch = False
@@ -843,10 +930,11 @@ class EMTDisconnectedQuark1pt:
         dirac.loadGauge(U)
         mpi_print(latt_info, "Multigrid inverter ready.")
 
-        qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
-        phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, [0, 0, 0, 0])
+        momentum_projectors = _build_momentum_projectors(
+            latt_info, self.qlist, [0, 0, 0, 0]
+        )
         return self._measure_base_shards(
-            U, dirac, randPara, tag, phases_3pt, attrs,
+            U, dirac, randPara, tag, momentum_projectors, attrs,
             shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
             completed_bases, flow_batch_size,
         )
@@ -1199,11 +1287,11 @@ class EMTDisconnectedGluon1pt:
             "flow_steps": self.flow_steps,
             "flow_times": _flow_times(self.flow_epsilon, self.flow_steps),
             "qext": np.asarray(self.qlist, dtype=np.int32),
-            "loop_provenance_schema": "emt_disconnected_loop_provenance_v1",
+            "loop_provenance_schema": "emt_disconnected_loop_provenance_v2",
             "global_lattice_size": np.asarray(global_size, dtype=np.int32),
             "momentum_phase_origin": np.zeros(4, dtype=np.int32),
             "spatial_momentum_phase_convention": (
-                "exp(-2pi*i*sum_j q_j*(x_j-origin_j)/L_j)"
+                "exp(+2pi*i*sum_j q_j*(x_j-origin_j)/L_j)"
             ),
             "loop_time_convention": "absolute_lattice_time",
             "volume_norm": Ns3,

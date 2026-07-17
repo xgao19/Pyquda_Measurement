@@ -529,6 +529,10 @@ class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
                     "nucleon_interpolator_flowed": False,
                     "derivative_convention": "symmetric_covdev_0p5_Dplus_minus_Dminus",
                     "left_derivative_convention": "raw_seq_gamma5_hermiticity",
+                    "one_derivative_operator": (
+                        "0.5*bar_chi*Gamma_A*(rightD_mu-leftD_mu)*chi"
+                    ),
+                    "derivative_closed_fermion_loop_sign_included": False,
                     "C3_chi_axes": "flavor,polarization,flow,q,t",
                     "primitive_local_axes": "flavor,polarization,gamma,q,flow,t",
                     "primitive_derivative_axes": "flavor,polarization,gamma,derivative,q,flow,t",

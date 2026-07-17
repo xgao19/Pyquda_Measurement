@@ -186,12 +186,24 @@ one-derivative primitive bilinears
   &=\sum_{\mathbf{x}}\Phi_q(x)\,
     \xi_r^\dagger(x;\Tf)\Gamma_A\eta_r(x;\Tf),
   \\
-  L_{A\mu}^{D,(r)}(q,t;\Tf)
-  &=-\frac12\sum_{\mathbf{x}}\Phi_q(x)\,
+  A_{A\mu}^{(r)}(q,t;\Tf)
+  &=\frac12\sum_{\mathbf{x}}\Phi_q(x)\,
     \xi_r^\dagger(x;\Tf)\Gamma_A
-    [D_{+\mu}-D_{-\mu}]\eta_r(x;\Tf).
+    [D_{+\mu}-D_{-\mu}]\eta_r(x;\Tf),
+  \\
+  L_{A\mu}^{D,(r)}(q,t;\Tf)
+  &=-\frac12\left[
+    A_{A\mu}^{(r)}(q,t;\Tf)
+    -A_{A^\sharp\mu}^{(r)}(-q,t;\Tf)^*\right].
   \label{eq:primitive_bilinears}
 \end{align}
+Here \(\Gamma_A^\sharp=\gamma_5\Gamma_A^\dagger\gamma_5\).  Thus the stored
+derivative primitive is the complete two-sided operator including one closed
+fermion-loop Wick minus; \(A\) is only an internal right-acting intermediate
+and is not written to HDF5.  The production Fourier phase is
+\(\Phi_q(x)=\exp[+2\pi i\,\mathbf q\cdot(\mathbf x-\mathbf o)/\mathbf L]\).
+The source-origin conversion used in three-point analysis consequently carries
+the opposite, negative phase.
 The gamma axis is ordered as
 \begin{verbatim}
 5,T,T5,X,X5,Y,Y5,Z,Z5,I,SXT,SXY,SXZ,SYT,SYZ,SZT
@@ -241,32 +253,137 @@ The corresponding PyQUDA IDs are
 The numerical matrices themselves are stored in \code{gamma\_matrices}; an
 analysis should read the file metadata rather than reproduce the table by hand.
 
-The EMT is a derived vector-channel observable.  Defining
-\(B_{\nu\mu}=L^D_{\gamma_\nu,\mu}\), the previous per-source,
-pre-volume-normalized object remains
+The EMT is a derived vector-channel observable.  Let
+\(D_\mu=\tfrac12(D_{+\mu}-D_{-\mu})\), let \(P_{q,\tau}\) contain the
+spatial Fourier phase and the projector onto insertion time \(\tau\), and set
+\(S_f=K D^{-1}K^\dagger\).  The connected and disconnected contractions use
+the same local operator
 \begin{equation}
-  L^{q,(r)}_{\nu\mu}(q,t;\Tf)
-  =
-  -\frac{1}{2}
-  \sum_{\mathbf{x}} \Phi_q(x)\,
-  \xi_r^\dagger(x;\Tf)\,
-  \gamma_\nu\,
-  \Big[
-    D_{+\mu} - D_{-\mu}
-  \Big]\,
-  \eta_r(x;\Tf).
+ B_{A\mu}(x)=\frac12\bar\chi(x)\Gamma_A
+ \left(\overrightarrow D_\mu-\overleftarrow D_\mu\right)\chi(x).
+\end{equation}
+This convention is the flowed fermion EMT derivative used by
+\href{https://arxiv.org/abs/1403.4772}{Makino--Suzuki}; the same two-sided
+twist-two derivative convention underlies lattice disconnected nucleon
+measurements such as \href{https://arxiv.org/abs/1310.6339}{arXiv:1310.6339}
+and nucleon spin/momentum decompositions such as
+\href{https://www-library.desy.de/preparch/desy/2017/desy17-086.pdf}{DESY 17-086}.
+After the closed-fermion-loop Wick sign, its exact disconnected trace is
+\begin{equation}
+ L_{A\mu}(q,\tau)
+ =-\frac12\Tr\!\left[
+ P_{q,\tau}\Gamma_A D_\mu S_f
+ +D_\mu P_{q,\tau}\Gamma_A S_f\right].
   \label{eq:quark_loop_raw}
 \end{equation}
-It is reconstructed directly from the primitive array.  In code the underlying
-batch contraction is equivalent channel by channel to
+The old one-sided replacement
+\(-\Tr[P_{q,\tau}\Gamma_A D_\mu S_f]\) is equal to
+Eq.~\eqref{eq:quark_loop_raw} only when \(P_{q,\tau}\) is constant along the
+derivative direction.  It therefore fails for a spatial derivative when
+\(q_\mu\ne0\), and it fails for the temporal derivative at fixed \(\tau\) even
+when \(\mathbf q=0\).  Summing over all insertion times removes the latter
+obstruction, but a time-resolved three-point function cannot use that shortcut.
+
+Production completes the second term without additional covariant derivatives.
+Using \(D_\mu^\dagger=-D_\mu\), \(S_f^\dagger=\gamma_5S_f\gamma_5\), and
+\begin{equation}
+ \Gamma_A^\sharp=\gamma_5\Gamma_A^\dagger\gamma_5,
+\end{equation}
+define \(A_{A\mu}(q,\tau)=\Tr[P_{q,\tau}\Gamma_A D_\mu S_f]\).  Then
+\begin{equation}
+ L_{A\mu}(q,\tau)=-\frac12\left[
+ A_{A\mu}(q,\tau)-A_{A^\sharp\mu}(-q,\tau)^*\right].
+ \label{eq:gamma5_completed_loop}
+\end{equation}
+The raw PyQUDA basis is closed under this map; the partner and sign tables are
+stored as \code{gamma5\_hermiticity\_partner} and
+\code{gamma5\_hermiticity\_sign}.  Internally the momentum projector contains
+the stable union of requested \(q\) and required \(-q\), while the HDF5
+\code{qext} axis remains exactly the requested list.  Since QUDA returns
+\(D_{+\mu}-D_{-\mu}=2D_\mu\), the code is equivalent to
 \begin{verbatim}
 tmp = U_f.pure_gauge.covDev(eta, mu) - U_f.pure_gauge.covDev(eta, mu + 4)
 field_A = contract("...ia,Aij,...ja->A...", xi.data.conj(), gamma_A, tmp.data)
-L_D[:, mu] = -0.5 * project_all_gamma_channels(field_A)
+right = project_q_and_minus_q(field_A)
+L_D[:, mu] = -0.25 * (right[A,q] - conj(right[A_sharp,-q]))
 \end{verbatim}
-The first tensor index is \(\nu\), because the gamma matrix \(\gamma_\nu\) is
-applied after choosing the derivative direction \(\mu\).  This is why the code
-fills \code{Tmunu[nu, mu]} before symmetrization.
+
+\subsubsection{Direct left derivative versus the production estimator}
+
+The gamma5-hermiticity completion and an explicit derivative on the noise are
+two different stochastic estimators of the same trace.  Define
+\begin{equation}
+ \xi_f=K\xi,\qquad \eta_f=KD^{-1}\xi.
+\end{equation}
+An explicit right/left estimator of Eq.~\eqref{eq:quark_loop_raw} is
+\begin{equation}
+ \widehat L^{\rm direct}_{A\mu}(q,\tau)
+ =-\frac12\left[
+ \xi_f^\dagger P_{q,\tau}\Gamma_A D_\mu\eta_f
+ -(D_\mu\xi_f)^\dagger P_{q,\tau}\Gamma_A\eta_f
+ \right].
+ \label{eq:direct_noise_derivative_estimator}
+\end{equation}
+Because \(D_\mu^\dagger=-D_\mu\) and
+\(\mathbb E_\xi[\xi\xi^\dagger]=1\),
+\begin{equation}
+ \mathbb E_\xi\!\left[\widehat L^{\rm direct}_{A\mu}\right]
+ =-\frac12\Tr\!\left[
+ P_{q,\tau}\Gamma_A D_\mu S_f
+ +D_\mu P_{q,\tau}\Gamma_A S_f\right].
+\end{equation}
+This is useful as an independent reference but requires the extra
+applications \(D_\mu\xi_f\).
+
+Production instead estimates Eq.~\eqref{eq:gamma5_completed_loop}.  With
+\begin{equation}
+ \widehat A_{A\mu}(q,\tau)
+ =\xi_f^\dagger P_{q,\tau}\Gamma_A D_\mu\eta_f,
+\end{equation}
+it uses
+\begin{equation}
+ \widehat L^{\gamma_5}_{A\mu}(q,\tau)
+ =-\frac12\left[
+ \widehat A_{A\mu}(q,\tau)
+ -\widehat A_{A^\sharp\mu}(-q,\tau)^*\right].
+ \label{eq:gamma5_stochastic_estimator}
+\end{equation}
+The equality needed here is the trace identity
+\begin{equation}
+ \Tr[D_\mu P_{q,\tau}\Gamma_A S_f]
+ =-\Tr[P_{-q,\tau}\Gamma_A^\sharp D_\mu S_f]^*.
+\end{equation}
+It uses hermiticity and cyclic permutation inside the trace.  It is not a
+matrix identity inside a fixed-noise quadratic form: in general
+\begin{equation}
+ (D_\mu\xi_f)^\dagger P_{q,\tau}\Gamma_A\eta_f
+ \ne
+ \left(\xi_f^\dagger P_{-q,\tau}\Gamma_A^\sharp
+ D_\mu\eta_f\right)^*
+\end{equation}
+for one random vector.  Consequently the two estimators need not agree source
+by source, even though
+\begin{equation}
+ \mathbb E_\xi[\widehat L^{\rm direct}]
+ =\mathbb E_\xi[\widehat L^{\gamma_5}]=L.
+\end{equation}
+Their difference is zero-mean stochastic noise.  A finite-noise validation
+must therefore compare the paired ensemble difference with its statistical
+uncertainty; elementwise per-source equality is not a valid criterion.
+
+This was checked on S8T8 with 256 counter-based \(Z_4\) sources, all 16 Gamma
+channels, all four derivative directions, every time slice, and
+\(q=0,\pm\hat x,\pm\hat y,\pm\hat z\).  For Wilson--clover solutions at
+tolerance \(10^{-15}\), the global paired difference was \(0.981\) standard
+errors from zero; an identity-propagator control gave \(0.978\) standard
+errors.  One-rank and four-rank means agreed at relative \(L_2\) approximately
+\(2.0\times10^{-16}\).  The independent left/right calculation therefore
+found no systematic discrepancy, including at nonzero momentum, while
+confirming that the estimators fluctuate differently at finite noise.
+
+For the EMT, \(B_{\nu\mu}=L^D_{\gamma_\nu,\mu}\); the first tensor index is
+the gamma direction and the second is the derivative direction.  The primitive
+is symmetrized only when constructing \(T_{\mu\nu}\).
 
 The raw matrices deliberately retain the historical PyQUDA bit-mask basis used
 by the qTMD and two-point workflows.  A stored matrix
@@ -356,7 +473,7 @@ scalar_trace = local_bilinear[gamma_list.index("I")]
 dot_xi_xi = contract("etzyxbc,etzyxbc->etzyx", xi.data.conj(), xi.data)
 flowed_noise_norm = impose_P_Breit_slice(dot_xi_xi, phases_3pt)
 \end{verbatim}
-Schema version 3 stores only the latter separately as
+Operator schema version 5 stores only the latter separately as
 \code{raw/flowed\_noise\_norm\_pervec} and
 \code{avg/flowed\_noise\_norm}; both averages use the same \(\Vthree\)
 normalization as the primitive bilinears.
@@ -370,14 +487,15 @@ source \(r\), the implementation forms
 \begin{equation}
   K_r(\Tf,\tau)
   =-\frac{2}{\Vthree}\sum_{\mu=1}^{4}
-  L^q_{\mu\mu,r}(q=0,\tau;\Tf)
-  =\frac{1}{\Vthree}\sum_{\mu,\mathbf{x}}
-  \xi^\dagger(x;\Tf)
-  \gamma_\mu
-  \left[D_{+\mu}-D_{-\mu}\right]
-  \eta(x;\Tf).
+  L^q_{\mu\mu,r}(q=0,\tau;\Tf).
   \label{eq:ringed_building_block}
 \end{equation}
+The two-sided definition is essential for the time-resolved \(\mu=4\) term.
+At \(q=0\), vector matrices obey \(\Gamma_\mu^\sharp=-\Gamma_\mu\), so the
+standalone implementation obtains the same per-source quantity by combining
+the one-sided contraction with its complex conjugate.  Only after summing all
+space-time points is the historical one-sided kinetic estimator equivalent in
+expectation.
 No new inversion, fermion-flow update, covariant derivative, or MPI gather is
 needed: Eq.~\eqref{eq:ringed_building_block} is evaluated directly from the
 four diagonal vector channels of
@@ -849,6 +967,8 @@ gamma_list
 gamma_pyquda_ids
 gamma_matrices
 physical_from_pyquda
+gamma5_hermiticity_partner
+gamma5_hermiticity_sign
 derivative_directions
 raw/local_bilinear_pervec
 raw/derivative_bilinear_pervec
@@ -881,6 +1001,10 @@ Attribute & Meaning \\
 & Gradient-flow schedule. \\
 \code{qext}
 & Momentum labels used by downstream analysis. \\
+\code{loop\_provenance\_schema}, \code{momentum\_phase\_origin}
+& Versioned Fourier-origin convention; current production is v2. \\
+\code{spatial\_momentum\_phase\_convention}
+& \(\exp[+2\pi i\,\boldsymbol q\cdot(\boldsymbol x-\boldsymbol o)/\boldsymbol L]\). \\
 \code{volume\_norm}
 & \(\Vthree\), the spatial-volume normalization. \\
 \code{upper\_triangle\_only}
@@ -895,6 +1019,9 @@ Attribute & Meaning \\
 & Fixed hash algorithm and the fields entering its counter. \\
 \code{operator\_normalization}, \code{renormalization\_applied}
 & Whether the saved quark loop has already been renormalized. \\
+\code{gamma5\_hermiticity\_reconstruction},
+\code{derivative\_closed\_fermion\_loop\_sign\_included}
+& The left derivative is reconstructed and the saved loop contains one Wick minus. \\
 \bottomrule
 \end{tabular}
 \end{center}

@@ -757,30 +757,48 @@ In code:
 
 \subsubsection{Quark EMT one-point building block}
 
-The stochastic estimate of the quark EMT one-point function is
+The disconnected primitive uses the same two-sided one-derivative operator as
+the connected insertion above.  With
+$D_\mu=\tfrac12(D_{+\mu}-D_{-\mu})$, flowed propagator
+$S_f=K D^{-1}K^\dagger$, and the fixed-time momentum projector
+$P_{q,\tau}$, the closed-loop contraction is
 
 \begin{equation}\label{eq:Tmunu_1pt_stoch}
-  T_{\nu\mu}^q(q, t)
-    = -\frac{1}{2} \sum_{\vec{x}} \Phi_q(x)\;
-      \xi^\dagger(x)\;
-      \gamma_\nu\,
-      \big[ D_{+\mu} - D_{-\mu} \big]\,
-      \eta(x).
+  L_{\nu\mu}^q(q,\tau)
+  =-\frac12\Tr\!\left[
+    P_{q,\tau}\gamma_\nu D_\mu S_f
+    +D_\mu P_{q,\tau}\gamma_\nu S_f
+  \right].
 \end{equation}
 
-Here $D_{\pm\mu}$ are the forward/backward covariant derivatives (NOT the symmetrized versions -- the difference $D_+ - D_-$ already implements the symmetric derivative up to a factor of 2). The indices on $T_{\nu\mu}^q$ are ordered $(\nu, \mu)$ because the gamma matrix index comes first in the code:
+The minus sign is the single closed-fermion-loop Wick sign.  A right-acting
+term alone is insufficient whenever the Fourier/time projector does not
+commute with $D_\mu$; notably, the fixed-time $D_4$ term requires both sides
+even at zero spatial momentum.  Production uses
+$\Gamma^\sharp=\gamma_5\Gamma^\dagger\gamma_5$ and
+$S_f^\dagger=\gamma_5S_f\gamma_5$ to reconstruct the second term from the
+right-acting contraction at $-q$:
+\begin{equation}
+ L_{\Gamma\mu}(q,\tau)
+ =-\frac12\left[A_{\Gamma\mu}(q,\tau)
+ -A_{\Gamma^\sharp\mu}(-q,\tau)^*\right].
+\end{equation}
+Thus no extra \code{covDev} call is needed.  In schematic code,
 
 \begin{verbatim}
   for mu in range(4):
-      tmp = covDev(eta, mu) - covDev(eta, mu + 4)   # (D_+mu - D_-mu) eta
-      for nu in range(4):
-          Y = contract("ab, ...bc -> ...ac", D_gammas[nu], tmp.data)
-          complex_field = contract("...sc, ...sc -> ...",
-                                   xi.data.conj(), Y)
-          Tmunu[nu, mu] += -0.5 * impose_P_Breit_slice(...)
+      tmp = covDev(eta, mu) - covDev(eta, mu + 4)
+      right = project_q_and_minus_q(xi_dag_Gamma_tmp)
+      L_D[:, mu] = -0.25 * (right[A,q] - conj(right[A_sharp,-q]))
 \end{verbatim}
-
-The minus sign ($-1/2$) follows from Eq.~\eqref{eq:Tmunu_q_bilinear} combined with the stochastic trace convention.
+The explicit alternative applies \(D_\mu\) to the stochastic source as well
+as to the solution.  It is an independent unbiased estimator, not a
+source-by-source reference value: equivalence to the gamma5 reconstruction
+uses cyclicity only after the noise average has formed a trace.  On S8T8, a
+256-source comparison including \(q=0,\pm\hat x,\pm\hat y,\pm\hat z\) found
+the paired ensemble difference to be \(0.981\) standard errors from zero.
+The complete derivation and raw-basis Gamma-sharp table are maintained in
+\code{docs/EMT\_disconnected\_1pt/EMT\_disconnected\_1pt.tex}.
 
 \subsubsection{Symmetrization, noise averaging, and volume normalization}
 

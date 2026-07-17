@@ -155,10 +155,18 @@ python tests/run_smoke_tests.py
   derivative basis; derive the old EMT from vector channels.  Raw PyQUDA `Y5`
   and `T5` need minus signs for uniform `gamma_mu gamma5`, and raw tensor masks
   are `[gamma_mu,gamma_nu]/2` without `i`; use the stored basis transform.
-- EMT operator schema v3 stores the identity only in the 16-Gamma local basis,
+- EMT operator schema v5 stores the identity only in the 16-Gamma local basis,
   names the separate source norm `flowed_noise_norm`, and embeds the kinetic
   data under `derived/ringed` in EMTc.  Compute physical ringed factors only
   after ensemble-averaging the kinetic expectation value.
+- A time- or momentum-resolved disconnected derivative loop must contain both
+  sides of `overleftrightarrow_D`.  Production reconstructs the left term from
+  the right term at `-q` with `Gamma# = gamma5 Gamma^dag gamma5`; the old
+  one-sided shortcut is invalid for nonzero `q_mu` and for fixed-time `D4`.
+  The stored loop already includes exactly one closed-fermion-loop Wick minus.
+- EMT loop projection uses `exp(+2 pi i q.(x-origin)/L)`.  Rephasing an
+  origin-zero loop to a hadron source therefore uses
+  `exp(-2 pi i q.(source-origin)/L)`; do not reverse both signs.
 - Production quark EMT 1pt is base-oriented: base-internal part files are only
   checkpoints, a base is complete only after all HP vectors validate, and an
   explicit streaming finalizer publishes one canonical EMTc file.

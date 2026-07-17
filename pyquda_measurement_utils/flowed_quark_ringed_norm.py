@@ -10,6 +10,11 @@ from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedQuark1pt,
     _flow_times,
 )
+from pyquda_measurement_utils.fermion_bilinear_basis import (
+    GAMMA5_HERMITICITY_PARTNERS,
+    GAMMA5_HERMITICITY_SIGNS,
+    VECTOR_GAMMA_POSITIONS,
+)
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
     canonical_temp_path,
@@ -46,11 +51,11 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
         return "ringed"
 
     def _contract_flowed_source(
-        self, U_f, gauge_dirac, xi, eta, phases_3pt
+        self, U_f, gauge_dirac, xi, eta, momentum_projectors
     ):
-        """Compute K=V_s^-1 sum_mu xi^dag gamma_mu(D+-D-)eta."""
+        """Compute the exact time-slice kinetic trace from two-sided EMT loops."""
         vector_gammas = self._vector_gamma_stack_for(eta.data)
-        local_kinetic = None
+        right_field_sum = None
         for mu in range(4):
             derivative_right = gauge_dirac.covDev(eta, mu)
             derivative_left = gauge_dirac.covDev(eta, mu + 4)
@@ -59,14 +64,40 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
                 "wtzyxia,ij,wtzyxja->wtzyx",
                 xi.data.conj(), vector_gammas[mu], derivative.data,
             )
-            local_kinetic = term if local_kinetic is None else local_kinetic + term
-            del term, derivative, derivative_right, derivative_left
+            gamma_position = VECTOR_GAMMA_POSITIONS[mu]
+            partner = GAMMA5_HERMITICITY_PARTNERS[gamma_position]
+            if partner != gamma_position:
+                raise RuntimeError(
+                    "vector Gamma should map to itself under gamma5 hermiticity"
+                )
+            if GAMMA5_HERMITICITY_SIGNS[gamma_position] != -1:
+                raise RuntimeError("vector Gamma should be odd under gamma5 hermiticity")
+            right_field_sum = (
+                term if right_field_sum is None else right_field_sum + term
+            )
+            del (
+                term,
+                derivative,
+                derivative_right,
+                derivative_left,
+            )
 
-        projected = np.asarray(
-            self._impose_P_Breit_slice(local_kinetic, phases_3pt)
+        right_projected = self._project_gamma_fields(
+            right_field_sum[None, ...], momentum_projectors.derivative_phases
         )
+        closed_loop = self._closed_loop_derivative_from_right_projection(
+            right_projected,
+            momentum_projectors,
+            gamma_partners=(0,),
+            gamma_signs=(-1,),
+        )[0, 0]
+        projected = np.asarray(-2.0 * closed_loop)
+        if projected.shape != (int(U_f.latt_info.global_size[3]),):
+            raise RuntimeError(
+                f"unexpected ringed kinetic time shape {projected.shape}"
+            )
         spatial_volume = int(np.prod(U_f.latt_info.global_size[:3]))
-        return {"kinetic_pervec": projected[0] / spatial_volume}
+        return {"kinetic_pervec": projected / spatial_volume}
 
     def _measurement_attrs(
         self,
@@ -89,7 +120,11 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
             "kinetic_relation_to_emt": (
                 "K=-2*sum_mu(L_D[gamma_mu,mu,q0])/spatial_volume"
             ),
-            "derivative_convention": "gamma_mu*(Dplus_mu-Dminus_mu)",
+            "derivative_convention": (
+                "two_sided_overleftrightarrow_D_from_gamma5_hermiticity"
+            ),
+            "gamma5_hermiticity_reconstruction": True,
+            "derivative_closed_fermion_loop_sign_included": True,
             "flow_type": self.flow_type,
             "flow_epsilon": self.flow_epsilon,
             "flow_steps": self.flow_steps,

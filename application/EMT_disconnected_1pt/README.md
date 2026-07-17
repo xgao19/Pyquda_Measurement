@@ -180,6 +180,63 @@ factor. A physical factor must be formed from the configuration-averaged
 kinetic expectation value, not by averaging configuration-local values of
 `1/K`.
 
+For disconnected loops the derivative primitive is not a one-sided
+`xi_f^dag Gamma D_mu eta_f` contraction. With
+
+```text
+D_mu = (D_+mu - D_-mu) / 2
+S_f  = K D^{-1} K^dag
+P_qtau = fixed-time projector times the spatial Fourier phase
+```
+
+the stored closed-loop building block is
+
+```text
+L_A,mu(q,tau) = -1/2 Tr[
+    P_qtau Gamma_A D_mu S_f + D_mu P_qtau Gamma_A S_f]
+```
+
+The leading minus is the closed-fermion-loop Wick sign. Production reconstructs
+the second term without extra `covDev` calls by using
+`Gamma_sharp = gamma5 Gamma_A^dag gamma5`:
+
+```text
+L_A,mu(q,tau) = -1/2 [
+    A_A,mu(q,tau) - A_Asharp,mu(-q,tau).conj()]
+```
+
+The internal momentum list therefore includes any missing `-q`; the canonical
+`qext` axis still contains only the momenta requested by the user. The old
+one-sided shortcut fails for a spatial derivative when the corresponding
+momentum component is nonzero. It also fails for `D_4` at fixed insertion time,
+even at zero spatial momentum.
+
+There is a useful but subtle validation alternative. One may calculate the
+left term explicitly by applying `covDev` to the flowed noise:
+
+```text
+L_direct = -1/2 * [
+    xi_f^dag P_qtau Gamma D_mu eta_f
+  - (D_mu xi_f)^dag P_qtau Gamma eta_f]
+```
+
+Production instead evaluates
+
+```text
+L_gamma5 = -1/2 * [A_Gamma(q) - A_Gamma_sharp(-q).conj()]
+```
+
+Both are unbiased estimators of the same trace, but they are not the same
+quadratic form for an individual noise vector. Their equivalence uses cyclic
+permutation inside a trace, which cannot be applied inside a fixed-source
+quantity `xi^dag M xi`. A numerical check must therefore compare the paired
+ensemble difference with its SEM rather than demand source-by-source equality.
+The S8T8 validation used 256 counter-Z4 sources, all 16 Gamma channels, four
+derivative directions, every time slice, and `q=0,+/-x,+/-y,+/-z`. The direct
+and reconstructed ensemble results differed globally by only `0.981` paired
+standard errors at solver tolerance `1e-15`. One-rank and four-rank means
+agreed at relative L2 approximately `2.0e-16`.
+
 ## Mathematical Problem
 
 For one absolute insertion time `tau`, the flowed stochastic loop has the form
@@ -231,9 +288,10 @@ For every effective source, the production code performs:
 2. Solve eta = D^{-1} xi.
 3. Flow xi and eta through the same four-dimensional fermion-flow schedule.
 4. Construct each covariant derivative direction once.
-5. Contract all 16 local and 16x4 derivative Gamma channels.
-6. Project onto the requested spatial momenta at every absolute time.
-7. Write the per-source primitive data to an atomic shard part.
+5. Contract all 16 local and 16x4 right-derivative Gamma channels.
+6. Project onto the requested momenta and any internally required `-q`.
+7. Complete the two-sided derivative with gamma5 hermiticity.
+8. Write only the completed primitive data to an atomic shard part.
 ```
 
 The default flow schedule is:
@@ -362,9 +420,11 @@ The finalized quark file contains:
 ```text
 attrs/
   measurement, config_num
-  mass, csw, tol, maxiter
+  mass, csw
   flow_type, flow_epsilon, flow_steps, flow_times
   qext, volume_norm
+  loop_provenance_schema, global_lattice_size, momentum_phase_origin
+  spatial_momentum_phase_convention, loop_time_convention
   n_zn, noise_stream, noise_generator, noise_counter_order
   noise_scheme, n_base_noise, hp_num_vectors, hp_ordering
   effective_n_inversions
@@ -376,6 +436,8 @@ gamma_pyquda_ids
 gamma_matrices
 physical_gamma_list
 physical_from_pyquda
+gamma5_hermiticity_partner
+gamma5_hermiticity_sign
 derivative_directions
 
 raw/local_bilinear_pervec

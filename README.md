@@ -26,6 +26,10 @@ time: 16 local bilinears and (16\times4) unsymmetrized one-derivative
 bilinears.  The connected and disconnected EMT tensors are derived from the
 same four vector channels, while axial twist-two and local tensor-current
 channels remain available for later analysis without additional inversions.
+Disconnected derivative primitives contain the complete two-sided
+`overleftrightarrow_D` operator.  Their left term is reconstructed from the
+right contraction at opposite momentum with gamma5 hermiticity, and the saved
+loop includes exactly one closed-fermion-loop Wick minus.
 
 The most validated runtime targets are currently NERSC Perlmutter with NVIDIA
 GPUs and Aurora with Intel GPU / SYCL QUDA.  The Aurora route uses the PyQUDA
@@ -263,7 +267,7 @@ For pion/meson EMT:
 
 For quark/gluon one-point data:
 
-- Quark 1pt schema v4 stores all 16 local and 64 unsymmetrized derivative
+- Quark 1pt schema v5 stores all 16 local and 64 unsymmetrized derivative
   primitive bilinears plus an explicitly named flowed-noise norm.
 - Quark 1pt defaults to decomposition-independent full-volume counter-based `Z4` noise.
 - Never seed an ordinary array-backend RNG identically on every MPI rank to

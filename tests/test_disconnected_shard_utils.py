@@ -65,7 +65,7 @@ def _common_attrs(configured_n_vec):
         "flow_times": np.asarray([0.0, 0.1]),
         "qext": np.asarray([[0, 0, 0, 0], [1, 0, 0, 0]], dtype=np.int32),
         "volume_norm": 8,
-        "emt_operator_schema_version": 4,
+        "emt_operator_schema_version": 5,
         "operator_normalization": "unrenormalized_flowed_quark_bilinear",
         "renormalization_applied": False,
         "renormalization_stage": "analysis_stage",
@@ -179,6 +179,22 @@ def test_finalizer_rejects_obsolete_persisted_source_index(tmp_path):
         h5["raw"].create_dataset("source_index", data=[0])
     with pytest.raises(ValueError, match="obsolete raw/source_index"):
         finalize_emt_quark_1pt_shards(shard_dir, tag, 1)
+
+
+def test_emt_finalizer_rejects_one_sided_schema_v4_and_preserves_canonical(tmp_path):
+    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
+    shard_dir = tmp_path / "EMTc" / "shards"
+    _write_synthetic_base(shard_dir, tag, 0, configured_n_vec=1)
+    first = shard_part_path(shard_dir, tag, 0, 0, 0, 1)
+    with h5py.File(first, "r+") as h5:
+        h5.attrs["emt_operator_schema_version"] = 4
+    Path(tag).parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(tag + ".h5", "w") as h5:
+        h5.attrs["sentinel"] = "old"
+    with pytest.raises(ValueError, match="require emt_operator_schema_version=5"):
+        finalize_emt_quark_1pt_shards(shard_dir, tag, 1)
+    with h5py.File(tag + ".h5", "r") as h5:
+        assert h5.attrs["sentinel"] == "old"
 
 
 def test_emt_finalizer_rejects_old_tmunu_only_shard_schema(tmp_path):

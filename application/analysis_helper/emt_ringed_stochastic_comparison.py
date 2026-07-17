@@ -127,8 +127,8 @@ def load_ringed_base_series(path, mode, flow_index=1):
     path = Path(path)
     with h5py.File(path, "r") as h5:
         schema = int(h5.attrs.get("emt_operator_schema_version", -1))
-        if schema != 3:
-            raise ValueError(f"{path} has EMT operator schema {schema}, expected 3")
+        if schema != 5:
+            raise ValueError(f"{path} has EMT operator schema {schema}, expected 5")
         n_zn = int(h5.attrs["n_zn"])
         scheme = _text(h5.attrs["noise_scheme"])
         hp_count = int(h5.attrs["hp_num_vectors"]) if scheme == "hierarchical_probing" else 1

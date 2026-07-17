@@ -1415,15 +1415,36 @@ as described in Sections~\ref{sec:C3_def}--\ref{sec:C3_total}.
 
 The disconnected quark contribution is evaluated using stochastic estimators.
 For each noise vector $\xi^{(r)}$, one solves $D\eta^{(r)} = \xi^{(r)}$ and
-computes the one-point function (spatially Fourier-transformed loop):
+computes the complete two-sided derivative loop.  With
+$D_\mu=\tfrac12(D_{+\mu}-D_{-\mu})$,
+$S_f=K D^{-1}K^\dagger$, and $P_{q,\tau}$ the spatial Fourier phase at fixed
+absolute insertion time, the target is
 \begin{equation}
-  L_{q,\,\mu\nu}^{(r)}(\momtrans,t)
-  = -\frac{1}{2}\sum_{\mathbf{x}}
-    \Phi_{\momtrans}(\mathbf{x})\;
-    \xi^{(r)\dagger}(x)\,
-    \gamma_{\nu}\big[D_{+\mu}-D_{-\mu}\big]\,
-    \eta^{(r)}(x).
+  L_{q,\,\mu\nu}(q,\tau)
+  =-\frac12\Tr\!\left[
+    P_{q,\tau}\gamma_\nu D_\mu S_f
+    +D_\mu P_{q,\tau}\gamma_\nu S_f\right].
 \end{equation}
+The minus sign is the closed-fermion-loop Wick sign and is already contained
+in the saved loop.  Production obtains the left-acting contribution without
+additional covariant derivatives by defining
+$\Gamma^\sharp=\gamma_5\Gamma^\dagger\gamma_5$ and combining the right-acting
+contractions as
+\begin{equation}
+ L_{\Gamma\mu}(q,\tau)=-\frac12\left[
+ A_{\Gamma\mu}(q,\tau)-A_{\Gamma^\sharp\mu}(-q,\tau)^*\right].
+\end{equation}
+An explicit reference may instead apply \(D_\mu\) to both the stochastic
+solution and stochastic source.  That construction and the production
+gamma5 reconstruction are different finite-noise quadratic forms but unbiased
+estimators of the same trace.  Their equality follows only after the noise
+average, so they must not be required to agree source by source.  A 256-source
+S8T8 test including \(q=0,\pm\hat x,\pm\hat y,\pm\hat z\) found their global
+paired difference to be \(0.981\) standard errors from zero; see the
+disconnected one-point note for the derivation.
+The historical one-sided expression is not valid for a spatial derivative at
+nonzero corresponding momentum, or for the temporal derivative at fixed
+insertion time even when the spatial momentum vanishes.
 At finite flow time the code evolves both stochastic fields with the same
 four-dimensional fermion-flow kernel:
 \begin{equation}

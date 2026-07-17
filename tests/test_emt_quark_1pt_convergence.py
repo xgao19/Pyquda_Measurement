@@ -21,7 +21,7 @@ def _write_emt(path, hp_index=(0, 1, 0, 1)):
     gamma_t = GAMMA_LABELS.index("T")
     derivative[:, gamma_t, 3, 0, 1, :] = target_t44[:, None] * volume
     with h5py.File(path, "w") as h5:
-        h5.attrs["emt_operator_schema_version"] = 3
+        h5.attrs["emt_operator_schema_version"] = 5
         h5.attrs["qext"] = [[0, 0, 0, 0]]
         h5.attrs["flow_times"] = [0.0, 0.2]
         h5.attrs["noise_scheme"] = "hierarchical_probing"

@@ -5,6 +5,7 @@ import pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop as emt_module
 
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedQuark1pt,
+    _MomentumProjectors,
     _flow_times,
     _interval_batches,
     _normalize_flow_type,
@@ -330,7 +331,11 @@ def test_complete_gamma_basis_does_not_add_covdev_calls(monkeypatch):
     with gauge.use() as gauge_dirac:
         local, derivative, flowed_noise_norm = (
             measurement._get_primitive_bilinears_P_Breit_slice(
-                gauge, gauge_dirac, FakeField(data), FakeField(2 * data), [None]
+                gauge,
+                gauge_dirac,
+                FakeField(data),
+                FakeField(2 * data),
+                _MomentumProjectors([None], [None], (0,), (0,)),
             )
         )
     gamma = gamma_matrices_numpy()
@@ -338,12 +343,18 @@ def test_complete_gamma_basis_does_not_add_covdev_calls(monkeypatch):
         "wtzyxia,gij,wtzyxja->gwtzyx", data.conj(), gamma, 2 * data
     ).reshape(16, 1, 1)
     expected_derivative = np.empty((16, 4, 1, 1), dtype=np.complex128)
+    projectors = _MomentumProjectors([None], [None], (0,), (0,))
     for mu in range(4):
         symmetric_difference = ((mu + 1) - (mu + 5)) * 2 * data
-        expected_derivative[:, mu] = -0.5 * np.einsum(
+        right_projected = np.einsum(
             "wtzyxia,gij,wtzyxja->gwtzyx",
             data.conj(), gamma, symmetric_difference,
         ).reshape(16, 1, 1)
+        expected_derivative[:, mu] = (
+            measurement._closed_loop_derivative_from_right_projection(
+                right_projected, projectors
+            )
+        )
     expected_norm = np.einsum(
         "wtzyxia,wtzyxia->wtzyx", data.conj(), data
     ).reshape(1, 1)

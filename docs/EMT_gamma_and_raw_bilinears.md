@@ -75,6 +75,40 @@ Thus every physical axial label consistently means \(\gamma_\mu\gamma_5\).
 
 ## Reconstructing the disconnected EMT
 
+Operator schema v5 stores the completed two-sided derivative, not the
+historical right-acting-only contraction. With
+`Gamma_sharp = gamma5 @ Gamma.conj().T @ gamma5`, production forms
+
+```text
+L_D[A,mu,q] = -0.5 * (
+    A_right[A,mu,q] - A_right[A_sharp,mu,-q].conj())
+```
+
+where `A_right` uses the symmetric lattice derivative
+`(Dplus-Dminus)/2`. The saved `L_D` already contains one closed-fermion-loop
+Wick minus. The datasets `gamma5_hermiticity_partner` and
+`gamma5_hermiticity_sign` specify the exact raw-basis map. Internal `-q`
+projections are not added to the canonical `qext` axis.
+
+This completion matters for nonzero momentum and also for the fixed-time
+temporal derivative at zero spatial momentum. Old one-sided EMT and ringed
+files cannot be interpreted as schema-v5 data.
+
+The production completion is not expected to match an explicit
+`covDev(xi_f)` left-derivative estimator source by source. The direct form
+
+```text
+-0.5 * [xi_f^dag P Gamma D eta_f - (D xi_f)^dag P Gamma eta_f]
+```
+
+and the production `Gamma_sharp/-q` form are distinct stochastic quadratic
+forms. Hermiticity and cyclicity prove equality only after the noise average
+has reconstructed the trace. Both are unbiased; their finite-source
+difference has zero expectation but nonzero variance. An actual S8T8 test with
+256 counter-Z4 sources and `q=0,+/-x,+/-y,+/-z` found a global paired
+difference of `0.981` SEM for solved fields at tolerance `1e-15`; one-rank and
+four-rank means agreed at relative L2 approximately `2.0e-16`.
+
 The canonical EMTc primitive axes are
 
 ```text

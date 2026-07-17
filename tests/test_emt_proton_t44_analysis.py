@@ -72,7 +72,7 @@ def _write_t44_file(path, hp_count=2, incomplete=False):
     for row, base in enumerate(base_idx):
         derivative[row, T_GAMMA_POSITION, T_DERIVATIVE_POSITION] = base + 1
     with h5py.File(path, "w") as h5:
-        h5.attrs["emt_operator_schema_version"] = 3
+        h5.attrs["emt_operator_schema_version"] = 5
         h5.attrs["volume_norm"] = 512
         h5.attrs["noise_scheme"] = "hierarchical_probing"
         h5.attrs["hp_num_vectors"] = hp_count
@@ -125,4 +125,3 @@ def test_disconnected_bootstrap_shapes_and_seed_reproducibility():
     for key in ("source", "stochastic", "combined"):
         assert errors_first[key]["real"].shape == (1, 2)
         np.testing.assert_allclose(errors_first[key]["real"], errors_second[key]["real"])
-

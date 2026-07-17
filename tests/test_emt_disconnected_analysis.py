@@ -35,11 +35,11 @@ def _write_quark(path, derivative, volume=2):
 
 
 def _write_provenance(h5, lattice_size):
-    h5.attrs["loop_provenance_schema"] = "emt_disconnected_loop_provenance_v1"
+    h5.attrs["loop_provenance_schema"] = "emt_disconnected_loop_provenance_v2"
     h5.attrs["global_lattice_size"] = lattice_size
     h5.attrs["momentum_phase_origin"] = [0, 0, 0, 0]
     h5.attrs["spatial_momentum_phase_convention"] = (
-        "exp(-2pi*i*sum_j q_j*(x_j-origin_j)/L_j)"
+        "exp(+2pi*i*sum_j q_j*(x_j-origin_j)/L_j)"
     )
     h5.attrs["loop_time_convention"] = "absolute_lattice_time"
 
@@ -106,10 +106,10 @@ def test_quark_reader_never_requests_nonvector_gamma(monkeypatch):
             "noise_scheme": "zn",
             "hp_num_vectors": 1,
             "source_bookkeeping_schema": "base_hp_v1",
-            "loop_provenance_schema": "emt_disconnected_loop_provenance_v1",
+            "loop_provenance_schema": "emt_disconnected_loop_provenance_v2",
             "global_lattice_size": [1, 1, 1, 2],
             "momentum_phase_origin": [0, 0, 0, 0],
-            "spatial_momentum_phase_convention": "exp(-2pi*i*sum_j q_j*(x_j-origin_j)/L_j)",
+            "spatial_momentum_phase_convention": "exp(+2pi*i*sum_j q_j*(x_j-origin_j)/L_j)",
             "loop_time_convention": "absolute_lattice_time",
         }
 
@@ -161,6 +161,16 @@ def test_old_loop_without_fourier_provenance_is_rejected(tmp_path):
             data=np.zeros((1, 16, 4, 1, 1, 2), np.complex128),
         )
     with pytest.raises(KeyError, match="strict loop provenance"):
+        read_quark_loop(path, [0, 0, 0, 0])
+
+
+def test_loop_provenance_v1_is_rejected(tmp_path):
+    derivative = np.zeros((1, 16, 4, 1, 1, 2), dtype=np.complex128)
+    path = tmp_path / "v1.h5"
+    _write_quark(path, derivative)
+    with h5py.File(path, "r+") as h5:
+        h5.attrs["loop_provenance_schema"] = "emt_disconnected_loop_provenance_v1"
+    with pytest.raises(ValueError, match="unsupported loop provenance schema"):
         read_quark_loop(path, [0, 0, 0, 0])
 
 

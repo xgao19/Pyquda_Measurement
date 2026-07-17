@@ -28,7 +28,7 @@ def _write_canonical(path, mode, n_base=None, incomplete_last_base=False):
     kinetic = np.zeros((len(values), 2, 3), dtype=np.complex128)
     kinetic[:, 1, :] = values[:, None]
     with h5py.File(path, "w") as h5:
-        h5.attrs["emt_operator_schema_version"] = 3
+        h5.attrs["emt_operator_schema_version"] = 5
         h5.attrs["n_zn"] = spec["n_zn"]
         h5.attrs["noise_scheme"] = spec["noise_scheme"]
         h5.attrs["hp_num_vectors"] = hp_count

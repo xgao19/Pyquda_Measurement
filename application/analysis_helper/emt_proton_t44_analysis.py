@@ -102,8 +102,8 @@ def load_t44_base_loops(path):
     """Load only T44 and group every complete randomized HP base."""
     path = Path(path)
     with h5py.File(path, "r") as h5:
-        if int(h5.attrs.get("emt_operator_schema_version", -1)) != 3:
-            raise ValueError(f"{path} is not EMT operator schema 3")
+        if int(h5.attrs.get("emt_operator_schema_version", -1)) != 5:
+            raise ValueError(f"{path} is not EMT operator schema 5")
         derivative = h5["raw/derivative_bilinear_pervec"]
         if derivative.ndim != 6 or derivative.shape[1:3] != (16, 4):
             raise ValueError(f"invalid derivative primitive shape {derivative.shape}")

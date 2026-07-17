@@ -64,6 +64,42 @@ def gamma_matrices_numpy():
     ])
 
 
+def _gamma5_hermiticity_map():
+    """Return the raw-basis map ``gamma5 Gamma^dagger gamma5``.
+
+    Every Clifford-basis element maps to exactly one signed raw PyQUDA basis
+    element.  Deriving the table from the matrices keeps the convention in one
+    place and prevents hand-written sign tables from drifting away from
+    ``PYQUDA_GAMMA_IDS``.
+    """
+    matrices = gamma_matrices_numpy()
+    gamma5 = matrices[GAMMA_LABELS.index("5")]
+    partners = []
+    signs = []
+    for matrix in matrices:
+        transformed = gamma5 @ matrix.conj().T @ gamma5
+        matches = [
+            (idx, sign)
+            for idx, candidate in enumerate(matrices)
+            for sign in (1, -1)
+            if np.allclose(transformed, sign * candidate, rtol=0, atol=1e-13)
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                "raw PyQUDA Gamma basis is not closed uniquely under "
+                "gamma5 hermiticity"
+            )
+        partner, sign = matches[0]
+        partners.append(partner)
+        signs.append(sign)
+    return tuple(partners), tuple(signs)
+
+
+GAMMA5_HERMITICITY_PARTNERS, GAMMA5_HERMITICITY_SIGNS = (
+    _gamma5_hermiticity_map()
+)
+
+
 def gamma_stack(reference_array):
     """Return the raw basis on the backend and queue of ``reference_array``."""
     xp = _get_xp_from_array(reference_array)
@@ -84,6 +120,12 @@ def basis_metadata():
         "gamma_matrices": gamma_matrices_numpy(),
         "physical_gamma_list": np.asarray(GAMMA_LABELS, dtype="S"),
         "physical_from_pyquda": PHYSICAL_FROM_PYQUDA.copy(),
+        "gamma5_hermiticity_partner": np.asarray(
+            GAMMA5_HERMITICITY_PARTNERS, dtype=np.int32
+        ),
+        "gamma5_hermiticity_sign": np.asarray(
+            GAMMA5_HERMITICITY_SIGNS, dtype=np.int8
+        ),
         "derivative_directions": np.asarray(DERIVATIVE_DIRECTIONS, dtype="S"),
     }
 
@@ -100,6 +142,10 @@ def basis_attrs():
         "raw_tensor_definition": "0.5*[gamma_mu,gamma_nu]",
         "hermitian_tensor_from_raw_factor": "1j",
         "derivative_direction_order": ",".join(DERIVATIVE_DIRECTIONS),
+        "gamma5_hermiticity_definition": (
+            "Gamma_sharp=gamma5*Gamma_dagger*gamma5="
+            "sign[A]*Gamma_raw[partner[A]]"
+        ),
     }
 
 
@@ -169,6 +215,8 @@ __all__ = [
     "DERIVATIVE_DIRECTIONS",
     "GAMMA_BASIS_SCHEMA",
     "GAMMA_LABELS",
+    "GAMMA5_HERMITICITY_PARTNERS",
+    "GAMMA5_HERMITICITY_SIGNS",
     "IDENTITY_GAMMA_POSITION",
     "PHYSICAL_FROM_PYQUDA",
     "PYQUDA_GAMMA_IDS",

@@ -10,6 +10,7 @@ except ModuleNotFoundError as err:
 
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
     EMTDisconnectedQuark1pt,
+    _MomentumProjectors,
     ringed_kinetic_pervec_from_derivative,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
@@ -93,24 +94,33 @@ def test_ringed_contraction_matches_emt_vector_diagonal(monkeypatch):
     ringed = RingedQuark1pt(_parameters())
 
     def project_gamma(fields, _phases):
-        return np.asarray(fields).reshape(16, -1).sum(axis=1)[:, None, None]
+        fields = np.asarray(fields)
+        return fields.reshape(fields.shape[0], -1).sum(axis=1)[:, None, None]
 
     def project_scalar(field, _phases):
         return np.asarray([[np.asarray(field).sum()]])
 
     monkeypatch.setattr(emt, "_project_gamma_fields", project_gamma)
     monkeypatch.setattr(emt, "_impose_P_Breit_slice", project_scalar)
-    monkeypatch.setattr(ringed, "_impose_P_Breit_slice", project_scalar)
+    ringed_projection_calls = []
+
+    def project_ringed(fields, phases):
+        ringed_projection_calls.append(phases)
+        return project_gamma(fields, phases)
+
+    monkeypatch.setattr(ringed, "_project_gamma_fields", project_ringed)
+    projectors = _MomentumProjectors([None], [None], (0,), (0,))
     _, derivative, _ = emt._get_primitive_bilinears_P_Breit_slice(
-        Gauge(), Gauge(), xi, eta, [None]
+        Gauge(), Gauge(), xi, eta, projectors
     )
     direct = ringed._contract_flowed_source(
-        Gauge(), Gauge(), xi, eta, [None]
+        Gauge(), Gauge(), xi, eta, projectors
     )["kinetic_pervec"]
     derived = ringed_kinetic_pervec_from_derivative(
         derivative[None, :, :, :, None, :], 0, spatial_volume=1
     )[0, 0]
     np.testing.assert_allclose(direct, derived, rtol=1e-13, atol=1e-13)
+    assert len(ringed_projection_calls) == 1
 
 
 def _ringed_attrs(config_num):
@@ -130,7 +140,11 @@ def _ringed_attrs(config_num):
         "gauge_preprocessing": "test",
         "t_boundary": -1,
         "flavor_convention": "single_flavor_trace_for_this_dirac_operator",
-        "derivative_convention": "gamma_mu*(Dplus_mu-Dminus_mu)",
+        "derivative_convention": (
+            "two_sided_overleftrightarrow_D_from_gamma5_hermiticity"
+        ),
+        "gamma5_hermiticity_reconstruction": True,
+        "derivative_closed_fermion_loop_sign_included": True,
         "kinetic_relation_to_emt": (
             "K=-2*sum_mu(L_D[gamma_mu,mu,q0])/spatial_volume"
         ),

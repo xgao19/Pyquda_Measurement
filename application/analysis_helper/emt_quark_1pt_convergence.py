@@ -101,8 +101,8 @@ def load_quark_1pt_base_series(
     mu, nu = _component_indices(component)
     with h5py.File(path, "r") as h5:
         schema = int(h5.attrs.get("emt_operator_schema_version", -1))
-        if schema != 3:
-            raise ValueError(f"{path} has EMT operator schema {schema}, expected 3")
+        if schema != 5:
+            raise ValueError(f"{path} has EMT operator schema {schema}, expected 5")
         qext = np.asarray(h5.attrs["qext"], dtype=np.int32)
         if q_index is None:
             q_index = _unique_zero_momentum(qext)

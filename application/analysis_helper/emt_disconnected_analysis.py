@@ -11,8 +11,8 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
 )
 
 
-LOOP_PROVENANCE_SCHEMA = "emt_disconnected_loop_provenance_v1"
-SPATIAL_PHASE_CONVENTION = "exp(-2pi*i*sum_j q_j*(x_j-origin_j)/L_j)"
+LOOP_PROVENANCE_SCHEMA = "emt_disconnected_loop_provenance_v2"
+SPATIAL_PHASE_CONVENTION = "exp(+2pi*i*sum_j q_j*(x_j-origin_j)/L_j)"
 ABSOLUTE_TIME_CONVENTION = "absolute_lattice_time"
 
 
