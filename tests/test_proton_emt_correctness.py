@@ -137,7 +137,9 @@ def test_qtmd_c2_is_a_thin_shared_kernel_caller(monkeypatch):
     helper.contract_2pt_TMD(info, object(), object(), "unused")
     assert captured["sink_smearing"] is True
     assert captured["smearing_width"] == 2.0
-    assert captured["smearing_boost"] == [1, 0, 0]
+    assert captured["smearing_boost"] == [0, 0, 0]
+    assert not hasattr(helper, "boost_in")
+    assert helper.boost_out == [0, 0, 0]
 
 
 def test_emt_gamma_cache_is_per_dtype_and_sycl_queue(monkeypatch):

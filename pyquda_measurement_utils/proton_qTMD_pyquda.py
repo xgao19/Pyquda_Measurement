@@ -160,7 +160,7 @@ class proton_TMD():
         self.pilist = parameters["p_2pt"]  # 2pt momentum
 
         self.width = parameters["width"] # Gaussian smearing width
-        self.boost_in = parameters["boost_in"] # Forward-propagator boost smearing
+        self.boost_out = parameters["boost_out"] # Sink-propagator boost smearing
 
         self.pol_list = parameters["pol"] # projection of nucleon state
         self.t_insert = parameters["t_insert"] # time separation of three point function
@@ -177,7 +177,7 @@ class proton_TMD():
             interpolator=interpolator,
             sink_smearing=True,
             smearing_width=self.width,
-            smearing_boost=self.boost_in,
+            smearing_boost=self.boost_out,
         )
         if latt_info.mpi_rank == 0:
             save_proton_c2pt_hdf5(

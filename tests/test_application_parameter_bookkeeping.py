@@ -333,8 +333,8 @@ def test_proton_qtmd_parameters_use_only_active_measurement_fields():
     module = _source("pyquda_measurement_utils/proton_qTMD_pyquda.py")
     assert "self.save_propagators" not in module
     assert "self.pos_boost" not in module
-    assert "self.boost_out" not in module
-    assert 'parameters["boost_in"]' in module
+    assert "self.boost_in" not in module
+    assert 'self.boost_out = parameters["boost_out"]' in module
 
     for relpath in [
         "application/nucleon_TMD/perlmutter/Pyquda_nucleon_TMD.py",
@@ -343,6 +343,8 @@ def test_proton_qtmd_parameters_use_only_active_measurement_fields():
     ]:
         source = _source(relpath)
         assert '"save_propagators"' not in source
+        assert 'boost=parameters["boost_in"]' in source
+        assert source.count('parameters["boost_out"]') >= 2
         assert "my_pyquda_gammas" not in source
         assert "gamma_stack" in source
 

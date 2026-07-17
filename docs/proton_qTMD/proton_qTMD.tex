@@ -913,11 +913,24 @@ The measurement is organized into a class \texttt{proton\_TMD} in
   \end{tabular}
 \end{center}
 
-The production measurement object stores only the forward-line smearing
-parameter \texttt{boost\_in}, which is used by its two-point contraction.
-The application-level \texttt{boost\_out} remains the sequential/sink
-smearing parameter and is passed directly to sequential-source construction;
-it is not duplicated as an inactive measurement-class alias.
+The application uses \texttt{boost\_in} to smear the source before the forward
+inversion.  The production measurement object stores \texttt{boost\_out} and
+uses it for the sink side of the two-point contraction; the same
+\texttt{boost\_out} is passed to the fixed-sink sequential-source
+construction.  Thus the saved two-point function has the endpoint convention
+\begin{equation}
+  C_{2}^{\mathrm{out,in}}(p,t)
+  =
+  \left\langle
+    \chi_{S_{\mathrm{out}}}(p,t)\,
+    \overline{\chi}_{S_{\mathrm{in}}}(0)
+  \right\rangle .
+\end{equation}
+The current canonical applications set
+\(\texttt{boost\_in}=\texttt{boost\_out}=(0,0,0)\), so this correction does
+not change their standard zero-boost data.  Manually produced older
+unequal-boost two-point data used \texttt{boost\_in} at both endpoints and
+must be recomputed.
 
 \subsection{Method Summary}
 
@@ -1138,12 +1151,15 @@ The production applications follow this workflow for each source position:
 
 \begin{enumerate}
   \item \textbf{Forward propagator}: Generate a point source at position
-    $(x_0, y_0, z_0, t_0)$, apply boosted smearing, and invert.
+    $(x_0, y_0, z_0, t_0)$, apply boosted smearing with
+    \texttt{boost\_in}, and invert.
   \item \textbf{Two-point contraction}: Call \texttt{contract\_2pt\_TMD} with the
-    forward propagator and momentum phases. This computes all 16 gamma channels
-    and saves the result as HDF5.
+    forward propagator and momentum phases, applying sink smearing with
+    \texttt{boost\_out}. This computes all 16 gamma channels and saves the
+    result as HDF5.
   \item \textbf{Sequential sources}: Build two sequential backward propagators
-    via \texttt{create\_bw\_seq\_pyquda}:
+    via \texttt{create\_bw\_seq\_pyquda}, using \texttt{boost\_out} for the
+    fixed sink:
     \begin{itemize}
       \item Flavor 2 (down): \texttt{sequential\_bw\_prop\_down},
       \item Flavor 1 (up): \texttt{sequential\_bw\_prop\_up}.

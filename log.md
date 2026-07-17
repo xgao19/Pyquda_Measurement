@@ -1109,3 +1109,13 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   identical for qTMD/PDF (65 files, 1872 datasets), EMFF (2 files, 864
   datasets), first-order response (1 file, 31 datasets), and soft factor
   including nonzero transverse displacement (6 files, 25 datasets).
+
+## 2026-07-17: Correct proton qTMD endpoint boost usage
+
+- Kept `boost_in` as the application-owned source-smearing parameter and made
+  the shared proton qTMD measurement use `boost_out` for the C2 sink, matching
+  the existing fixed-sink sequential-source convention.
+- The canonical production applications still use zero source and sink
+  boosts, so their standard output is unchanged.  Older manually produced
+  unequal-boost C2 data used the source boost at both endpoints and must be
+  recomputed.
