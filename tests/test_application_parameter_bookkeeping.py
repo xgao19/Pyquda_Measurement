@@ -387,6 +387,52 @@ def test_pion_channel_provenance_is_explicit_and_rank_zero_writes_qtmd():
     assert "channel_set_tag" in emff
 
 
+def test_pion_qtmd_keeps_run_configuration_in_application_only():
+    measurement = _source(
+        "pyquda_measurement_utils/pion_qTMD_vibe_develop.py"
+    )
+    for field in ("self.pf", "self.qlist", "self.qlist_PDF", "self.t_insert"):
+        assert field not in measurement
+
+    driver = _source(
+        "application/pion_TMD/perlmutter/Pyquda_pion_TMD.py"
+    )
+    assert 'parameters["pf"]' in driver
+    assert 'parameters["qext"]' in driver
+    assert 'parameters["qext_PDF"]' in driver
+    assert 'parameters["t_insert"]' in driver
+    assert "phases_TMD" in driver
+    assert "phases_PDF" in driver
+    assert "create_meson_bw_seq_pyquda(" in driver
+
+
+def test_pion_dead_parameters_and_duplicate_backend_helpers_are_removed():
+    emff = _source("pyquda_measurement_utils/pion_EMFF_vibe_develop.py")
+    response = _source(
+        "pyquda_measurement_utils/pion_current_background_response_vibe_develop.py"
+    )
+    soft = _source("pyquda_measurement_utils/pion_soft_factor_vibe_develop.py")
+
+    assert "self.save_propagators" not in emff
+    assert "def _gamma_on_backend" not in response
+    assert "matrix_on_backend" in response
+    assert "def _matrix_on_backend" not in soft
+    assert "def _matrix_stack" not in soft
+    assert "def momentum_tag" in soft
+    assert "def load_wall_propagator(self, tag)" in soft
+
+    for relpath in [
+        "application/EMFF_pion/perlmutter/Pyquda_pion_EMFF.py",
+        (
+            "application/EMFF_pion_background_response/perlmutter/"
+            "Pyquda_pion_EMFF_background_response.py"
+        ),
+        "application/qDA/frontier_charm/pyquda_DA_k6.py",
+        "application/qDA/frontier_charm/pyquda_charm_mass.py",
+    ]:
+        assert '"save_propagators"' not in _source(relpath)
+
+
 def test_standalone_ringed_exposes_cli_only_flow_batch_size():
     drivers = [
         "application/flowed_quark_ringed_norm/perlmutter/Pyquda_flowed_quark_ringed_norm.py",

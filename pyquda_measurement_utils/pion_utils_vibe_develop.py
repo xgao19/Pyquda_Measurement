@@ -69,8 +69,28 @@ def array_to_numpy(arr):
     return np.asarray(arr)
 
 
-def _gamma_on_backend(gamma_like, xp, ref_arr):
-    return _asarray_on_queue(_gamma_matrix(gamma_like), xp, ref_arr)
+def matrix_on_backend(value, reference_array):
+    """Place a small matrix on the backend and queue of ``reference_array``."""
+    xp = _get_xp_from_array(reference_array)
+    value = _gamma_matrix(value)
+    value_backend = type(value).__module__.split(".")[0]
+    if value_backend == xp.__name__:
+        if xp.__name__ != "dpnp":
+            return value
+        reference_queue = getattr(reference_array, "sycl_queue", None)
+        if getattr(value, "sycl_queue", None) is reference_queue:
+            return value
+    if hasattr(value, "get"):
+        value = value.get()
+    return _asarray_on_queue(value, xp, reference_array)
+
+
+def matrix_stack_on_backend(values, reference_array):
+    """Stack small matrices on the backend and queue of ``reference_array``."""
+    xp = _get_xp_from_array(reference_array)
+    return xp.stack(
+        [matrix_on_backend(value, reference_array) for value in values]
+    )
 
 
 def gamma_stack(reference_array):
@@ -120,7 +140,7 @@ def source_gamma_stack(src_gamma, sink_gamma_ls, reference_array):
     """
     source_gamma_provenance(src_gamma)
     xp = _get_xp_from_array(reference_array)
-    gamma5 = _gamma_on_backend(G5, xp, reference_array)
+    gamma5 = matrix_on_backend(G5, reference_array)
 
     if src_gamma == "dagger_of_sink":
         return xp.einsum(
@@ -131,7 +151,7 @@ def source_gamma_stack(src_gamma, sink_gamma_ls, reference_array):
             optimize=True,
         )
     if src_gamma in my_gammas:
-        source_gamma = _gamma_on_backend(gamma_from_label(src_gamma), xp, reference_array)
+        source_gamma = matrix_on_backend(gamma_from_label(src_gamma), reference_array)
         source_gamma_ls = sink_gamma_ls.copy()
         source_gamma_ls[:] = source_gamma
         return source_gamma_ls
@@ -141,7 +161,7 @@ def source_gamma_stack(src_gamma, sink_gamma_ls, reference_array):
 
 def meson_backward_line(prop):
     xp = _get_xp_from_array(prop.data)
-    gamma5 = _gamma_on_backend(G5, xp, prop.data)
+    gamma5 = matrix_on_backend(G5, prop.data)
     return xp.einsum("ij,wtzyxilab,kl->wtzyxkjba", gamma5, prop.data.conj(), gamma5, optimize=True)
 
 

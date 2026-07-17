@@ -98,8 +98,8 @@ for tslice in tslice_list:
 
             prop_fw_tag = get_pion_soft_factor_prop_file_tag(str(data_dir), lat_tag, conf, "CG.wall", pos, sm_tag, quark_mom_fw)
             prop_bw_src_tag = get_pion_soft_factor_prop_file_tag(str(data_dir), lat_tag, conf, "CG.wall", pos, sm_tag, [-quark_mom_bw[0], -quark_mom_bw[1], -quark_mom_bw[2]])
-            prop_fw = measurement.load_wall_propagator(latt_info, prop_fw_tag)
-            prop_bw_src = measurement.load_wall_propagator(latt_info, prop_bw_src_tag)
+            prop_fw = measurement.load_wall_propagator(prop_fw_tag)
+            prop_bw_src = measurement.load_wall_propagator(prop_bw_src_tag)
 
             pion_pair_labels = list(measurement.pion_channel_pairs)
             for pion_pair_label in pion_pair_labels:
@@ -154,8 +154,8 @@ for tslice in tslice_list:
                 sink_pos = [0, 0, 0, sink_t]
                 prop_sink_fw_tag = get_pion_soft_factor_prop_file_tag(str(data_dir), lat_tag, conf, "CG.wall", sink_pos, sm_tag, [-quark_mom_fw[0], -quark_mom_fw[1], -quark_mom_fw[2]])
                 prop_sink_bw_tag = get_pion_soft_factor_prop_file_tag(str(data_dir), lat_tag, conf, "CG.wall", sink_pos, sm_tag, quark_mom_bw)
-                prop_sink_fw = measurement.load_wall_propagator(latt_info, prop_sink_fw_tag)
-                prop_sink_bw = measurement.load_wall_propagator(latt_info, prop_sink_bw_tag)
+                prop_sink_fw = measurement.load_wall_propagator(prop_sink_fw_tag)
+                prop_sink_bw = measurement.load_wall_propagator(prop_sink_bw_tag)
                 corr, _, _ = measurement.contract_soft_factor(
                     latt_info,
                     prop_fw,

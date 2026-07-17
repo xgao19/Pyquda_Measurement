@@ -123,7 +123,6 @@ parameters = {
     "neg_boost_sink": parse_boost(args.neg_boost_sink),
     "width": args.width,
     "t_insert": t_insert_list,
-    "save_propagators": False,
 }
 boost_tag = (
     f"posSrc{''.join(str(v) for v in parameters['pos_boost_src'])}"

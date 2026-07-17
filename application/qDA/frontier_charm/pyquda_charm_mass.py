@@ -87,8 +87,6 @@ parameters = {
     "pos_boost": [0, 0, smearing_boost_k],
     # Momentum used in boosted smearing for the backward/sink-side propagator.
     "neg_boost": [0, 0, -smearing_boost_k],
-    # Retained for interface compatibility; this script does not save propagators.
-    "save_propagators": False,
 }
 Measurement = pion_TMDWF_measurement(parameters)
 

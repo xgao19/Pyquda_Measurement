@@ -4,6 +4,8 @@ import numpy as np
 
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
     array_to_numpy,
+    matrix_on_backend,
+    matrix_stack_on_backend,
     zeros_on_backend,
 )
 from pyquda_measurement_utils.tools import (
@@ -86,6 +88,62 @@ def test_shared_host_conversion_and_queue_aware_zeros():
     assert calls == [((2, 3), np.complex128, queue)]
 
 
+def test_shared_matrix_helpers_follow_reference_backend_and_queue():
+    queue = object()
+    calls = []
+
+    class Matrix:
+        matrix = np.asarray([[1, 2], [3, 4]], dtype=np.complex128)
+
+    class FakeArray:
+        __module__ = "dpnp"
+        sycl_queue = queue
+
+    class FakeDPNP:
+        __name__ = "dpnp"
+
+        @staticmethod
+        def asarray(value, *, sycl_queue):
+            calls.append(("asarray", sycl_queue))
+            return np.asarray(value)
+
+        @staticmethod
+        def stack(values):
+            calls.append(("stack", len(values)))
+            return np.stack(values)
+
+    import sys
+
+    previous = sys.modules.get("dpnp")
+    sys.modules["dpnp"] = FakeDPNP()
+    try:
+        reference = FakeArray()
+        matrix = matrix_on_backend(Matrix(), reference)
+        stack = matrix_stack_on_backend([Matrix(), np.eye(2)], reference)
+    finally:
+        if previous is None:
+            del sys.modules["dpnp"]
+        else:
+            sys.modules["dpnp"] = previous
+
+    np.testing.assert_array_equal(matrix, Matrix.matrix)
+    assert stack.shape == (2, 2, 2)
+    assert calls == [
+        ("asarray", queue),
+        ("asarray", queue),
+        ("asarray", queue),
+        ("stack", 2),
+    ]
+
+    class NumpyMatrix(np.ndarray):
+        def get(self):
+            raise AssertionError("same-backend matrix should not round-trip through host")
+
+    NumpyMatrix.__module__ = "numpy"
+    same_backend = np.eye(2).view(NumpyMatrix)
+    assert matrix_on_backend(same_backend, np.empty(1)) is same_backend
+
+
 def test_emff_and_soft_factor_have_no_backend_specific_host_conversion():
     emff = (
         REPO_ROOT / "pyquda_measurement_utils/pion_EMFF_vibe_develop.py"
@@ -101,6 +159,8 @@ def test_emff_and_soft_factor_have_no_backend_specific_host_conversion():
     assert "first_gamma.device" not in soft
     assert "contract_pion_gamma_scan" in emff
     assert "array_to_numpy" in soft
+    assert "def _matrix_on_backend" not in soft
+    assert "def _matrix_stack" not in soft
 
 
 def test_response_apps_require_explicit_source_relative_conversion_and_tagging():

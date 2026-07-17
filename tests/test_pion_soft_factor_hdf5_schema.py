@@ -21,7 +21,6 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
     gamma_matrices_numpy,
 )
 from pyquda_measurement_utils.pion_soft_factor_vibe_develop import (
-    _gamma_matrix,
     _raw_gamma_by_label,
     soft_factor_gamma_channel_pairs,
 )
@@ -37,7 +36,11 @@ def test_soft_factor_default_gamma_pairs_use_canonical_raw_basis():
     for pair_label, (gamma1_label, gamma2_label) in soft_factor_gamma_channel_pairs.items():
         assert pair_label == gamma1_label == gamma2_label
         gamma_idx = GAMMA_LABELS.index(pair_label)
-        np.testing.assert_array_equal(_gamma_matrix(_raw_gamma_by_label[pair_label]), raw[gamma_idx])
+        matrix = _raw_gamma_by_label[pair_label]
+        np.testing.assert_array_equal(
+            np.asarray(getattr(matrix, "matrix", matrix)),
+            raw[gamma_idx],
+        )
 
 
 def test_pion_soft_factor_4pt_hdf5_schema(tmp_path):

@@ -154,16 +154,11 @@ class pion_TMD:
         self.b_z = parameters["b_z"]
         self.b_T = parameters["b_T"]
 
-        self.pf = parameters["pf"]
-        self.qlist = parameters["qext"]
-        self.qlist_PDF = parameters.get("qext_PDF", self.qlist)
         self.pilist = parameters["p_2pt"]
 
         self.width = parameters["width"]
         self.pos_boost = parameters["pos_boost"]
         self.neg_boost = parameters["neg_boost"]
-
-        self.t_insert = parameters["t_insert"]
 
     def contract_2pt_pion(
         self, latt_info, spectator_prop, active_prop, phases, tag,

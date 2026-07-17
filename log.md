@@ -1086,3 +1086,26 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   containing all 16 Gamma groups. Its soft-factor/qTMDWF/qDA relative L2
   differences from one rank were at most `1.69e-15`.
 - The final CPU regression suite passes with 260 tests and 12 skips.
+
+## 2026-07-17: Lighten pion qTMD configuration and backend helpers
+
+- Removed the unused `pf`, qTMD/PDF momentum-list, and insertion-time copies
+  from `pion_TMD`; the application runner remains the owner of sequential
+  sink kinematics, Fourier phases, output labels, and time trimming.
+- Removed the unused pion EMFF/qDA `save_propagators` parameter and the unused
+  lattice-info argument from the soft-factor propagator loader.
+- Centralized small-matrix backend and SYCL-queue placement in
+  `matrix_on_backend` and `matrix_stack_on_backend`.  Pion contractions,
+  response sources, and soft-factor contractions now use the same helpers.
+- Kept the soft-factor `momentum_tag`, qTMDWF `eta`, qTMD final-momentum
+  convention, single-\(t_{\rm sep}\) scheduling, and Wilson-index order
+  unchanged.
+- The full CPU suite passes with 263 tests and 12 skips.  A one-rank S8T8
+  reference/candidate run at tolerance `1e-15`, nonzero momentum, and
+  \(t_{\rm sep}=3\) compared 65 qTMD/PDF files (1872 datasets) and two EMFF
+  files (864 datasets); all numerical datasets were bitwise identical.
+- A fresh four-rank S8T8 run with geometry `2.2.1.1` used the same tolerance,
+  momentum, and separation.  Reference/candidate comparisons were bitwise
+  identical for qTMD/PDF (65 files, 1872 datasets), EMFF (2 files, 864
+  datasets), first-order response (1 file, 31 datasets), and soft factor
+  including nonzero transverse displacement (6 files, 25 datasets).

@@ -29,18 +29,9 @@ from pyquda_utils import core, gamma, source
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
     contract_pion_2pt_multi_src_gamma,
     gamma_from_label,
+    matrix_on_backend,
 )
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array
-
-
-def _gamma_matrix(gamma_like):
-    if hasattr(gamma_like, "matrix"):
-        return gamma_like.matrix
-    return gamma_like
-
-
-def _gamma_on_backend(gamma_like, xp, ref_arr):
-    return _asarray_on_queue(_gamma_matrix(gamma_like), xp, ref_arr)
 
 
 def relative_tau_to_absolute(tau_relative_list, source_time, Nt):
@@ -84,7 +75,7 @@ def build_local_current_inserted_source(
     xp = _get_xp_from_array(prop_forward.data)
     phase_q = _asarray_on_queue(phase_q, xp, prop_forward.data)
     gamma_current = gamma_from_label(current_gamma) if isinstance(current_gamma, str) else current_gamma
-    gamma_current = _gamma_on_backend(gamma_current, xp, prop_forward.data)
+    gamma_current = matrix_on_backend(gamma_current, prop_forward.data)
 
     src = core.LatticePropagator(prop_forward.latt_info)
     src.data = xp.einsum(

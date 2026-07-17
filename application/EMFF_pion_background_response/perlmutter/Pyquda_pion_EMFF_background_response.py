@@ -111,7 +111,6 @@ parameters = {
     "neg_boost_sink": [0, 0, 0],
     "width": args.width,
     "t_insert": tsep_list,
-    "save_propagators": False,
 }
 measurement = pion_EMFF(parameters)
 

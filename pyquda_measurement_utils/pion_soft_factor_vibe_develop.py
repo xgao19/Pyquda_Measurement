@@ -81,8 +81,12 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
     PYQUDA_GAMMA_IDS,
 )
 from pyquda_measurement_utils.io_corr import ensure_parent_dir
-from pyquda_measurement_utils.pion_utils_vibe_develop import array_to_numpy
-from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
+from pyquda_measurement_utils.pion_utils_vibe_develop import (
+    array_to_numpy,
+    matrix_on_backend,
+    matrix_stack_on_backend,
+)
+from pyquda_measurement_utils.tools import _get_xp_from_array, mpi_print
 
 
 soft_factor_gammas = ["5", "I", "X", "Y", "X5", "Y5"]
@@ -108,30 +112,6 @@ def as_momentum_3(momentum):
     if len(momentum) == 4:
         return [int(momentum[0]), int(momentum[1]), int(momentum[2])]
     return [int(momentum[0]), int(momentum[1]), int(momentum[2])]
-
-
-def _gamma_matrix(gamma_like):
-    if hasattr(gamma_like, "matrix"):
-        return gamma_like.matrix
-    return gamma_like
-
-
-def _matrix_on_backend(matrix, xp, reference_array):
-    if type(matrix).__module__.split(".")[0] == xp.__name__:
-        return matrix
-    if hasattr(matrix, "get"):
-        matrix = matrix.get()
-    return _asarray_on_queue(matrix, xp, reference_array)
-
-
-def _matrix_stack(gamma_dict, keys, reference_array):
-    xp = _get_xp_from_array(reference_array)
-    return xp.stack([
-        _matrix_on_backend(
-            _gamma_matrix(gamma_dict[key]), xp, reference_array
-        )
-        for key in keys
-    ])
 
 
 class pion_soft_factor:
@@ -172,7 +152,7 @@ class pion_soft_factor:
                 for key, value in attrs.items():
                     f.attrs[key] = value
 
-    def load_wall_propagator(self, latt_info, tag):
+    def load_wall_propagator(self, tag):
         return core.LatticePropagator.loadH5(tag + ".h5", "propagator")
 
     def apply_phase(self, prop, momentum, sign=1, x0=None):
@@ -181,7 +161,7 @@ class pion_soft_factor:
         mom_phase = phase.MomentumPhase(prop.latt_info).getPhase(as_momentum_3(momentum), x0=x0)
         if sign == -1:
             mom_phase = mom_phase.conj()
-        mom_phase = _matrix_on_backend(mom_phase, xp, prop.data)
+        mom_phase = matrix_on_backend(mom_phase, prop.data)
         phased = prop.copy()
         phased.data[:] = phased.data * mom_phase[:, :, :, :, :, None, None, None, None]
         return phased
@@ -189,9 +169,9 @@ class pion_soft_factor:
     def contract_wall_2pt(self, latt_info, prop_fw, prop_bw, pion_mom, pion_pair_label):
         xp = _get_xp_from_array(prop_fw.data)
         src_matrix, sink_matrix = self.pion_channel_pairs[pion_pair_label]
-        src_gamma = _matrix_on_backend(_gamma_matrix(src_matrix), xp, prop_fw.data)
-        sink_gamma = _matrix_on_backend(_gamma_matrix(sink_matrix), xp, prop_fw.data)
-        gamma5 = _matrix_on_backend(_gamma_matrix(G5), xp, prop_fw.data)
+        src_gamma = matrix_on_backend(src_matrix, prop_fw.data)
+        sink_gamma = matrix_on_backend(sink_matrix, prop_fw.data)
+        gamma5 = matrix_on_backend(G5, prop_fw.data)
         prop_fw_phase = self.apply_phase(prop_fw, [-pion_mom[0], -pion_mom[1], -pion_mom[2]], 1)
         prop_fw_t = prop_fw_phase.lexico(False)
         prop_bw_bar = xp.einsum("ij,tzyxmlca,kl->tzyxkjca", gamma5, prop_bw.lexico(False).conj(), gamma5, optimize=True)
@@ -203,8 +183,8 @@ class pion_soft_factor:
     def contract_tmdwf_check(self, latt_info, prop_fw, prop_bw, pion_mom, pion_pair_label):
         xp = _get_xp_from_array(prop_fw.data)
         src_matrix, _ = self.pion_channel_pairs[pion_pair_label]
-        src_gamma = _matrix_on_backend(_gamma_matrix(src_matrix), xp, prop_fw.data)
-        gamma5 = _matrix_on_backend(_gamma_matrix(G5), xp, prop_fw.data)
+        src_gamma = matrix_on_backend(src_matrix, prop_fw.data)
+        gamma5 = matrix_on_backend(G5, prop_fw.data)
         prop_fw_phase = self.apply_phase(prop_fw, [-pion_mom[0], -pion_mom[1], -pion_mom[2]], 1)
         prop_fw_t = prop_fw_phase.lexico(False)
         corr_list = []
@@ -224,7 +204,7 @@ class pion_soft_factor:
 
     def contract_soft_factor(self, latt_info, prop_fw, prop_bw_src, prop_sink_bw, prop_sink_fw, pion_mom):
         xp = _get_xp_from_array(prop_fw.data)
-        gamma5 = _matrix_on_backend(_gamma_matrix(G5), xp, prop_fw.data)
+        gamma5 = matrix_on_backend(G5, prop_fw.data)
         pion_pair_labels = list(self.pion_channel_pairs)
         gamma_pair_labels = list(self.gamma_channel_pairs)
         pion_src_matrices = {
@@ -241,10 +221,18 @@ class pion_soft_factor:
             pair_label: _raw_gamma_by_label[labels[1]]
             for pair_label, labels in self.gamma_channel_pairs.items()
         }
-        src_ls = _matrix_stack(pion_src_matrices, pion_pair_labels, prop_fw.data)
-        sink_ls = _matrix_stack(pion_sink_matrices, pion_pair_labels, prop_fw.data)
-        gamma1_ls = _matrix_stack(gamma1_matrices, gamma_pair_labels, prop_fw.data)
-        gamma2_ls = _matrix_stack(gamma2_matrices, gamma_pair_labels, prop_fw.data)
+        src_ls = matrix_stack_on_backend(
+            [pion_src_matrices[key] for key in pion_pair_labels], prop_fw.data
+        )
+        sink_ls = matrix_stack_on_backend(
+            [pion_sink_matrices[key] for key in pion_pair_labels], prop_fw.data
+        )
+        gamma1_ls = matrix_stack_on_backend(
+            [gamma1_matrices[key] for key in gamma_pair_labels], prop_fw.data
+        )
+        gamma2_ls = matrix_stack_on_backend(
+            [gamma2_matrices[key] for key in gamma_pair_labels], prop_fw.data
+        )
 
         Gw = prop_fw.lexico(False)
         Gw_dagger = prop_sink_fw.lexico(False)
