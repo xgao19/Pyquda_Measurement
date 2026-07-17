@@ -77,7 +77,7 @@ chmod +x scripts/select_gpu_Ncfg
 sleep 10s
 offset=0
 
-srun -u --nodes 4 -n 32 -r $offset scripts/./select_gpu_Ncfg python pyquda_qTMDWF_einsum2.py  --config_num 1050 --mpi_geometry 2.2.2.4 >/ccs/home/xiangg/latwork/l64c64a076/qTMDWF_pyquda/log/qTMDWF_einsum_1050.out 2>/ccs/home/xiangg/latwork/l64c64a076/qTMDWF_pyquda/log/qTMDWF_einsum_1050.err &
+srun -u --nodes 4 -n 32 -r $offset scripts/./select_gpu_Ncfg python pyquda_qTMDWF.py --config_num 1050 --mpi_geometry 2.2.2.4 >/ccs/home/xiangg/latwork/l64c64a076/qTMDWF_pyquda/log/qTMDWF_1050.out 2>/ccs/home/xiangg/latwork/l64c64a076/qTMDWF_pyquda/log/qTMDWF_1050.err &
 
 offset=$((offset + 4))
 sleep 0.5s

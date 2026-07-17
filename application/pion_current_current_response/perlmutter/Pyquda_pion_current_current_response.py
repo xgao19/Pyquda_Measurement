@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -46,18 +47,23 @@ args, _unknown = parser.parse_known_args()
 
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 init(mpi_geometry, enable_mps=True)
+repo_root = Path(__file__).resolve().parents[3]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 from pyquda_utils import core, io, source
 from pyquda_utils.phase import MomentumPhase
 
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.pion_current_background_response_vibe_develop import (
-    contract_current_current_response_pion_2pt,
-    infer_source_momentum,
+    contract_response_pion_2pt,
     invert_current_current_response_propagator,
+    relative_tau_to_absolute,
+)
+from application.analysis_helper.pion_current_response_analysis import (
+    infer_source_momentum,
     response_at_sink_time,
     response_ratio,
-    relative_tau_to_absolute,
     roll_to_source_relative,
     save_pion_current_current_response_hdf5,
     tau_window_list,
@@ -179,7 +185,7 @@ cc_response_prop = invert_current_current_response_propagator(
     response_sign=1,
 )
 cc_response_prop = boosted_smearing(cc_response_prop, w=args.width, boost=[0, 0, 0])
-cc_response_corr = contract_current_current_response_pion_2pt(
+cc_response_corr = contract_response_pion_2pt(
     latt_info,
     cc_response_prop,
     prop_neg_sink,

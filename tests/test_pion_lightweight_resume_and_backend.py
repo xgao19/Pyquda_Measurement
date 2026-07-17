@@ -99,7 +99,7 @@ def test_emff_and_soft_factor_have_no_backend_specific_host_conversion():
     assert "xp.asnumpy" not in soft
     assert "def _to_numpy" not in soft
     assert "first_gamma.device" not in soft
-    assert "array_to_numpy" in emff
+    assert "contract_pion_gamma_scan" in emff
     assert "array_to_numpy" in soft
 
 

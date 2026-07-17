@@ -4,7 +4,7 @@ from pathlib import Path
 from pyquda import init
 from pyquda_utils import io
 from pyquda_measurement_utils.pion_EMT_vibe_develop import QuarkEMT
-from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import parse_optional_multigrid_blocks
+from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import parse_optional_multigrid_blocks
 from pyquda_measurement_utils.io_corr import get_emt_meson_2pt_file_tag, get_emt_quark_3pt_file_tag
 
 # ============================================================

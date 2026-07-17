@@ -9,15 +9,17 @@ import pyquda_measurement_utils.pion_qTMD_vibe_develop as pion_qtmd_module
 import pyquda_measurement_utils.pion_EMT_vibe_develop as pion_emt_module
 import pyquda_measurement_utils.pion_qTMDWF_pyquda as pion_qtmdwf_module
 import pyquda_measurement_utils.pion_EMFF_vibe_develop as pion_emff_module
+import pyquda_measurement_utils.pion_utils_vibe_develop as pion_utils_module
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
     contract_pion_2pt,
     contract_pion_2pt_multi_src_gamma,
+    contract_pion_gamma_scan_from_backward_line,
 )
 
 
 def test_qtmdwf_2pt_contracts_one_sink_gamma_at_a_time():
     wrapper_source = inspect.getsource(pion_TMDWF_measurement.contract_2pt_pion)
-    source = inspect.getsource(contract_pion_2pt_multi_src_gamma)
+    source = inspect.getsource(contract_pion_gamma_scan_from_backward_line)
 
     assert "for gamma_idx" in source
     assert "latt_info.size[3]" in source
@@ -54,11 +56,11 @@ def test_all_standard_pion_c2_wrappers_use_shared_kernel():
 
 
 def test_pion_qtmd_has_no_gamma_times_propagator_intermediate():
-    source = inspect.getsource(pion_TMD._contract_qTMD_one_shift)
+    source = inspect.getsource(contract_pion_gamma_scan_from_backward_line)
 
     assert '"wtzyxjicf,gim->gwtzyxjmcf"' not in source.replace(" ", "")
     assert "for gamma_idx, sink_gamma" in source
-    assert "shifted_prop.latt_info.size[3]" in source
+    assert "latt_info.size[3]" in source
 
 
 def test_pion_qtmd_channel_loop_matches_stacked_reference(monkeypatch):
@@ -71,8 +73,10 @@ def test_pion_qtmd_channel_loop_matches_stacked_reference(monkeypatch):
     shifted_data = rng.normal(size=lattice_shape + (4, 4, color, color)) + 1j * rng.normal(
         size=lattice_shape + (4, 4, color, color)
     )
-    sink_gamma_ls = rng.normal(size=(3, 4, 4)) + 1j * rng.normal(size=(3, 4, 4))
-    source_gamma_ls = rng.normal(size=(3, 4, 4)) + 1j * rng.normal(size=(3, 4, 4))
+    sink_gamma_ls = pion_utils_module.gamma_stack(shifted_data)
+    source_gamma_ls = pion_utils_module.source_gamma_stack(
+        "5", sink_gamma_ls, shifted_data
+    )
     phases = rng.normal(size=(2,) + lattice_shape) + 1j * rng.normal(size=(2,) + lattice_shape)
 
     class FakeLatticeInfo:
@@ -82,15 +86,16 @@ def test_pion_qtmd_channel_loop_matches_stacked_reference(monkeypatch):
         data = shifted_data
         latt_info = FakeLatticeInfo()
 
-    monkeypatch.setattr(pion_qtmd_module.core, "gatherLattice", lambda values, axes: values)
-    result = pion_TMD._contract_qTMD_one_shift(
-        object(),
-        seq_bw_line,
-        FakePropagator(),
-        sink_gamma_ls,
-        source_gamma_ls,
-        phases,
+    monkeypatch.setattr(
+        pion_utils_module.core, "gatherLattice", lambda values, axes: values
     )
+    result = contract_pion_gamma_scan_from_backward_line(
+        FakeLatticeInfo(),
+        FakePropagator(),
+        seq_bw_line,
+        phases,
+        ["5"],
+    )["5"]
 
     sink_inserted = np.einsum(
         "wtzyxjicf,gim->gwtzyxjmcf", seq_bw_line, sink_gamma_ls, optimize=True

@@ -1049,3 +1049,40 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   one/four-rank relative L2 differences were at most `7.25e-14`; the maximum
   absolute difference was `1.14e-13`.  Repeated qTMD/EMFF runs skipped before
   inversion and did not change any HDF5 size or modification time.
+
+## 2026-07-17: Unify pion bilinear and nonlocal-line infrastructure
+
+- Added one shared pion 16-Gamma contraction core for propagator pairs and
+  prebuilt backward lines. Pion C2, qTMD, EMFF, qTMDWF, and qDA now use this
+  implementation; qTMD no longer broadcasts complete gathered results back
+  to non-root ranks solely for serial output.
+- Unified qDA with qTMDWF: the positive-boost forward line is the fixed
+  spectator and CG/GI displacement acts on the negative-boost backward active
+  line. Positive and negative longitudinal branches restart from the original
+  backward propagator.
+- Replaced soft-factor rank-local transverse `roll` operations by global
+  `LatticePropagator.shift`, which is correct when the transverse direction is
+  MPI decomposed.
+- Introduced `FlowedFermionBilinearKernel`; connected pion and proton EMT no
+  longer inherit disconnected noise, shard, resume, or finalizer machinery.
+- Consolidated Aurora/Frontier qTMDWF production around one application runner,
+  one root-written 16-Gamma HDF5 file, and exact-line source resume. qDA and
+  charm-mass workflows use the same lightweight log helpers.
+- Split pion response calculations from analysis: production inversions and
+  contractions remain in `pyquda_measurement_utils`, while tau selection,
+  rolling, ratios, channel extraction, explicit sums, and HDF5 writers live in
+  `application/analysis_helper/pion_current_response_analysis.py`.
+- S8T8 reference/candidate checks at solver tolerance `1e-15` passed for
+  connected pion EMT, disconnected quark EMT, and standalone ringed output in
+  one-rank and spatially decomposed four-rank layouts. Reference and candidate
+  files were bitwise identical within each layout; the largest cross-layout
+  relative L2 difference was `4.09e-15`.
+- A full nonzero-`bT` soft-factor contraction agreed between one and four
+  ranks with relative L2 difference `8.89e-16`. qTMDWF and qDA CG contractions
+  were exactly equal for the same sources in both layouts; their cross-layout
+  relative L2 difference was `1.22e-16`. The maximum true solver residual was
+  `9.90e-16`.
+- A 16-rank `2.2.2.2` MPS smoke also produced one root-written qTMDWF HDF5
+  containing all 16 Gamma groups. Its soft-factor/qTMDWF/qDA relative L2
+  differences from one rank were at most `1.69e-15`.
+- The final CPU regression suite passes with 260 tests and 12 skips.

@@ -30,3 +30,8 @@ The common 16-Gamma convention and portable examples for rebuilding `Tmunu`,
 axial one-derivative operators, and local tensor currents from primitive HDF5
 datasets are in
 [`docs/EMT_gamma_and_raw_bilinears.md`](../../docs/EMT_gamma_and_raw_bilinears.md).
+
+`pion_current_response_analysis.py` contains source-relative tau-window
+selection, rolling, ratio/channel extraction, explicit-EMFF summation, and
+the response HDF5 writers. The corresponding module under
+`pyquda_measurement_utils` is calculation-only.

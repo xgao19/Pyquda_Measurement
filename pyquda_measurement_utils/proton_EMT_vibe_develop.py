@@ -111,10 +111,11 @@ from opt_einsum import contract
 from pyquda import getMPIComm
 from pyquda_utils import core, source, phase
 
-from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
-    EMTDisconnectedQuark1pt,
+from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import (
     EMT_OPERATOR_SCHEMA_VERSION,
-    _flow_times,
+    FlowedFermionBilinearKernel,
+    flow_times as _flow_times,
+    parse_multigrid_blocks,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
@@ -136,11 +137,22 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
 from pyquda_measurement_utils.tools import mpi_print, mpi_timer_print
 
 
-class ProtonQuarkEMT(EMTDisconnectedQuark1pt):
-    """Connected proton EMT plus inherited stochastic quark 1pt utilities."""
+class ProtonQuarkEMT(FlowedFermionBilinearKernel):
+    """Connected proton EMT measurement."""
 
     def __init__(self, parameters):
-        super().__init__(parameters)
+        super().__init__(parameters["flow_type"])
+        self.qlist = parameters["qext"]
+        self.flow_epsilon = parameters["flow_epsilon"]
+        self.flow_steps = parameters["flow_steps"]
+        self.config_num = parameters.get("config_num")
+        self.gauge_preprocessing = parameters.get(
+            "gauge_preprocessing", "unspecified"
+        )
+        multigrid = parameters.get("multigrid", [[8, 8, 4, 4]])
+        self.multigrid_blocks = (
+            None if multigrid is None else parse_multigrid_blocks(multigrid)
+        )
         self.pf = parameters["pf"]
         self.pilist = parameters["p_2pt"]
         self.CG_GaussSmear = bool(parameters.get("CG_GaussSmear", False))

@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -52,6 +53,9 @@ args, _unknown = parser.parse_known_args()
 
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 init(mpi_geometry, enable_mps=True)
+repo_root = Path(__file__).resolve().parents[3]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 from pyquda_utils import core, gamma, io, phase, source
 from pyquda_utils.phase import MomentumPhase
@@ -61,11 +65,13 @@ from pyquda_measurement_utils.bw_seq_pyquda import create_meson_bw_seq_pyquda
 from pyquda_measurement_utils.io_corr import ensure_parent_dir
 from pyquda_measurement_utils.pion_current_background_response_vibe_develop import (
     contract_response_pion_2pt,
-    infer_source_momentum,
     invert_local_current_response_propagator,
+    relative_tau_to_absolute,
+)
+from application.analysis_helper.pion_current_response_analysis import (
+    infer_source_momentum,
     response_at_sink_time,
     response_ratio,
-    relative_tau_to_absolute,
     roll_to_source_relative,
     save_pion_EMFF_background_response_hdf5,
     summed_explicit_emff,

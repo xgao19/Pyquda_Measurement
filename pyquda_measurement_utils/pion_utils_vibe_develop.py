@@ -146,7 +146,7 @@ def meson_backward_line(prop):
 
 
 def contract_pion_2pt(latt_info, prop_forward, prop_backward, phases, src_gamma="5"):
-    return contract_pion_2pt_multi_src_gamma(
+    return contract_pion_gamma_scan(
         latt_info,
         prop_forward,
         prop_backward,
@@ -156,21 +156,67 @@ def contract_pion_2pt(latt_info, prop_forward, prop_backward, phases, src_gamma=
 
 
 def contract_pion_2pt_multi_src_gamma(latt_info, prop_forward, prop_backward, phases, src_gammas):
-    xp = _get_xp_from_array(prop_forward.data)
-    sink_gamma_ls = gamma_stack(prop_forward.data)
+    return contract_pion_gamma_scan(
+        latt_info,
+        prop_forward,
+        prop_backward,
+        phases,
+        src_gammas,
+    )
+
+
+def contract_pion_gamma_scan(
+    latt_info,
+    forward_prop,
+    backward_prop,
+    phases,
+    src_gammas,
+):
+    """Contract a pion 16-Gamma scan from two propagators.
+
+    This is the propagator-level entry point shared by pion C2, EMFF,
+    qTMDWF, and qDA.  The backward propagator is converted to the standard
+    gamma5-hermitian backward line exactly once.
+    """
+    return contract_pion_gamma_scan_from_backward_line(
+        latt_info,
+        forward_prop,
+        meson_backward_line(backward_prop),
+        phases,
+        src_gammas,
+    )
+
+
+def contract_pion_gamma_scan_from_backward_line(
+    latt_info,
+    forward_prop,
+    backward_line,
+    phases,
+    src_gammas,
+):
+    """Contract all sink Gamma channels from a prebuilt backward line.
+
+    The result is a root-only mapping ``src_gamma -> [16, Nq, Nt]``.  At most
+    one propagator-sized sink-Gamma temporary is live at a time.
+    """
+    src_gammas = list(src_gammas)
+    if not src_gammas:
+        raise ValueError("src_gammas must contain at least one source Gamma")
+
+    xp = _get_xp_from_array(forward_prop.data)
+    sink_gamma_ls = gamma_stack(forward_prop.data)
     source_gamma_ls_by_src = {
-        src_gamma: source_gamma_stack(src_gamma, sink_gamma_ls, prop_forward.data)
+        src_gamma: source_gamma_stack(src_gamma, sink_gamma_ls, forward_prop.data)
         for src_gamma in src_gammas
     }
-    phases = _asarray_on_queue(phases, xp, prop_forward.data)
+    phases = _asarray_on_queue(phases, xp, forward_prop.data)
 
-    backward_line = meson_backward_line(prop_backward)
     corr_local_by_src = {
         src_gamma: zeros_on_backend(
             (len(sink_gamma_ls), phases.shape[0], latt_info.size[3]),
-            prop_forward.data.dtype,
+            forward_prop.data.dtype,
             xp,
-            prop_forward.data,
+            forward_prop.data,
         )
         for src_gamma in src_gammas
     }
@@ -181,7 +227,7 @@ def contract_pion_2pt_multi_src_gamma(latt_info, prop_forward, prop_backward, ph
             corr_site = xp.einsum(
                 "wtzyxjiab,wtzyxilba,lj->wtzyx",
                 sink_inserted,
-                prop_forward.data,
+                forward_prop.data,
                 source_gamma_ls_by_src[src_gamma][gamma_idx],
                 optimize=True,
             )
@@ -193,5 +239,5 @@ def contract_pion_2pt_multi_src_gamma(latt_info, prop_forward, prop_backward, ph
         src_gamma: core.gatherLattice(array_to_numpy(corr_local), [2, -1, -1, -1])
         for src_gamma, corr_local in corr_local_by_src.items()
     }
-    del corr_local_by_src, source_gamma_ls_by_src, backward_line
+    del corr_local_by_src, source_gamma_ls_by_src
     return corr_by_src

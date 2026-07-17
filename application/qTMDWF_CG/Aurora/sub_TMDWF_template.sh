@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -q debug-scaling
-#PBS -N TMDWF_k0_b
+#PBS -N TMDWF_b
 #PBS -l select=20:ngpus=5
 #PBS -l walltime=01:00:00
 #PBS -l filesystems=flare
@@ -14,7 +14,7 @@ stream="b"
 cfgmin=1
 cfgmax=2
 cfglist="/lus/flare/projects/StructNGB/xgao/ensembles/s8080b7596/gauge_fixed/list_cfg_${stream}"
-main=pyquda_qTMDWF_k0.py
+main=pyquda_qTMDWF.py
 
 # switch to the submit directory
 WORKDIR=/lus/flare/projects/StructNGB/xgao/run/l80c80a050/TMDWF_pyquda
@@ -70,7 +70,7 @@ export QUDA_ENABLE_MPS=1
 NUM_NODES_PER_MPI=10
 NRANKS_PER_NODE=10
 
-echo ">>> Running pyquda_qTMDWF_k0.py"
+echo ">>> Running pyquda_qTMDWF.py"
 n_ranks=$((NUM_NODES_PER_MPI * NRANKS_PER_NODE))
 
 #split -l ${NUM_NODES_PER_MPI} -d -a 2 hostfile/allnodes.uniq hostfile/qTMDWF_hostfile.
@@ -85,7 +85,9 @@ for cfg in $(sed -n "${cfgmin},${cfgmax}p" ${cfglist}); do
   hf=$(printf "hostfile/qTMDWF_hostfile_stream${stream}_${cfgmin}to${cfgmax}.%02d" $k)
 
   /opt/cray/pals/1.8/bin/mpiexec -n ${n_ranks} -ppn ${NRANKS_PER_NODE} --hostfile ${hf} \
-    python3 ${main} --stream ${stream} --config_num ${cfg} --mpi 1.5.4.5 \
+    python3 ${main} --stream ${stream} --config_num ${cfg} \
+    --mpi_geometry 1.5.4.5 --pzmin 4 --pzmax 9 \
+    --pos-boost 0.0.4 --neg-boost 0.0.-4 \
     >${out} 2>${err} &
 
   k=$((k+1))

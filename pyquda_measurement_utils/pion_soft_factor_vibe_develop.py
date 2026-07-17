@@ -247,18 +247,22 @@ class pion_soft_factor:
         gamma2_ls = _matrix_stack(gamma2_matrices, gamma_pair_labels, prop_fw.data)
 
         Gw = prop_fw.lexico(False)
-        Gw_bperp_dagger = prop_bw_src.lexico(False)
         Gw_dagger = prop_sink_fw.lexico(False)
-        Gw_bperp = self.apply_phase(prop_sink_bw, [-2 * pion_mom[0], -2 * pion_mom[1], -2 * pion_mom[2]], 1).lexico(False)
+        phased_sink_backward = self.apply_phase(
+            prop_sink_bw,
+            [-2 * pion_mom[0], -2 * pion_mom[1], -2 * pion_mom[2]],
+            1,
+        )
         Gw_dagger_conj = Gw_dagger.conj()
 
         shape = (len(pion_pair_labels), len(gamma_pair_labels), len(self.bT_dir), self.bT_length + 1, latt_info.global_size[3])
         corr_collect = np.empty(shape, dtype=np.complex128) if latt_info.mpi_rank == 0 else None
         for idir, bT_dir in enumerate(self.bT_dir):
             for bT in range(self.bT_length + 1):
-                axis = 3 - bT_dir
-                Gw_bperp_shift = xp.roll(Gw_bperp, shift=bT, axis=axis)
-                Gw_bperp_dagger_shift = xp.roll(Gw_bperp_dagger.conj(), shift=bT, axis=axis)
+                shifted_sink_backward = phased_sink_backward.shift(bT, bT_dir)
+                shifted_source_backward = prop_bw_src.shift(bT, bT_dir)
+                Gw_bperp_shift = shifted_sink_backward.lexico(False)
+                Gw_bperp_dagger_shift = shifted_source_backward.lexico(False).conj()
                 tmp_1 = xp.einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc", Gw, src_ls, gamma5, Gw_bperp_dagger_shift, gamma5, optimize=True)
                 tmp_2 = xp.einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc", Gw_bperp_shift, sink_ls, gamma5, Gw_dagger_conj, gamma5, optimize=True)
                 for isrc in range(len(pion_pair_labels)):
@@ -276,4 +280,12 @@ class pion_soft_factor:
                         corr_global = core.gatherLattice(array_to_numpy(corr_t), [0, -1, -1, -1])
                         if latt_info.mpi_rank == 0:
                             corr_collect[isrc, igm, idir, bT] = corr_global
+                del (
+                    shifted_sink_backward,
+                    shifted_source_backward,
+                    Gw_bperp_shift,
+                    Gw_bperp_dagger_shift,
+                    tmp_1,
+                    tmp_2,
+                )
         return corr_collect, pion_pair_labels, gamma_pair_labels

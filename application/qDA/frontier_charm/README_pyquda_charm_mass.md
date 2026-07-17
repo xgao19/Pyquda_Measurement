@@ -1,5 +1,8 @@
 # `pyquda_charm_mass.py` README
 
+The source sample log uses exact-line matching. Completed sources are skipped
+before inversion, and a line is appended only after the C2 file closes.
+
 This DA calculation uses independent positive- and negative-boost source
 propagators. It is a two-propagator correlator and does not use the fixed-sink
 sequential active-line convention of connected pion qTMD/PDF.

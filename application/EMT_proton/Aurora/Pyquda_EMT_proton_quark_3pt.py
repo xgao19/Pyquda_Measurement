@@ -5,7 +5,7 @@ from pyquda import init
 from pyquda_utils import io
 
 from pyquda_measurement_utils.proton_EMT_vibe_develop import ProtonQuarkEMT
-from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import parse_optional_multigrid_blocks
+from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import parse_optional_multigrid_blocks
 from pyquda_measurement_utils.io_corr import (
     get_emt_proton_2pt_file_tag,
     get_emt_proton_quark_3pt_file_tag,

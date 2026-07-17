@@ -3,9 +3,10 @@ import numpy as np
 import pyquda_measurement_utils.pion_current_background_response_vibe_develop as response_module
 from pyquda_measurement_utils.pion_current_background_response_vibe_develop import (
     build_local_current_inserted_source,
-    current_current_response_toy,
-    infer_source_momentum,
     relative_tau_to_absolute,
+)
+from application.analysis_helper.pion_current_response_analysis import (
+    infer_source_momentum,
     response_at_sink_time,
     response_ratio,
     roll_to_source_relative,
@@ -45,7 +46,15 @@ def test_current_current_response_toy_matches_nested_current_insertions():
     for tau in range(4):
         expected[tau] = phase_2[tau] * gamma_2 @ (phase_1[tau] * gamma_1 @ prop_forward[tau])
 
-    response = current_current_response_toy(prop_forward, phase_1, phase_2, gamma_1, gamma_2)
+    response = np.einsum(
+        "t,ab,t,bc,tcd->tad",
+        phase_2,
+        gamma_2,
+        phase_1,
+        gamma_1,
+        prop_forward,
+        optimize=True,
+    )
     np.testing.assert_allclose(response, expected)
 
 

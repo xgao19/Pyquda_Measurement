@@ -10,14 +10,14 @@ contraction is written in the common form
 
     C^(g, src)(q, t; z) =
         sum_x exp(i q . x)
-        Tr_{c,s}[ gamma5 S_b(x)^\dagger gamma5 Gamma_g F(x; z) Gamma_src ] .
+        Tr_{c,s}[ gamma5 B_-(x;z)^\dagger gamma5 Gamma_g
+                  S_+(x) Gamma_src ] .
 
 Here:
-- In the CG block, F(x; z) means a shifted forward propagator S_f(x + z zhat)
-  without explicit gauge links, i.e. a fixed-gauge correlator.
-- In the GI block, F(x; z) means a gauge-covariantly shifted propagator
-  W(x, x + z zhat) S_f(x + z zhat), where the straight Wilson line is built
-  into the covariant shift.
+- In the CG block, B_-(x;z) is the shifted negative-boost backward active line
+  without explicit gauge links.
+- In the GI block, B_-(x;z) is gauge-covariantly transported with a straight
+  Wilson line. The positive-boost forward spectator S_+ remains fixed.
 - The sink gamma runs over the 16-element gamma basis in `gammalist`.
 - The source gamma is chosen from `da_src_gammalist`.
 - The local 2pt correlator uses the paired source convention
@@ -41,7 +41,12 @@ from pyquda_utils.phase import MomentumPhase
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.pion_qTMDWF_pyquda import pion_TMDWF_measurement
 from pyquda_measurement_utils.io_corr import get_sample_log_tag, get_c2pt_file_tag, get_qTMDWF_file_tag, save_qTMDWF_hdf5_noRoll
-from pyquda_measurement_utils.tools import srcLoc_distri_eq, mpi_print
+from pyquda_measurement_utils.tools import (
+    append_sample_log_entry,
+    mpi_print,
+    read_sample_log_entries,
+    srcLoc_distri_eq,
+)
 
 
 import argparse
@@ -173,8 +178,10 @@ src_production = src_positions[0:10]
 # ============================================================================
 sample_log_file = data_dir + f"/sample_log/TMDWF_{sm_tag}_{conf}"
 if latt_info.mpi_rank == 0:
-    open(sample_log_file, "a+").close()
-time.sleep(2)
+    completed_samples = read_sample_log_entries(sample_log_file)
+else:
+    completed_samples = None
+completed_samples = set(getMPIComm().bcast(completed_samples, root=0))
 
 
 # ============================================================================
@@ -183,11 +190,9 @@ time.sleep(2)
 for ipos, pos in enumerate(src_production):
     sample_log_tag = get_sample_log_tag("ex", pos, sm_tag)
     mpi_print(latt_info, f"Contraction START: {sample_log_tag}")
-    with open(sample_log_file, "a+") as f:
-        f.seek(0)
-        if sample_log_tag in f.read():
-            mpi_print(latt_info, f"Contraction SKIP: {sample_log_tag}")
-            continue
+    if sample_log_tag in completed_samples:
+        mpi_print(latt_info, f"Contraction SKIP: {sample_log_tag}")
+        continue
 
     # ------------------------------------------------------------------------
     # Source construction and boosted smearing
@@ -271,8 +276,8 @@ for ipos, pos in enumerate(src_production):
     # ------------------------------------------------------------------------
     # Bookkeeping for completed source positions
     # ------------------------------------------------------------------------
-    with open(sample_log_file, "a+") as f:
-        if latt_info.mpi_rank == 0:
-            f.write(sample_log_tag+"\n")
+    if latt_info.mpi_rank == 0:
+        append_sample_log_entry(sample_log_file, sample_log_tag)
+    getMPIComm().Barrier()
 
     mpi_print(latt_info, f"DONE: {sample_log_tag}")

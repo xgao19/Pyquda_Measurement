@@ -13,11 +13,12 @@ from pyquda_measurement_utils.io_corr import (
     save_emt_quark_3pt_hdf5,
     save_emt_meson_2pt_hdf5,
 )
-from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
-    EMTDisconnectedQuark1pt,
+from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import (
     EMT_OPERATOR_SCHEMA_VERSION,
-    _flow_times,
+    FlowedFermionBilinearKernel,
+    flow_times as _flow_times,
     my_gammas,
+    parse_multigrid_blocks,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.fermion_bilinear_basis import (
@@ -44,10 +45,21 @@ def _save_connected_3pt_rank0(latt_info, *args, **kwargs):
                                   QuarkEMT
 ================================================================================
 """
-class QuarkEMT(EMTDisconnectedQuark1pt):
+class QuarkEMT(FlowedFermionBilinearKernel):
 
     def __init__(self, parameters):
-        super().__init__(parameters)
+        super().__init__(parameters["flow_type"])
+        self.qlist = parameters["qext"]
+        self.flow_epsilon = parameters["flow_epsilon"]
+        self.flow_steps = parameters["flow_steps"]
+        self.config_num = parameters.get("config_num")
+        self.gauge_preprocessing = parameters.get(
+            "gauge_preprocessing", "unspecified"
+        )
+        multigrid = parameters.get("multigrid", [[8, 8, 4, 4]])
+        self.multigrid_blocks = (
+            None if multigrid is None else parse_multigrid_blocks(multigrid)
+        )
         self.pf = parameters["pf"]
         self.pilist = parameters["p_2pt"]
         self.CG_GaussSmear = bool(parameters.get("CG_GaussSmear", False))

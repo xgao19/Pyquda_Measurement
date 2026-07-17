@@ -136,20 +136,16 @@ def test_qtmdwf_and_qda_keep_independent_source_lines():
     assert "propag_f = core.invertPropagator(dirac, srcDp" in qda
     assert "propag_b = core.invertPropagator(dirac, srcDm" in qda
 
-    qtmdwf = (
-        REPO_ROOT / "application/qTMDWF_CG/Aurora/pyquda_qTMDWF_k4.py"
+    runner = (
+        REPO_ROOT / "application/qTMDWF_CG/qTMDWF_runner.py"
     ).read_text()
-    assert "srcDp = boosted_smearing" in qtmdwf
-    assert "srcDm = boosted_smearing" in qtmdwf
-    assert "propag_f = core.invertPropagator(dirac, srcDp" in qtmdwf
-    assert "propag_b = core.invertPropagator(dirac, srcDm" in qtmdwf
-
-    qtmdwf_zero = (
-        REPO_ROOT / "application/qTMDWF_CG/Aurora/pyquda_qTMDWF_k0.py"
-    ).read_text()
-    assert '"pos_boost" : [0,0,0]' in qtmdwf_zero
-    assert '"neg_boost" : [0,0,0]' in qtmdwf_zero
-    assert "propag_b = propag_f.copy()" in qtmdwf_zero
+    helper = inspect.getsource(pion_utils.build_pion_source_propagators)
+    assert "build_pion_source_propagators(" in runner
+    assert "pos_boost=measurement.pos_boost" in runner
+    assert "neg_boost=measurement.neg_boost" in runner
+    assert "src_positive" in helper
+    assert "src_negative" in helper
+    assert "prop_positive.copy()" in helper
 
 
 def _random_su3(rng, count):

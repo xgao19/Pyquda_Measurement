@@ -19,14 +19,19 @@ import time
 import numpy as np
 import cupy as cp
 
-from pyquda import init
+from pyquda import init, getMPIComm
 from pyquda_utils import core, gamma, io, source
 from pyquda_utils.phase import MomentumPhase
 
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.pion_qTMDWF_pyquda import pion_TMDWF_measurement
 from pyquda_measurement_utils.io_corr import get_sample_log_tag, get_c2pt_file_tag
-from pyquda_measurement_utils.tools import srcLoc_distri_eq, mpi_print
+from pyquda_measurement_utils.tools import (
+    append_sample_log_entry,
+    mpi_print,
+    read_sample_log_entries,
+    srcLoc_distri_eq,
+)
 
 import argparse
 
@@ -139,8 +144,10 @@ src_production = src_positions[0:10]
 
 sample_log_file = data_dir + f"/sample_log/charm_mass_{sm_tag}_{conf}"
 if latt_info.mpi_rank == 0:
-    open(sample_log_file, "a+").close()
-time.sleep(2)
+    completed_samples = read_sample_log_entries(sample_log_file)
+else:
+    completed_samples = None
+completed_samples = set(getMPIComm().bcast(completed_samples, root=0))
 
 
 # ============================================================================
@@ -151,11 +158,9 @@ for ipos, pos in enumerate(src_production):
         "ex", pos, sm_tag + f".c2src{source_gamma_label}"
     )
     mpi_print(latt_info, f"Contraction START: {sample_log_tag}")
-    with open(sample_log_file, "a+") as f:
-        f.seek(0)
-        if sample_log_tag in f.read():
-            mpi_print(latt_info, f"Contraction SKIP: {sample_log_tag}")
-            # continue
+    if sample_log_tag in completed_samples:
+        mpi_print(latt_info, f"Contraction SKIP: {sample_log_tag}")
+        continue
 
     # ------------------------------------------------------------------------
     # Source construction and boosted smearing
@@ -201,8 +206,8 @@ for ipos, pos in enumerate(src_production):
     # ------------------------------------------------------------------------
     # Bookkeeping for completed source positions
     # ------------------------------------------------------------------------
-    with open(sample_log_file, "a+") as f:
-        if latt_info.mpi_rank == 0:
-            f.write(sample_log_tag + "\n")
+    if latt_info.mpi_rank == 0:
+        append_sample_log_entry(sample_log_file, sample_log_tag)
+    getMPIComm().Barrier()
 
     mpi_print(latt_info, f"DONE: {sample_log_tag}")

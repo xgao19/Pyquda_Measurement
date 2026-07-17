@@ -91,8 +91,11 @@ Both modules implement the same core physical content:
     \begin{equation}
         S_{\text{anti}}(x, x_0) = \gamma_5 \, S_q(x, x_0)^\dagger \, \gamma_5.
     \end{equation}
-    \item The three-point function uses the fixed-sink sequential-source method: a sequential propagator is computed from a sink at time $t_{\text{sep}}$ with the desired sink interpolator, and the operator insertion is contracted along the forward quark line.
-    \item The CG qTMD operator displaces the forward propagator in the transverse ($\hat{x}$ or $\hat{y}$) and longitudinal ($\hat{z}$) directions by integer lattice units.
+    \item The positive-boost forward propagator is held fixed as the spectator
+    line. The negative-boost backward propagator is the active operator line.
+    \item The CG qTMD operator displaces the backward active propagator in the
+    transverse ($\hat{x}$ or $\hat{y}$) and longitudinal ($\hat{z}$)
+    directions by integer lattice units.
     \item Boosted Gaussian smearing with momentum injection is applied to both quark and antiquark lines at the sink.
 \end{itemize}
 
@@ -193,7 +196,7 @@ and enters the three-point contraction.
 
 \subsection{CG qTMD Operator}
 
-In the coordinate-gauge (CG) approximation, the Wilson line is replaced by the identity, and the operator insertion reduces to a spatial displacement of the forward propagator:
+In the coordinate-gauge (CG) approximation, the Wilson line is replaced by the identity, and the operator insertion reduces to a spatial displacement of the negative-boost backward propagator:
 
 \begin{equation}
     \mathcal{O}_b \, S_q(x, x_0) = S_q\left(x + b_T \hat{e}_{\perp} + b_z \hat{e}_z, \, x_0\right),
@@ -469,10 +472,10 @@ def create_fw_prop_TMD_CG(self, prop_f, W_index,
                            WL_indices_previous):
 \end{lstlisting}
 
-Applies an incremental spatial shift to the forward propagator for the CG qTMD path. The shift is computed as:
+Applies an incremental spatial shift to the backward active propagator for the CG qTMD path. The shift is computed as:
 
 \begin{equation}
-    S_f \leftarrow S_f.\texttt{shift}(\Delta b_T, \perp\text{-dir}).\texttt{shift}(\Delta b_z, z\text{-dir}),
+    B_- \leftarrow B_-.\texttt{shift}(\Delta b_T, \perp\text{-dir}).\texttt{shift}(\Delta b_z, z\text{-dir}),
 \end{equation}
 where $\Delta b_T = b_T^{\text{curr}} - b_T^{\text{prev}}$ and $\Delta b_z = b_z^{\text{curr}} - b_z^{\text{prev}}$.
 
@@ -513,14 +516,15 @@ Measurement = pion_TMDWF_measurement(parameters)
 \end{lstlisting}
 
 The application layer iterates over Wilson-line indices and transports the
-backward propagator.  Frontier and Aurora then call the same shared
-\texttt{contract\_qtmdwf\_gamma\_scan} kernel for the 16-Gamma contraction
-and momentum projection.
+backward propagator. qTMDWF and qDA then call the same shared
+\texttt{contract\_pion\_gamma\_scan} kernel used by pion C2, qTMD, and EMFF.
+Thus source-Gamma placement, sink-Gamma order, momentum projection, and MPI
+gather are defined in one place.
 
 \subsubsection{Memory-light platform Gamma scan}
 
 The Frontier and Aurora applications call the shared
-\texttt{contract\_qtmdwf\_gamma\_scan} helper for each displaced backward
+\texttt{contract\_pion\_gamma\_scan} helper for each displaced backward
 propagator.  The contraction is deliberately ordered in two stages:
 \begin{align}
  M_{kl}(x)
@@ -568,7 +572,7 @@ Wilson index reordering & Duplicated inline as local function \texttt{reorder\_i
 \hline
 Momentum list & \texttt{plist} from \texttt{range(pzmin, pzmax)} in $z$ only & Explicit \texttt{p\_2pt}, \texttt{qext}, \texttt{qext\_PDF} lists with $x$, $y$, $z$ support \\
 \hline
-Source gamma & \texttt{fixed\_g5}, \texttt{same\_as\_sink}, \texttt{dagger\_of\_sink}, or a canonical Gamma label & Same shared modes and labels \\
+Source gamma & A canonical Gamma label or \texttt{dagger\_of\_sink} & Same shared modes and labels \\
 \hline
 Contraction methods & \texttt{contract\_2pt\_pion()} only; 3pt contracted inline in application & \texttt{contract\_2pt\_pion()}, \texttt{contract\_qTMD\_CG()}, \texttt{contract\_PDF()} all as class methods \\
 \hline
@@ -631,6 +635,10 @@ In the mature qTMDWF implementation, $n_x = n_y = 0$ always, and $n_z$ is scanne
 
 %==========================================================================
 \section{HDF5 Output}
+The canonical application writes one rank-0 HDF5 file per source/operator
+containing the complete 16-Gamma axis. The former per-rank, per-Gamma files are
+not produced. A lightweight exact-line sample log is read before source
+inversion; a source is recorded only after the C2 and full qTMDWF file close.
 \label{sec:hdf5}
 %==========================================================================
 
@@ -690,7 +698,7 @@ gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)
         \item Invert to obtain the forward propagator (smeared-point).
         \item Compute the two-point function via \texttt{contract\_2pt\_pion()}.
         \item Compute the three-point qTMDWF correlation functions by iterating over Wilson line indices and performing inline contractions.
-        \item Save results to HDF5, parallelized over gamma structures across MPI ranks.
+        \item Rank 0 saves one HDF5 file containing all 16 Gamma structures.
     \end{enumerate}
 \end{enumerate}
 
@@ -700,7 +708,8 @@ The code exploits two levels of MPI parallelism:
 
 \begin{enumerate}
     \item \textbf{Source-level:} Different source positions can be assigned to different MPI sub-partitions (not enforced in the code; typically sources are processed sequentially on all ranks).
-    \item \textbf{Gamma-level I/O:} The HDF5 writing is parallelized over gamma structures: each MPI rank writes a disjoint subset of the 16 gamma channels. This is implemented by cycling through \texttt{tasks[rank::size]} where \texttt{tasks} is $[0, 1, \dots, 15]$.
+    \item \textbf{Root-only I/O:} MPI reduction produces the complete Gamma
+    axis on rank 0, which writes one serial HDF5 file.
 \end{enumerate}
 
 All spatial contractions use \texttt{core.gatherLattice()}, which performs a distributed global sum across MPI ranks, reducing the 4D lattice field to a 1D time series.

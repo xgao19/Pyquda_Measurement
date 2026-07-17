@@ -21,6 +21,7 @@ class _TinyPropagator:
 
 class _FakeDAMeasurement:
     contract_DA = pion_TMDWF_measurement.contract_DA
+    contract_qTMDWF_CG = pion_TMDWF_measurement.contract_qTMDWF_CG
 
     def __init__(self):
         self.cg_calls = []
@@ -50,27 +51,17 @@ def _tiny_contract_inputs(seed=17):
     return _TinyPropagator(forward), _TinyPropagator(backward), phases
 
 
-def test_da_transports_only_forward_and_restarts_negative_branch(monkeypatch):
+def test_da_transports_only_backward_and_restarts_negative_branch(monkeypatch):
     forward, backward, phases = _tiny_contract_inputs()
     measurement = _FakeDAMeasurement()
-    backward_objects = []
+    contraction_calls = []
 
-    monkeypatch.setattr(
-        qda_module,
-        "gamma_stack",
-        lambda reference: np.asarray([np.eye(4, dtype=np.complex128)]),
-    )
-    monkeypatch.setattr(
-        qda_module,
-        "source_gamma_stack",
-        lambda label, sink, reference: np.asarray([np.eye(4, dtype=np.complex128)]),
-    )
-    monkeypatch.setattr(
-        qda_module,
-        "meson_backward_line",
-        lambda prop: backward_objects.append(prop) or prop.data,
-    )
-    monkeypatch.setattr(qda_module.core, "gatherLattice", lambda values, axes: values)
+    def fake_contract(_info, fixed_forward, shifted_backward, _phases, labels):
+        contraction_calls.append((fixed_forward, shifted_backward))
+        scale = np.mean(shifted_backward.data / backward.data)
+        return {label: np.full((1, 1, 1), scale) for label in labels}
+
+    monkeypatch.setattr(qda_module, "contract_pion_gamma_scan", fake_contract)
 
     wilson_indices = [
         [0, 0, 0, 0],
@@ -111,23 +102,59 @@ def test_da_transports_only_forward_and_restarts_negative_branch(monkeypatch):
     assert [(cur, prev) for _, cur, prev in measurement.gi_calls] == expected_steps
     assert measurement.cg_calls[3][0] == ()
     assert measurement.gi_calls[3][0] == ()
-    assert backward_objects == [backward, backward]
+    assert all(call[0] is forward for call in contraction_calls)
+    assert all(call[1] is not forward for call in contraction_calls)
     assert cg[0][1].shape == (len(wilson_indices), 1, 1, 1)
-    local_site = np.einsum(
-        "wtzyxjiab,wtzyxilba,lj->wtzyx",
-        backward.data,
-        forward.data,
-        np.eye(4),
-        optimize=True,
-    )
-    local_reference = np.einsum(
-        "qwtzyx,wtzyx->qt", phases, local_site, optimize=True
-    )
-    np.testing.assert_allclose(
-        cg[0][1][0, :, 0, :], local_reference, rtol=1e-13, atol=1e-13
-    )
+    np.testing.assert_allclose(cg[0][1][0], 1.0)
     np.testing.assert_allclose(cg[0][1], gi[0][1], rtol=1e-13, atol=1e-13)
     np.testing.assert_allclose(cg[0][1][0], gi[0][1][0], rtol=1e-13, atol=1e-13)
+
+
+def test_qtmdwf_and_qda_share_backward_active_cg_convention(monkeypatch):
+    forward, backward, phases = _tiny_contract_inputs(seed=29)
+    measurement = _FakeDAMeasurement()
+
+    def fake_contract(_info, fixed_forward, shifted_backward, _phases, labels):
+        assert fixed_forward is forward
+        # A CG shift is a group action: only the accumulated displacement is
+        # physical, whether the negative branch is reached by one jump
+        # (qTMDWF) or by restarting at the origin (qDA).
+        scale = float(sum(shifted_backward.path))
+        return {
+            label: np.full((2, 16, 1), scale, dtype=np.complex128)
+            for label in labels
+        }
+
+    monkeypatch.setattr(qda_module, "contract_pion_gamma_scan", fake_contract)
+    indices = [
+        [0, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 2, 0, 0],
+        [0, -1, 0, 0],
+        [0, -2, 0, 0],
+    ]
+    qtmdwf = measurement.contract_qTMDWF_CG(
+        _TinyLatticeInfo(),
+        forward,
+        backward,
+        phases,
+        indices,
+        [],
+        source_gamma_labels=("5",),
+    )["5"]
+    qda = dict(
+        measurement.contract_DA(
+            _TinyLatticeInfo(),
+            None,
+            forward,
+            backward,
+            phases,
+            indices,
+            ["5"],
+            gauge_invariant=False,
+        )
+    )["5"]
+    np.testing.assert_allclose(qtmdwf, qda, rtol=1e-13, atol=1e-13)
 
 
 class _NumericFermion:

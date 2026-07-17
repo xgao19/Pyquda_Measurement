@@ -1,5 +1,14 @@
 # `pyquda_DA_k6.py` README
 
+The positive-boost forward propagator is the fixed spectator. Both CG shifts
+and GI straight-link transport act on the negative-boost backward active
+propagator, and each negative-\(z\) branch restarts from the original backward
+propagator. This is the same line convention used by qTMDWF.
+
+The source sample log uses exact-line matching. A completed source is skipped
+before inversion and is appended only after local C2, CG DA, and GI DA outputs
+all close successfully.
+
 ## 1. Purpose
 
 `pyquda_DA_k6.py` is a PyQUDA-based measurement script for the charmonium DA correlator in the `b_T = 0` limit.
@@ -51,19 +60,20 @@ C^{(g,\mathrm{src})}(q,t;z)
 \sum_x e^{i q\cdot x}\,
 \mathrm{Tr}_{c,s}
 \Big[
-\gamma_5\,S_b^\dagger(x)\,\gamma_5\,
+\gamma_5\,B_-^\dagger(x;z)\,\gamma_5\,
 \Gamma_g\,
-F(x;z)\,
+S_+(x)\,
 \Gamma_{\mathrm{src}}
 \Big].
 \]
 
 Here:
 
-- `S_b` is the backward propagator,
+- `S_+` is the fixed positive-boost forward spectator,
+- `B_-(x;z)` is the displaced or transported negative-boost backward
+  active propagator,
 - `\Gamma_g` is the sink gamma,
 - `\Gamma_src` is the source gamma,
-- `F(x;z)` is the forward part with longitudinal displacement,
 - `Tr_{c,s}` means trace over color and spin,
 - and the phase factor projects to definite momentum.
 
@@ -78,10 +88,11 @@ This distinction is the most important physics point in the script.
 In the `CG` block,
 
 \[
-F(x;z) = S_f(x+z\hat z),
+B_-(x;z) = S_-(x+z\hat z),
 \]
 
-meaning the forward propagator is shifted in space, but no explicit gauge link is inserted.
+meaning the backward active propagator is shifted in space, but no explicit
+gauge link is inserted. The forward spectator is unchanged.
 
 In the source code, this is implemented by plain lattice shifts:
 
@@ -95,7 +106,7 @@ So the `CG` correlator is a fixed-gauge object, not a manifestly gauge-invariant
 In the `GI` block,
 
 \[
-F(x;z) = W(x,x+z\hat z)\,S_f(x+z\hat z),
+B_-(x;z) = W(x,x+z\hat z)\,S_-(x+z\hat z),
 \]
 
 where `W(x,x+z\hat z)` is the straight Wilson line.
@@ -185,8 +196,8 @@ The DA workflow is a two-propagator correlator rather than a fixed-sink
 sequential three-point function. It independently constructs and inverts the
 positive- and negative-boost source lines, so it does not share the active-line
 ambiguity corrected in connected pion qTMD/PDF. CG and straight-link GI DA
-transport the designated forward line while retaining the independently
-inverted backward line.
+transport the negative-boost backward active line while retaining the
+independently inverted positive-boost forward spectator.
 
 ---
 
@@ -289,17 +300,18 @@ Inside `Measurement.contract_DA(...)`, the logic is:
 
 1. build the common sink gamma structure,
 2. loop over source gamma choices,
-3. initialize a forward propagator copy,
+3. keep the positive-boost forward propagator fixed and initialize a
+   negative-boost backward propagator copy,
 4. loop over all Wilson-line separations,
-5. shift or gauge-covariantly transport the forward propagator,
+5. shift or gauge-covariantly transport the backward active propagator,
 6. do the spin-color contraction,
 7. project to all sink gamma channels,
 8. Fourier transform to momentum space,
 9. gather the result to the root rank,
 10. save the collected correlators.
 
-The backward propagator is not transported. The negative branch restarts from
-the original forward propagator, so the GI updates are the one-link sequence
+The forward spectator is not transported. The negative branch restarts from
+the original backward propagator, so the GI updates are the one-link sequence
 \(0,-1,-2,\ldots\) rather than a jump from the end of the positive branch.
 
 The local C2 uses the generic relational source mode

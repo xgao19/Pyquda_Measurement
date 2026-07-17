@@ -18,7 +18,7 @@ import numpy as np
 from opt_einsum import contract
 
 from pyquda import getMPIComm
-from pyquda.field import LatticeGauge, LatticePropagator, LatticeFermion, MultiLatticeFermion
+from pyquda.field import LatticeGauge, LatticeFermion
 from pyquda_utils import core, phase, convert
 from pyquda_comm.array import arrayIdentity, arrayZeros
 
@@ -33,14 +33,21 @@ from pyquda_measurement_utils.tools import (
     timing_enabled,
 )
 from pyquda_measurement_utils.fermion_bilinear_basis import (
-    GAMMA_LABELS,
     GAMMA5_HERMITICITY_PARTNERS,
     GAMMA5_HERMITICITY_SIGNS,
     VECTOR_GAMMA_POSITIONS,
     basis_attrs,
     basis_metadata,
-    gamma_stack,
     symmetric_vector_emt,
+)
+from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import (
+    EMT_OPERATOR_SCHEMA_VERSION,
+    FlowedFermionBilinearKernel,
+    flow_times as _flow_times,
+    my_gammas,
+    normalize_flow_type as _normalize_flow_type,
+    parse_multigrid_blocks,
+    parse_optional_multigrid_blocks,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
@@ -62,11 +69,6 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     validate_hierarchical_probing_options,
     write_raw_part_hdf5,
 )
-
-_VALID_FLOW_TYPES = {"wilson", "symanzik"}
-EMT_OPERATOR_SCHEMA_VERSION = 5
-my_gammas = list(GAMMA_LABELS)
-
 
 @dataclass(frozen=True)
 class _MomentumProjectors:
@@ -115,17 +117,6 @@ def _array_on_backend(val, ref_arr):
     if hasattr(val, "get"):
         val = val.get()
     return _asarray_on_queue(val, xp, ref_arr)
-
-
-def _normalize_flow_type(flow_type: str) -> str:
-    flow = str(flow_type).strip().lower()
-    if flow not in _VALID_FLOW_TYPES:
-        raise ValueError(f"flow_type should be one of {_VALID_FLOW_TYPES}, got {flow_type!r}")
-    return flow
-
-
-def _flow_times(flow_epsilon, flow_steps):
-    return np.arange(flow_steps + 1, dtype=np.float64) * float(flow_epsilon)
 
 
 def _positive_flow_batch_size(value):
@@ -204,39 +195,6 @@ def _timer_stop(start, *objects):
     return perf_counter() - start
 
 
-def parse_multigrid_blocks(value):
-    """Parse dot-separated QUDA blocks and semicolon-separated MG levels."""
-    if isinstance(value, str):
-        level_text = [item.strip() for item in value.split(";") if item.strip()]
-        if not level_text:
-            raise ValueError("multigrid block specification is empty")
-        blocks = []
-        for item in level_text:
-            try:
-                block = [int(entry) for entry in item.split(".")]
-            except ValueError as error:
-                raise ValueError(
-                    f"invalid multigrid block {item!r}; expected X.Y.Z.T"
-                ) from error
-            blocks.append(block)
-    else:
-        blocks = [[int(entry) for entry in block] for block in value]
-    if not blocks or any(len(block) != 4 for block in blocks):
-        raise ValueError("each multigrid level must contain four integers")
-    if any(entry <= 0 for block in blocks for entry in block):
-        raise ValueError("multigrid block entries must be positive")
-    return blocks
-
-
-def parse_optional_multigrid_blocks(value):
-    """Parse an EMT multigrid hierarchy, allowing an explicit ``none``."""
-    if value is None:
-        return None
-    if isinstance(value, str) and value.strip().lower() == "none":
-        return None
-    return parse_multigrid_blocks(value)
-
-
 def _unique_zero_momentum_index(momentum_list):
     """Return the unique zero-momentum index or raise a clear error."""
     zero_indices = [
@@ -294,13 +252,13 @@ def validate_quark_gluon_loop_axes(
         raise ValueError("Quark and gluon 1pt files must use matching flow_times")
 
 
-class EMTDisconnectedQuark1pt:
+class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
     """Hadron-independent stochastic flowed quark EMT loop measurement."""
 
     def __init__(self, parameters):
+        super().__init__(parameters["flow_type"])
         self.qlist = parameters["qext"]
 
-        self.flow_type = _normalize_flow_type(parameters["flow_type"])
         self.flow_epsilon = parameters["flow_epsilon"]
         self.flow_steps = parameters["flow_steps"]
         self.config_num = parameters.get("config_num")
@@ -320,55 +278,7 @@ class EMTDisconnectedQuark1pt:
         self.multigrid_blocks = (
             None if multigrid is None else parse_multigrid_blocks(multigrid)
         )
-        self._emt_gamma_cache = {}
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
-
-    @staticmethod
-    def _gamma_cache_key(ref_arr):
-        """Identify one backend/dtype/device or SYCL queue allocation domain."""
-        xp = _get_xp_from_array(ref_arr)
-        queue = getattr(ref_arr, "sycl_queue", None)
-        if queue is not None:
-            location = ("sycl_queue", id(queue))
-        else:
-            device = getattr(ref_arr, "device", None)
-            device_id = getattr(device, "id", device)
-            location = ("device", str(device_id)) if device is not None else ("host", None)
-        return (xp.__name__, str(getattr(ref_arr, "dtype", None)), location)
-
-    def _gamma_cache_entry(self, ref_arr):
-        key = self._gamma_cache_key(ref_arr)
-        entry = self._emt_gamma_cache.get(key)
-        if entry is None:
-            entry = {"stack": gamma_stack(ref_arr), "matrices": {}}
-            self._emt_gamma_cache[key] = entry
-        return entry
-
-    def _gamma5_for(self, ref_arr):
-        return self._gamma_cache_entry(ref_arr)["stack"][GAMMA_LABELS.index("5")]
-
-    def _gamma_stack_for(self, ref_arr):
-        return self._gamma_cache_entry(ref_arr)["stack"]
-
-    def _vector_gamma_stack_for(self, ref_arr):
-        entry = self._gamma_cache_entry(ref_arr)
-        if "vector_stack" not in entry:
-            xp = _get_xp_from_array(ref_arr)
-            entry["vector_stack"] = xp.stack(
-                [entry["stack"][position] for position in VECTOR_GAMMA_POSITIONS]
-            )
-        return entry["vector_stack"]
-
-    def _cached_backend_matrix(self, name, matrix, ref_arr):
-        entry = self._gamma_cache_entry(ref_arr)
-        if name not in entry["matrices"]:
-            entry["matrices"][name] = _array_on_backend(_gamma_matrix(matrix), ref_arr)
-        return entry["matrices"][name]
-
-    def _get_interpolator_gamma_for(self, interpolator, ref_arr):
-        if interpolator not in my_gammas:
-            raise ValueError(f"Unsupported interpolator {interpolator!r}. Expected one of {my_gammas}.")
-        return self._gamma_stack_for(ref_arr)[my_gammas.index(interpolator)]
 
     @staticmethod
     def _impose_P_Breit_slice(complex_field, phases_3pt):
@@ -938,89 +848,6 @@ class EMTDisconnectedQuark1pt:
             shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
             completed_bases, flow_batch_size,
         )
-
-    @staticmethod
-    def _covdev_sym_prop(gauge_dirac, prop: LatticePropagator, mu: int):
-        """Apply the symmetric derivative using a caller-owned gauge context."""
-        mf = convert.propagatorToMultiFermion(prop)
-        mf_covdev = convert.propagatorToMultiFermion(prop)
-
-        for spin in range(4):
-            for color in range(3):
-                idx = spin * 3 + color
-                Dp = gauge_dirac.covDev(mf[idx], mu)
-                Dm = gauge_dirac.covDev(mf[idx], mu + 4)
-                mf_covdev[idx] = 0.5 * (Dp - Dm)
-
-        return convert.multiFermionToPropagator(mf_covdev)
-
-    def _make_dst2(self, prop: LatticePropagator):
-        """Build the backward meson line gamma5 * prop^dagger * gamma5."""
-        G5_local = self._gamma5_for(prop.data)
-        return contract(
-            "ab,wtzyxbcij,cd->wtzyxadij",
-            G5_local,
-            prop.data.conj().transpose(0, 1, 2, 3, 4, 6, 5, 8, 7),
-            G5_local,
-        )
-
-    def _left_covdev_dst2_from_prop(self, gauge_dirac, prop: LatticePropagator, mu: int):
-        """Construct the left-acting derivative on ``dst2 = gamma5 S^dagger gamma5``."""
-        D_y = self._covdev_sym_prop(gauge_dirac, prop, mu)
-        D_y_dag = D_y.data.conj().transpose(0, 1, 2, 3, 4, 6, 5, 8, 7)
-        G5_local = self._gamma5_for(prop.data)
-        leftD_dst2 = contract("ab,wtzyxbcij,cd->wtzyxadij", G5_local, D_y_dag, G5_local)
-        return leftD_dst2
-
-    @staticmethod
-    def _flow_two_props_pyquda(U_f: LatticeGauge, prop_a: LatticePropagator, prop_b: LatticePropagator, stepsize: float, Nsteps: int, flow_type: str = "wilson"):
-        """Flow two propagators simultaneously on the same flowed gauge background."""
-        mf_a = convert.propagatorToMultiFermion(prop_a)
-        mf_b = convert.propagatorToMultiFermion(prop_b)
-
-        L5_a = mf_a.L5
-        L5_b = mf_b.L5
-        assert L5_a == L5_b
-
-        fields = [mf_a[idx] for idx in range(L5_a)] + [mf_b[idx] for idx in range(L5_b)]
-        packed = convert.multiField(fields)
-        del fields, mf_a, mf_b, prop_a, prop_b
-
-        packed_flow = U_f.gradientFlow(packed, flow_type, Nsteps, stepsize)
-        del packed
-
-        mf_a_flow = MultiLatticeFermion(U_f.latt_info, L5_a, packed_flow.data[:L5_a])
-        mf_b_flow = MultiLatticeFermion(U_f.latt_info, L5_b, packed_flow.data[L5_a:L5_a + L5_b])
-
-        prop_a_flow = convert.multiFermionToPropagator(mf_a_flow)
-        prop_b_flow = convert.multiFermionToPropagator(mf_b_flow)
-        prop_a_flow._packed_flow_owner = packed_flow
-        prop_b_flow._packed_flow_owner = packed_flow
-        del mf_a_flow, mf_b_flow
-        return prop_a_flow, prop_b_flow
-
-    def _advance_flowed_props(self, U_f, prop_fw_flow, seq_bw_prop_flow, step, stepsize, Nsteps):
-        """Advance the flowed propagators using the quark-flow schedule."""
-        if Nsteps > 0 and step == 0:
-            return self._flow_two_props_pyquda(
-                U_f,
-                prop_fw_flow,
-                seq_bw_prop_flow,
-                stepsize / 10,
-                Nsteps=10,
-                flow_type=self.flow_type,
-            )
-        if Nsteps > 0 and step < Nsteps:
-            return self._flow_two_props_pyquda(
-                U_f,
-                prop_fw_flow,
-                seq_bw_prop_flow,
-                stepsize,
-                Nsteps=1,
-                flow_type=self.flow_type,
-            )
-        return prop_fw_flow, seq_bw_prop_flow
-
 
 def _copy_h5_attrs(obj, attrs):
     for key, value in attrs.items():

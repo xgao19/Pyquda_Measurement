@@ -58,6 +58,12 @@ and
 \begin{center}
 \texttt{application/EMFF\_pion\_background\_response/perlmutter/}.
 \end{center}
+The production utility contains only inserted-source construction, response
+inversions, the response pion-C2 contraction, and relative-to-absolute
+projector conversion. Tau-window selection, source-relative rolling,
+ratio/channel extraction, explicit-EMFF summation, and HDF5 writers are
+centralized in
+\texttt{application/analysis\_helper/pion\_current\_response\_analysis.py}.
 
 The goal is to study background-field/Feynman-Hellmann routes to pion current
 matrix elements while \emph{not} modifying the QUDA Dirac operator and while

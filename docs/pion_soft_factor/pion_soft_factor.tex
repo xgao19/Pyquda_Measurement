@@ -553,26 +553,31 @@ the same underlying matrix.
 
 % ===========================================================================
 \section{Transverse Displacement Implementation}
+\paragraph{Global shift under MPI decomposition.}
+Every nonzero transverse displacement is applied to the complete PyQUDA
+\texttt{LatticePropagator} through \texttt{prop.shift}. This invokes the halo
+communication required when the transverse direction is MPI decomposed.
+Rolling a rank-local lexicographic array would instead wrap at the local
+subdomain boundary and produce a decomposition-dependent four-point function.
 % ===========================================================================
 
 \subsection{Coordinate-Gauge Shifts}
 
-The transverse displacement $\mathbf{b}$ is implemented by a simple array roll
-in the coordinate gauge (CG).  No explicit gauge link is inserted between the
-shifted quark fields.  This is consistent with the CG convention used in the
-pion qTMD workflow: in Coulomb gauge the gluon field is minimized, and at
-leading order the gauge link reduces to unity.
+The transverse displacement $\mathbf{b}$ is implemented by a global
+propagator shift in the coordinate gauge (CG). No explicit gauge link is
+inserted between the shifted quark fields. This is consistent with the CG
+convention used in the pion qTMD workflow.
 
 For a displacement of $b_{T}$ lattice units along axis $\hat{n}_{T}$ (where
 $n_{T}=0$ means $x$, $n_{T}=1$ means $y$, $n_{T}=2$ means $z$), the operation is
 
 \begin{verbatim}
-    xp.roll(Gw_bperp, shift=bT, axis=axis)
+    shifted_prop = prop.shift(bT, bT_dir)
 \end{verbatim}
 
-where \walltag{axis = 3 - bT\_dir} converts from the physics axis convention
-to the time-major lexicographic index convention.  In the time-major layout
-\walltag{tzyx...}, the spatial axes are ordered $(z=1, y=2, x=3)$, so:
+The PyQUDA field operation owns the conversion from physics direction to field
+layout and communicates across MPI subdomain boundaries. The rank-local
+lexicographic array is materialized only after the shift.
 
 \begin{center}
 \begin{tabular}{ll}

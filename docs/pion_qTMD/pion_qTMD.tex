@@ -487,7 +487,7 @@ set as in Sec.~\ref{sec:twopt}), while $\Gamma_{\rm src}$ is the explicit
 canonical label \texttt{5} by default and $\Gamma_{\rm sink}$ is set by the application (e.g.,
 $\gamma_5$ for the pseudoscalar pion).
 
-The einsum contraction pattern in \verb|_contract_qTMD_one_shift| mirrors the
+The shared \verb|contract_pion_gamma_scan_from_backward_line| kernel mirrors the
 two-point function:
 \begin{align}
   \texttt{sink\_inserted}[g,w,t,z,y,x_{\rm cb},j,m,c,f]
@@ -768,7 +768,7 @@ Workflow:
   \item For direction 0 ($x$): iterate over \texttt{W\_index\_list\_dir0},
         incrementally shifting the negative active propagator using
         \verb|create_fw_prop_TMD_CG| and contracting at each step via
-        \verb|_contract_qTMD_one_shift|.
+        the shared Gamma-scan kernel.
   \item Reset and repeat for direction 1 ($y$) with
         \texttt{W\_index\_list\_dir1}.
   \item Stack all results into a numpy array.
@@ -802,14 +802,15 @@ Same structure as \verb|contract_qTMD_CG| but:
         or \verb|create_fw_prop_TMD_CG| when \texttt{gauge\_invariant=False}.
 \end{itemize}
 
-\subsection{\texttt{\_contract\_qTMD\_one\_shift}}
+\subsection{Shared per-shift Gamma scan}
 
 \begin{lstlisting}
-def _contract_qTMD_one_shift(self, seq_bw_line, shifted_prop,
-                              sink_gamma_ls, source_gamma_ls, phases):
+contract_pion_gamma_scan_from_backward_line(
+    latt_info, shifted_prop, seq_bw_line, phases, [src_gamma])
 \end{lstlisting}
 
-The core single-Wilson-index contraction:
+The core single-Wilson-index contraction is shared with pion C2, EMFF,
+qTMDWF, and qDA:
 \begin{enumerate}[nosep]
   \item \texttt{sink\_inserted}:
         einsum \texttt{"wtzyxjicf,gim->gwtzyxjmcf"}

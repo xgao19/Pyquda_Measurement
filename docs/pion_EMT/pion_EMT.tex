@@ -93,13 +93,17 @@ Throughout this note:
 The class hierarchy is:
 \begin{center}
 \begin{tabular}{ll}
+  \code{FlowedFermionBilinearKernel} & lightweight shared flow/bilinear algebra \\
   \code{EMTDisconnectedQuark1pt} & shared quark-1pt loop \\
   \code{EMTDisconnectedGluon1pt} & shared gluon-1pt loop \\
-  \code{QuarkEMT(EMTDisconnectedQuark1pt)} & connected meson 3pt + 2pt \\
+  \code{QuarkEMT(FlowedFermionBilinearKernel)} & connected meson 3pt + 2pt \\
 \end{tabular}
 \end{center}
 
-\code{QuarkEMT} inherits all stochastic 1pt methods (including covariant derivatives, gamma5 hermiticity, and flow utilities) while adding meson-specific two-point and three-point contractions.
+\code{QuarkEMT} inherits only the Gamma cache, covariant-derivative
+primitives, backward-line algebra, and two-propagator fermion-flow utilities.
+It does not inherit stochastic noise, hierarchical probing, shard resume, or
+disconnected finalization.
 
 The application-level entry points are:
 \begin{itemize}[nosep]
@@ -1512,6 +1516,11 @@ Notation: \code{Np} = number of momenta, \code{Nq} = number of momentum transfer
 
 % ==============================================================================
 \section{Technical Implementation Details}
+The connected pion class derives from the lightweight
+\texttt{FlowedFermionBilinearKernel}. This base owns only the backend Gamma
+cache, symmetric covariant-derivative primitives, and two-propagator fermion
+flow. Stochastic noise, hierarchical probing, shard resume, and disconnected
+finalizers remain exclusively in \texttt{EMTDisconnectedQuark1pt}.
 % ==============================================================================
 
 \subsection{Parameter Dictionary}

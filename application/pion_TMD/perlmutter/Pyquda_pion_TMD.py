@@ -303,8 +303,6 @@ for pos in src_positions:
             pion_TMDs = np.roll(pion_TMDs, -pos[3], axis=-1)
             pion_TMDs = pion_TMDs[:, :, :, : parameters["t_insert"] + 2]
             pion_TMDs = np.transpose(pion_TMDs, (0, 2, 1, 3))
-        pion_TMDs = getMPIComm().bcast(pion_TMDs, root=0)
-
         for gidx in tasks if rank == 0 else ():
             gm = my_gammas[gidx]
             tag = get_qTMD_file_tag(
@@ -351,8 +349,6 @@ for pos in src_positions:
             pion_TMDs = np.roll(pion_TMDs, -pos[3], axis=-1)
             pion_TMDs = pion_TMDs[:, :, :, : parameters["t_insert"] + 2]
             pion_TMDs = np.transpose(pion_TMDs, (0, 2, 1, 3))
-        pion_TMDs = getMPIComm().bcast(pion_TMDs, root=0)
-
         for gidx in tasks if rank == 0 else ():
             gm = my_gammas[gidx]
             tag = get_qTMD_file_tag(
@@ -400,8 +396,6 @@ for pos in src_positions:
                 pion_PDFs = np.roll(pion_PDFs, -pos[3], axis=-1)
                 pion_PDFs = pion_PDFs[:, :, :, : parameters["t_insert"] + 2]
                 pion_PDFs = np.transpose(pion_PDFs, (0, 2, 1, 3))
-            pion_PDFs = getMPIComm().bcast(pion_PDFs, root=0)
-
             for gidx in tasks if rank == 0 else ():
                 gm = my_gammas[gidx]
                 tag = get_qTMD_file_tag(

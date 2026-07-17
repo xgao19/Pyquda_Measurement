@@ -102,19 +102,14 @@ bilinear sink/current gamma structures in the standard project order:
 
 import numpy as np
 
-from pyquda_utils import core
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
-from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
+from pyquda_measurement_utils.tools import mpi_print
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
-    array_to_numpy,
     contract_pion_2pt_multi_src_gamma,
-    gamma_stack,
-    meson_backward_line,
+    contract_pion_gamma_scan,
     my_gammas,
-    source_gamma_stack,
     source_gamma_provenance,
-    zeros_on_backend,
 )
 
 
@@ -187,42 +182,10 @@ class pion_EMFF:
         )[src_gamma]
 
     def contract_EMFF_multi_src_gamma(self, latt_info, prop_pos, seq_bw_prop, phases, src_gammas):
-        xp = _get_xp_from_array(prop_pos.data)
-        phases = _asarray_on_queue(phases, xp, prop_pos.data)
-        current_gamma_ls = gamma_stack(prop_pos.data)
-        source_gamma_ls_by_src = {
-            src_gamma: source_gamma_stack(src_gamma, current_gamma_ls, prop_pos.data)
-            for src_gamma in src_gammas
-        }
-        seq_bw_line = meson_backward_line(seq_bw_prop)
-        corr_local_by_src = {
-            src_gamma: zeros_on_backend(
-                (len(current_gamma_ls), phases.shape[0], latt_info.size[3]),
-                dtype=prop_pos.data.dtype,
-                xp=xp,
-                reference_array=prop_pos.data,
-            )
-            for src_gamma in src_gammas
-        }
-
-        for gamma_idx, current_gamma in enumerate(current_gamma_ls):
-            current_inserted = xp.einsum("wtzyxjicf,im->wtzyxjmcf", seq_bw_line, current_gamma, optimize=True)
-            for src_gamma in src_gammas:
-                corr_site = xp.einsum(
-                    "wtzyxjiab,wtzyxilba,lj->wtzyx",
-                    current_inserted,
-                    prop_pos.data,
-                    source_gamma_ls_by_src[src_gamma][gamma_idx],
-                    optimize=True,
-                )
-                corr_local_by_src[src_gamma][gamma_idx] = xp.einsum("qwtzyx,wtzyx->qt", phases, corr_site, optimize=True)
-                del corr_site
-            del current_inserted
-
-        corr_by_src = {
-            src_gamma: core.gatherLattice(array_to_numpy(corr_local), [2, -1, -1, -1])
-            for src_gamma, corr_local in corr_local_by_src.items()
-        }
-
-        del corr_local_by_src, source_gamma_ls_by_src, seq_bw_line
-        return corr_by_src
+        return contract_pion_gamma_scan(
+            latt_info,
+            prop_pos,
+            seq_bw_prop,
+            phases,
+            src_gammas,
+        )

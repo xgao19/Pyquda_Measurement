@@ -1223,16 +1223,16 @@ Sec.~\ref{sec:proton_disc_full_volume_source}.
 
 The proton EMT measurement code is organized in the class
 \texttt{ProtonQuarkEMT}, which inherits from
-\texttt{EMTDisconnectedQuark1pt}.  The inheritance provides:
+\texttt{FlowedFermionBilinearKernel}. The inheritance provides:
 \begin{itemize}
-  \item The stochastic quark one-point loop measurement
-        (\texttt{flowed\_fermionic\_1pt});
   \item The covariant derivative utilities
         (\texttt{\_covdev\_sym\_prop}, \texttt{\_make\_dst2}, etc.);
   \item The propagator flow utilities (\texttt{\_advance\_flowed\_props});
-  \item Gamma matrix helpers (\texttt{\_dirac\_gammas\_for},
+  \item cached Gamma matrix helpers (
         \texttt{\_gamma5\_for}, \texttt{\_get\_interpolator\_gamma\_for}).
 \end{itemize}
+It deliberately does not inherit stochastic noise, shard/resume state, or
+disconnected finalizers.
 
 The key methods of \texttt{ProtonQuarkEMT} are:
 

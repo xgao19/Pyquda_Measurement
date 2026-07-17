@@ -141,11 +141,13 @@ def test_qtmd_c2_is_a_thin_shared_kernel_caller(monkeypatch):
 
 
 def test_emt_gamma_cache_is_per_dtype_and_sycl_queue(monkeypatch):
+    import pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop as bilinear
+
     measurement = _measurement(False)
     calls = []
-    monkeypatch.setattr(emt_module, "_get_xp_from_array", lambda _ref: np)
+    monkeypatch.setattr(bilinear, "_get_xp_from_array", lambda _ref: np)
     monkeypatch.setattr(
-        emt_module,
+        bilinear,
         "gamma_stack",
         lambda ref: calls.append(ref) or np.zeros((16, 4, 4), dtype=ref.dtype),
     )

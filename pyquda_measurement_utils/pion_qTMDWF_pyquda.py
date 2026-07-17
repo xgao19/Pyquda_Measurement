@@ -1,83 +1,15 @@
 import numpy as np
 
-from pyquda_utils import core
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.fermion_bilinear_basis import basis_attrs
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
-    array_to_numpy,
-    _gamma_on_backend,
     contract_pion_2pt,
     contract_pion_2pt_multi_src_gamma,
-    gamma_stack,
-    G5,
-    meson_backward_line,
+    contract_pion_gamma_scan,
     my_gammas,
-    my_pyquda_gammas,
-    pyquda_gammas_order,
-    source_gamma_stack,
 )
-from pyquda_measurement_utils.tools import (
-    _asarray_on_queue,
-    _get_xp_from_array,
-    mpi_print,
-)
-
-
-def contract_qtmdwf_gamma_scan(
-    latt_info,
-    shifted_backward,
-    fixed_forward,
-    phases,
-    source_gamma,
-):
-    """Contract all 16 qTMDWF Gamma channels without a Gamma-propagator stack.
-
-    The largest Gamma-dependent field produced here has shape
-    ``[gamma, local sites]``.  In particular, this routine never constructs
-    the historical ``[gamma, local sites, spin, spin, color, color]``
-    intermediate.
-    """
-    xp = _get_xp_from_array(fixed_forward.data)
-    phases = _asarray_on_queue(phases, xp, fixed_forward.data)
-    gamma5 = _gamma_on_backend(G5, xp, fixed_forward.data)
-    source_gamma = _gamma_on_backend(source_gamma, xp, fixed_forward.data)
-    sink_gamma_ls = gamma_stack(fixed_forward.data)
-
-    source_gamma_gamma5 = xp.einsum(
-        "ij,jk->ik", source_gamma, gamma5, optimize=True
-    )
-    gamma5_sink_gamma = xp.einsum(
-        "ki,gim->gkm", gamma5, sink_gamma_ls, optimize=True
-    )
-    spin_matrix_field = xp.einsum(
-        "ij,wtzyxkjba,wtzyxliba->wtzyxkl",
-        source_gamma_gamma5,
-        shifted_backward.data.conj(),
-        fixed_forward.data,
-        optimize=True,
-    )
-    gamma_site = xp.einsum(
-        "wtzyxkl,gkl->gwtzyx",
-        spin_matrix_field,
-        gamma5_sink_gamma,
-        optimize=True,
-    )
-    corr_local = xp.einsum(
-        "qwtzyx,gwtzyx->qgt", phases, gamma_site, optimize=True
-    )
-    corr = core.gatherLattice(
-        array_to_numpy(corr_local), [2, -1, -1, -1]
-    )
-    del (
-        corr_local,
-        gamma_site,
-        spin_matrix_field,
-        gamma5_sink_gamma,
-        source_gamma_gamma5,
-        sink_gamma_ls,
-    )
-    return corr
+from pyquda_measurement_utils.tools import mpi_print
 
 
 """
@@ -207,11 +139,13 @@ class pion_TMDWF_measurement():
         *,
         gauge_invariant,
     ):
-        """Contract the straight-link DA operator on the forward quark line.
+        """Contract the straight-link DA operator on the backward active line.
 
         The Wilson-index sequence must contain the positive branch followed by
         the negative branch.  The latter is restarted from the undisplaced
-        forward propagator so every gauge-covariant update is one lattice step.
+        backward propagator so every gauge-covariant update is one lattice
+        step.  The positive-boost forward propagator remains the fixed
+        spectator, matching the qTMDWF convention.
         """
         source_gamma_labels = list(source_gamma_labels)
         invalid_labels = [label for label in source_gamma_labels if label not in my_gammas]
@@ -223,77 +157,92 @@ class pion_TMDWF_measurement():
         if gauge_invariant and gauge is None:
             raise ValueError("GI DA contraction requires a gauge field")
 
-        xp = _get_xp_from_array(prop_f.data)
-        phases = _asarray_on_queue(phases, xp, prop_f.data)
-        sink_gamma_ls = gamma_stack(prop_f.data)
-        source_gamma_by_label = {
-            label: source_gamma_stack(label, sink_gamma_ls, prop_f.data)[0]
-            for label in source_gamma_labels
-        }
-        backward_line = meson_backward_line(prop_b)
         collected = {label: [] for label in source_gamma_labels}
 
-        shifted_forward = prop_f.copy()
+        shifted_backward = prop_b.copy()
         previous_index = [0, 0, 0, 0]
         for W_index in W_index_list:
             if int(W_index[0]) != 0:
                 raise ValueError("DA contraction requires b_T=0 Wilson indices")
             if int(W_index[1]) == -1:
-                shifted_forward = prop_f.copy()
+                shifted_backward = prop_b.copy()
                 previous_index = [0, 0, 0, 0]
 
             if gauge_invariant:
-                shifted_forward = self.create_fw_prop_PDF_GI(
-                    gauge, shifted_forward, W_index, previous_index
+                shifted_backward = self.create_fw_prop_PDF_GI(
+                    gauge, shifted_backward, W_index, previous_index
                 )
             else:
-                shifted_forward = self.create_fw_prop_TMD_CG(
-                    shifted_forward, W_index, previous_index
+                shifted_backward = self.create_fw_prop_TMD_CG(
+                    shifted_backward, W_index, previous_index
                 )
 
-            for source_label, source_gamma in source_gamma_by_label.items():
-                corr_local = xp.empty(
-                    (phases.shape[0], len(sink_gamma_ls), latt_info.size[3]),
-                    dtype=prop_f.data.dtype,
-                    **(
-                        {"device": prop_f.data.device}
-                        if xp.__name__ == "dpnp"
-                        else {}
-                    ),
-                )
-                for gamma_idx, sink_gamma in enumerate(sink_gamma_ls):
-                    sink_inserted = xp.einsum(
-                        "wtzyxjicf,im->wtzyxjmcf",
-                        backward_line,
-                        sink_gamma,
-                        optimize=True,
+            corr_by_source = contract_pion_gamma_scan(
+                latt_info,
+                prop_f,
+                shifted_backward,
+                phases,
+                source_gamma_labels,
+            )
+            if latt_info.mpi_rank == 0:
+                for source_label in source_gamma_labels:
+                    collected[source_label].append(
+                        corr_by_source[source_label].transpose(1, 0, 2)
                     )
-                    corr_site = xp.einsum(
-                        "wtzyxjiab,wtzyxilba,lj->wtzyx",
-                        sink_inserted,
-                        shifted_forward.data,
-                        source_gamma,
-                        optimize=True,
-                    )
-                    corr_local[:, gamma_idx] = xp.einsum(
-                        "qwtzyx,wtzyx->qt", phases, corr_site, optimize=True
-                    )
-                    del sink_inserted, corr_site
-
-                corr = core.gatherLattice(
-                    array_to_numpy(corr_local), [2, -1, -1, -1]
-                )
-                if latt_info.mpi_rank == 0:
-                    collected[source_label].append(corr)
-                del corr_local
             previous_index = W_index
 
-        del backward_line, shifted_forward
+        del shifted_backward
         if latt_info.mpi_rank == 0:
             return [
                 (label, np.asarray(collected[label])) for label in source_gamma_labels
             ]
         return [(label, None) for label in source_gamma_labels]
+
+    def contract_qTMDWF_CG(
+        self,
+        latt_info,
+        prop_f,
+        prop_b,
+        phases,
+        W_index_list_dir0,
+        W_index_list_dir1,
+        source_gamma_labels=("5",),
+    ):
+        """Contract CG qTMDWF with a fixed forward and shifted backward line."""
+        source_gamma_labels = list(source_gamma_labels)
+        invalid = [label for label in source_gamma_labels if label not in my_gammas]
+        if not source_gamma_labels or invalid:
+            raise ValueError(
+                "qTMDWF source Gamma labels must be canonical; "
+                f"invalid entries: {invalid}"
+            )
+        collected = {label: [] for label in source_gamma_labels}
+        for index_list in (W_index_list_dir0, W_index_list_dir1):
+            shifted_backward = prop_b.copy()
+            for index, W_index in enumerate(index_list):
+                previous = [0, 0, 0, 0] if index == 0 else index_list[index - 1]
+                shifted_backward = self.create_fw_prop_TMD_CG(
+                    shifted_backward, W_index, previous
+                )
+                corr_by_source = contract_pion_gamma_scan(
+                    latt_info,
+                    prop_f,
+                    shifted_backward,
+                    phases,
+                    source_gamma_labels,
+                )
+                if latt_info.mpi_rank == 0:
+                    for label in source_gamma_labels:
+                        collected[label].append(
+                            corr_by_source[label].transpose(1, 0, 2)
+                        )
+            del shifted_backward
+        if latt_info.mpi_rank == 0:
+            return {
+                label: np.asarray(collected[label])
+                for label in source_gamma_labels
+            }
+        return {label: None for label in source_gamma_labels}
     
         
     def create_TMD_Wilsonline_index_list_CG(self):
