@@ -22,17 +22,14 @@ from pyquda_measurement_utils.io_corr import (
 def test_pion_channel_tag_keeps_interpolators_outside_setup_identity():
     setup = "custom_smearing"
 
-    assert get_pion_channel_tag(setup, "fixed_g5") == (
-        "custom_smearing.srcfixed_g5"
+    assert get_pion_channel_tag(setup, "5") == (
+        "custom_smearing.src5"
     )
-    assert get_pion_channel_tag(setup, "fixed_g5", "5") == (
-        "custom_smearing.srcfixed_g5.sink5"
+    assert get_pion_channel_tag(setup, "5", "5") == (
+        "custom_smearing.src5.sink5"
     )
-    assert get_pion_channel_tag(setup, "same_as_sink", "5") != (
-        get_pion_channel_tag(setup, "fixed_g5", "5")
-    )
-    assert get_pion_channel_tag(setup, "fixed_g5", "T5") != (
-        get_pion_channel_tag(setup, "fixed_g5", "5")
+    assert get_pion_channel_tag(setup, "5", "T5") != (
+        get_pion_channel_tag(setup, "5", "5")
     )
 
 

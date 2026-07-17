@@ -6,6 +6,7 @@ from pyquda_measurement_utils.pion_utils_vibe_develop import (
     contract_pion_2pt_multi_src_gamma,
     gamma_from_label,
     gamma_stack,
+    source_gamma_provenance,
     source_gamma_stack,
 )
 import pyquda_measurement_utils.pion_utils_vibe_develop as pion_utils
@@ -17,24 +18,37 @@ def _matrix(gamma_like):
     return gamma_like
 
 
-def test_source_gamma_stack_fixed_g5_and_explicit_label_are_constant():
+def test_source_gamma_stack_all_explicit_labels_are_constant():
     reference = np.zeros((1,), dtype=np.complex128)
     sink_gamma_ls = gamma_stack(reference)
 
-    fixed = source_gamma_stack("fixed_g5", sink_gamma_ls, reference)
-    explicit = source_gamma_stack("T5", sink_gamma_ls, reference)
+    for label in pion_utils.my_gammas:
+        explicit = source_gamma_stack(label, sink_gamma_ls, reference)
+        expected = _matrix(gamma_from_label(label))
+        for gamma_idx in range(len(sink_gamma_ls)):
+            np.testing.assert_allclose(explicit[gamma_idx], expected)
 
-    for gamma_idx in range(len(sink_gamma_ls)):
-        np.testing.assert_allclose(fixed[gamma_idx], _matrix(G5))
-        np.testing.assert_allclose(explicit[gamma_idx], _matrix(gamma_from_label("T5")))
+
+def test_source_gamma_provenance_distinguishes_fixed_and_paired_modes():
+    assert source_gamma_provenance("5") == {
+        "source_gamma_mode": "fixed",
+        "source_gamma_label": "5",
+    }
+    assert source_gamma_provenance("dagger_of_sink") == {
+        "source_gamma_mode": "dagger_of_sink",
+        "source_gamma_label": "dagger_of_sink",
+    }
 
 
-def test_source_gamma_stack_same_as_sink_mode():
+@pytest.mark.parametrize("removed_mode", ["fixed_g5", "same_as_sink"])
+def test_source_gamma_stack_rejects_removed_modes(removed_mode):
     reference = np.zeros((1,), dtype=np.complex128)
     sink_gamma_ls = gamma_stack(reference)
 
-    same = source_gamma_stack("same_as_sink", sink_gamma_ls, reference)
-    np.testing.assert_allclose(same, sink_gamma_ls)
+    with pytest.raises(ValueError, match="canonical Gamma label"):
+        source_gamma_stack(removed_mode, sink_gamma_ls, reference)
+    with pytest.raises(ValueError, match="canonical Gamma label"):
+        source_gamma_provenance(removed_mode)
 
 
 def test_source_gamma_stack_dagger_of_sink_for_all_channels():
@@ -96,11 +110,8 @@ def test_source_gamma_stack_rejects_invalid_label():
     reference = np.zeros((1,), dtype=np.complex128)
     sink_gamma_ls = gamma_stack(reference)
 
-    try:
+    with pytest.raises(ValueError, match="canonical Gamma label"):
         source_gamma_stack("not_a_gamma", sink_gamma_ls, reference)
-    except ValueError:
-        return
-    raise AssertionError("source_gamma_stack should reject invalid source gamma labels")
 
 
 def test_multi_source_c2_uses_local_time_extent_and_matches_reference(monkeypatch):

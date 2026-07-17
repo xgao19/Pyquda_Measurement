@@ -20,7 +20,7 @@ parser.add_argument("--b_T", type=int, default=int(os.environ.get("PION_TMD_BT",
 parser.add_argument("--eta", type=int, default=int(os.environ.get("PION_TMD_ETA", 1)))
 parser.add_argument("--t_insert", type=int, default=int(os.environ.get("PION_TMD_T_INSERT", 2)))
 parser.add_argument("--width", type=float, default=float(os.environ.get("PION_TMD_WIDTH", 1.0)))
-parser.add_argument("--src_interpolator", type=str, default=os.environ.get("PION_TMD_SRC_INTERPOLATOR", "fixed_g5"))
+parser.add_argument("--src_interpolator", type=str, default=os.environ.get("PION_TMD_SRC_INTERPOLATOR", "5"))
 parser.add_argument("--sink_interpolator", type=str, default=os.environ.get("PION_TMD_SINK_INTERPOLATOR", "5"))
 parser.add_argument("--run_cg_qtmd", type=int, default=int(os.environ.get("PION_TMD_RUN_CG_QTMD", 1)))
 parser.add_argument("--run_gi_qtmd", type=int, default=int(os.environ.get("PION_TMD_RUN_GI_QTMD", 1)))
@@ -43,6 +43,7 @@ from pyquda_measurement_utils.io_corr import (
     save_qTMD_pion_hdf5_noRoll,
 )
 from pyquda_measurement_utils.pion_qTMD_vibe_develop import my_gammas, pion_TMD
+from pyquda_measurement_utils.pion_utils_vibe_develop import source_gamma_provenance
 from pyquda_measurement_utils.tools import mpi_print, srcLoc_distri_eq
 
 
@@ -192,6 +193,7 @@ for pos in src_positions:
         attrs={
             "src_interpolator": args.src_interpolator,
             "sink_interpolator": "all_16_gamma_scan",
+            **source_gamma_provenance(args.src_interpolator),
         },
     )
     mpi_print(latt_info, f"TIME PyQUDA: Pion 2pt contraction {time.time() - t0}s")
@@ -265,6 +267,7 @@ for pos in src_positions:
                     "src_interpolator": args.src_interpolator,
                     "sink_interpolator": args.sink_interpolator,
                     "operator_gamma": gm,
+                    **source_gamma_provenance(args.src_interpolator),
                 },
             )
 
@@ -311,6 +314,7 @@ for pos in src_positions:
                     "src_interpolator": args.src_interpolator,
                     "sink_interpolator": args.sink_interpolator,
                     "operator_gamma": gm,
+                    **source_gamma_provenance(args.src_interpolator),
                 },
             )
 
@@ -358,6 +362,7 @@ for pos in src_positions:
                         "src_interpolator": args.src_interpolator,
                         "sink_interpolator": args.sink_interpolator,
                         "operator_gamma": gm,
+                        **source_gamma_provenance(args.src_interpolator),
                     },
                 )
     sync_backend_array(prop_fw.data)

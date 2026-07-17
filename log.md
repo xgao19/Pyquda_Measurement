@@ -925,3 +925,22 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   now derives both estimators and states the paired-SEM validation criterion;
   the application, Gamma-basis, pion and proton EMT documents carry concise
   cross-references and the S8T8 result.
+
+## 2026-07-16: Simplify pion source-Gamma modes
+
+- Removed the redundant `fixed_g5` alias and replaced every active pion
+  qTMD/PDF, EMFF and current-response default with the explicit canonical
+  source label `5`.  New tags use `src5`, while HDF5 provenance records
+  `source_gamma_mode=fixed` and `source_gamma_label=5`.
+- Removed the unused `same_as_sink` relational mode.  Shared pion
+  contractions now accept only a fixed canonical Gamma label or the
+  `dagger_of_sink` paired-channel convention used by qDA local C2.
+- Kept qDA nonlocal `5/X/T` source scans and all 16 sink channels unchanged.
+  Old source-mode strings and `.srcfixed_g5` output identities are not
+  compatible.
+- The S8T8 gate used tolerance `1e-15`, one rank (`1.1.1.1`) and four
+  ranks (`2.2.1.1`).  Old `fixed_g5` and explicit `5` qTMD/PDF and
+  EMFF outputs were bitwise identical at fixed MPI layout; qDA
+  `dagger_of_sink` and `5/X/T x 16` outputs were also unchanged.  Maximum
+  one/four-rank relative L2 differences were `1.03e-13` for pion qTMD/PDF,
+  `8.30e-14` for EMFF and `3.41e-16` for qDA.

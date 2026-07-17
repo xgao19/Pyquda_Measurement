@@ -53,22 +53,35 @@ def gamma_from_label(label):
     return my_pyquda_gammas[my_gammas.index(label)]
 
 
+def source_gamma_provenance(src_gamma):
+    """Return the canonical provenance fields for a pion source Gamma."""
+    if src_gamma in my_gammas:
+        return {
+            "source_gamma_mode": "fixed",
+            "source_gamma_label": src_gamma,
+        }
+    if src_gamma == "dagger_of_sink":
+        return {
+            "source_gamma_mode": "dagger_of_sink",
+            "source_gamma_label": "dagger_of_sink",
+        }
+    raise ValueError(
+        f"Invalid src_gamma: {src_gamma}. "
+        f"Use a canonical Gamma label from {my_gammas} or 'dagger_of_sink'."
+    )
+
+
 def source_gamma_stack(src_gamma, sink_gamma_ls, reference_array):
     """Return the source matrices paired with the sink Gamma axis.
 
-    A canonical Gamma label and ``fixed_g5`` produce a constant source
-    matrix.  ``same_as_sink`` and ``dagger_of_sink`` are relational modes;
-    their output Gamma axis is paired one-to-one with the sink Gamma axis.
+    A canonical Gamma label produces a constant source matrix.
+    ``dagger_of_sink`` is a relational mode whose output Gamma axis is paired
+    one-to-one with the sink Gamma axis.
     """
+    source_gamma_provenance(src_gamma)
     xp = _get_xp_from_array(reference_array)
     gamma5 = _gamma_on_backend(G5, xp, reference_array)
 
-    if src_gamma == "fixed_g5":
-        source_gamma_ls = sink_gamma_ls.copy()
-        source_gamma_ls[:] = gamma5
-        return source_gamma_ls
-    if src_gamma == "same_as_sink":
-        return sink_gamma_ls.copy()
     if src_gamma == "dagger_of_sink":
         return xp.einsum(
             "ab,gbc,cd->gad",
@@ -83,11 +96,7 @@ def source_gamma_stack(src_gamma, sink_gamma_ls, reference_array):
         source_gamma_ls[:] = source_gamma
         return source_gamma_ls
 
-    raise ValueError(
-        f"Invalid src_gamma: {src_gamma}. "
-        "Use a gamma label or one of "
-        "['fixed_g5', 'same_as_sink', 'dagger_of_sink']."
-    )
+    raise AssertionError("unreachable source-Gamma mode")
 
 
 def meson_backward_line(prop):
@@ -96,7 +105,7 @@ def meson_backward_line(prop):
     return xp.einsum("ij,wtzyxilab,kl->wtzyxkjba", gamma5, prop.data.conj(), gamma5, optimize=True)
 
 
-def contract_pion_2pt(latt_info, prop_forward, prop_backward, phases, src_gamma="fixed_g5"):
+def contract_pion_2pt(latt_info, prop_forward, prop_backward, phases, src_gamma="5"):
     return contract_pion_2pt_multi_src_gamma(
         latt_info,
         prop_forward,

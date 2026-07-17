@@ -211,7 +211,7 @@ def contract_response_pion_2pt(
     prop_response,
     prop_antiquark,
     sink_phases,
-    src_gamma="fixed_g5",
+    src_gamma="5",
 ):
     """Contract the response propagator with the ordinary antiquark line.
 
@@ -232,7 +232,7 @@ def contract_current_current_response_pion_2pt(
     prop_current_current_response,
     prop_antiquark,
     sink_phases,
-    src_gamma="fixed_g5",
+    src_gamma="5",
 ):
     """Contract a nested current-current response with the pion antiquark line."""
     return contract_response_pion_2pt(

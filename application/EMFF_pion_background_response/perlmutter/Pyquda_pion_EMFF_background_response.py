@@ -62,7 +62,11 @@ from pyquda_measurement_utils.pion_current_background_response_vibe_develop impo
     tau_window_list,
 )
 from pyquda_measurement_utils.pion_EMFF_vibe_develop import pion_EMFF
-from pyquda_measurement_utils.pion_utils_vibe_develop import contract_pion_2pt_multi_src_gamma, my_gammas
+from pyquda_measurement_utils.pion_utils_vibe_develop import (
+    contract_pion_2pt_multi_src_gamma,
+    my_gammas,
+    source_gamma_provenance,
+)
 from pyquda_measurement_utils.tools import mpi_print
 
 
@@ -79,7 +83,7 @@ tsep_list = parse_int_list(args.tsep_list) if args.tsep_list else [args.tsep]
 current_gammas = [item for item in args.current_gammas.replace(",", ".").split(".") if item]
 src_pos = [0, 0, 0, 0]
 sink_gamma_label = "5"
-src_gamma = "fixed_g5"
+src_gamma = "5"
 
 parameters = {
     "qext": [qext + [0] for qext in qext_list],
@@ -241,7 +245,8 @@ for iq, qext in enumerate(qext_list):
 
 if latt_info.mpi_rank == 0:
     out_tag = data_dir / "background_response" / (
-        f"{lat_tag}.pion_EMFF_background_response.{conf}.pf{pf[0]}_{pf[1]}_{pf[2]}"
+        f"{lat_tag}.pion_EMFF_background_response.{conf}.src{src_gamma}"
+        f".pf{pf[0]}_{pf[1]}_{pf[2]}"
         f".nq{len(qext_list)}.ntsep{len(tsep_list)}.{args.tau_window}"
     )
     out = Path(f"{out_tag}.h5")
@@ -260,6 +265,7 @@ if latt_info.mpi_rank == 0:
             "tau_window": args.tau_window,
             "tau_min": args.tau_min,
             "no_per_tau_response_propagator_cache": True,
+            **source_gamma_provenance(src_gamma),
         },
     )
     print("[pion EMFF background response]")

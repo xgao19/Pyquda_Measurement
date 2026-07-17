@@ -13,7 +13,7 @@ def test_current_current_response_hdf5_schema(tmp_path):
             "first_current_gamma": "T",
             "second_current_gamma": "T",
             "sink_gamma": "5",
-            "src_gamma": "fixed_g5",
+            "src_gamma": "5",
             "first_tau_window": "restricted",
             "second_tau_window": "restricted",
             "first_tau_min": 1,
@@ -35,12 +35,22 @@ def test_current_current_response_hdf5_schema(tmp_path):
         }
     ]
 
-    save_pion_current_current_response_hdf5(str(tag), records, attrs={"lat_tag": "S8T32"})
+    save_pion_current_current_response_hdf5(
+        str(tag),
+        records,
+        attrs={
+            "lat_tag": "S8T32",
+            "source_gamma_label": "5",
+            "source_gamma_mode": "fixed",
+        },
+    )
 
     with h5py.File(f"{tag}.h5", "r") as h5:
         assert h5.attrs["measurement"] == "pion_current_current_response"
         assert h5.attrs["schema_version"] == "1"
         assert h5.attrs["current_order"] == "Dinv_O2_Dinv_O1_S"
+        assert h5.attrs["source_gamma_label"] == "5"
+        assert h5.attrs["source_gamma_mode"] == "fixed"
         summary = h5["summary"]
         assert summary["first_current_gamma"][0].decode() == "T"
         np.testing.assert_array_equal(summary["first_qext"][:], [[0, 0, 1]])

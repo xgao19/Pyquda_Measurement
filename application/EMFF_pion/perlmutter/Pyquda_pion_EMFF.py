@@ -26,7 +26,7 @@ parser.add_argument("--pos_boost_src", type=str, default=os.environ.get("PION_EM
 parser.add_argument("--pos_boost_sink", type=str, default=os.environ.get("PION_EMFF_POS_BOOST_SINK", os.environ.get("PION_EMFF_POS_BOOST", "0.0.0")))
 parser.add_argument("--neg_boost_src", type=str, default=os.environ.get("PION_EMFF_NEG_BOOST_SRC", os.environ.get("PION_EMFF_NEG_BOOST", "0.0.0")))
 parser.add_argument("--neg_boost_sink", type=str, default=os.environ.get("PION_EMFF_NEG_BOOST_SINK", os.environ.get("PION_EMFF_NEG_BOOST", "0.0.0")))
-parser.add_argument("--src_interpolator", type=str, default=os.environ.get("PION_EMFF_SRC_INTERPOLATOR", "fixed_g5"))
+parser.add_argument("--src_interpolator", type=str, default=os.environ.get("PION_EMFF_SRC_INTERPOLATOR", "5"))
 parser.add_argument("--src_interpolators", type=str, default=os.environ.get("PION_EMFF_SRC_INTERPOLATORS", ""))
 parser.add_argument("--sink_interpolator", type=str, default=os.environ.get("PION_EMFF_SINK_INTERPOLATOR", "5"))
 args, unknown = parser.parse_known_args()
@@ -47,6 +47,7 @@ from pyquda_measurement_utils.io_corr import (
     save_pion_EMFF_hdf5_noRoll,
 )
 from pyquda_measurement_utils.pion_EMFF_vibe_develop import my_gammas, pion_EMFF
+from pyquda_measurement_utils.pion_utils_vibe_develop import source_gamma_provenance
 from pyquda_measurement_utils.tools import mpi_print, srcLoc_distri_eq
 
 
@@ -210,6 +211,7 @@ for pos in src_positions:
         src_interpolator: {
             "src_interpolator": src_interpolator,
             "sink_interpolator": "all_16_gamma_scan",
+            **source_gamma_provenance(src_interpolator),
         }
         for src_interpolator in src_interpolators
     }
@@ -294,6 +296,7 @@ for pos in src_positions:
                         "src_interpolator": src_interpolator,
                         "sink_interpolator": args.sink_interpolator,
                         "current_gamma_basis": "all_16",
+                        **source_gamma_provenance(src_interpolator),
                     },
                 )
 

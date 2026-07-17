@@ -173,16 +173,25 @@ $S_{\rm anti}$ is the antiquark line constructed via $\gamma_5$-hermiticity:
 
 \subsection{Source Gamma Convention}
 
-The default source gamma is \texttt{fixed\_g5}, which sets $\Gamma_{\rm src}=
-\gamma_5$ for all sink channels, corresponding to the standard pseudoscalar
-pion interpolator $\bar\psi \gamma_5 \psi$. Three source modes are supported in
-the code (\texttt{\_source\_gamma\_stack}):
+The default source gamma is the explicit canonical label \texttt{5}, which
+sets $\Gamma_{\rm src}=\gamma_5$ for all sink channels and corresponds to
+the standard pseudoscalar pion interpolator
+$\bar\psi \gamma_5 \psi$.  The shared source-Gamma utility supports:
 \begin{itemize}[nosep]
-  \item \texttt{fixed\_g5}: All source gammas are $\gamma_5$.
-  \item \texttt{same\_as\_sink}: $\Gamma_{\rm src} = \Gamma_{\rm sink}$.
+  \item Any of the 16 canonical Gamma labels: the selected source matrix is
+        fixed while all 16 sink channels are scanned.
   \item \texttt{dagger\_of\_sink}: $\Gamma_{\rm src}
         = \gamma_5 \Gamma_{\rm sink}^\dagger \gamma_5$.
 \end{itemize}
+The former aliases \texttt{fixed\_g5} and \texttt{same\_as\_sink} are not
+accepted.  Explicit \texttt{5} replaces \texttt{fixed\_g5} without changing
+the numerical contraction.  The relational \texttt{dagger\_of\_sink} mode
+is used by qDA local C2; it produces 16 paired source/sink channels rather than
+a fixed-source sink scan.
+For an explicit pseudoscalar source, output provenance uses
+\texttt{source\_gamma\_mode=fixed},
+\texttt{source\_gamma\_label=5}, and the filename channel tag
+\texttt{.src5}.
 
 All 16 sink gamma matrices are scanned and stored, ordered as
 \begin{equation}
@@ -714,7 +723,7 @@ Constructs the measurement object from a parameter dictionary with keys:
 
 \begin{lstlisting}
 def contract_2pt_pion(self, latt_info, prop_f, prop_b, phases, tag,
-                       src_gamma="fixed_g5"):
+                       src_gamma="5"):
 \end{lstlisting}
 
 Workflow:
@@ -739,7 +748,7 @@ The output shape is \texttt{[gamma, momentum, time]}.
 \begin{lstlisting}
 def contract_qTMD_CG(self, latt_info, prop_f, seq_bw_prop, phases,
                       W_index_list_dir0, W_index_list_dir1,
-                      src_gamma="fixed_g5"):
+                      src_gamma="5"):
 \end{lstlisting}
 
 Workflow:
@@ -770,7 +779,7 @@ Gamma-inserted line at a time and accumulates the small
 
 \begin{lstlisting}
 def contract_PDF(self, latt_info, gauge, prop_f, seq_bw_prop, phases,
-                  W_index_list, src_gamma="fixed_g5",
+                  W_index_list, src_gamma="5",
                   gauge_invariant=True):
 \end{lstlisting}
 

@@ -112,6 +112,7 @@ from pyquda_measurement_utils.pion_utils_vibe_develop import (
     meson_backward_line,
     my_gammas,
     source_gamma_stack,
+    source_gamma_provenance,
 )
 
 
@@ -132,7 +133,7 @@ class pion_EMFF:
 
     def contract_2pt_pion(
         self, latt_info, prop_pos, prop_neg, phases, tag,
-        src_gamma="fixed_g5", attrs=None,
+        src_gamma="5", attrs=None,
     ):
         self.contract_2pt_pion_multi_src_gamma(
             latt_info,
@@ -163,16 +164,18 @@ class pion_EMFF:
         if latt_info.mpi_rank == 0:
             attrs_by_src_gamma = attrs_by_src_gamma or {}
             for src_gamma, tag in tags_by_src_gamma.items():
+                output_attrs = dict(attrs_by_src_gamma.get(src_gamma) or {})
+                output_attrs.update(source_gamma_provenance(src_gamma))
                 save_proton_c2pt_hdf5(
                     corr_by_src[src_gamma],
                     tag,
                     my_gammas,
                     self.pilist,
-                    attrs=attrs_by_src_gamma.get(src_gamma),
+                    attrs=output_attrs,
                 )
         del corr_by_src
 
-    def contract_EMFF(self, latt_info, prop_pos, seq_bw_prop, phases, src_gamma="fixed_g5"):
+    def contract_EMFF(self, latt_info, prop_pos, seq_bw_prop, phases, src_gamma="5"):
         return self.contract_EMFF_multi_src_gamma(
             latt_info,
             prop_pos,

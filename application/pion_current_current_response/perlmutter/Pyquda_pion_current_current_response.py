@@ -52,7 +52,10 @@ from pyquda_measurement_utils.pion_current_background_response_vibe_develop impo
     save_pion_current_current_response_hdf5,
     tau_window_list,
 )
-from pyquda_measurement_utils.pion_utils_vibe_develop import contract_pion_2pt_multi_src_gamma
+from pyquda_measurement_utils.pion_utils_vibe_develop import (
+    contract_pion_2pt_multi_src_gamma,
+    source_gamma_provenance,
+)
 from pyquda_measurement_utils.tools import mpi_print
 
 
@@ -69,7 +72,7 @@ second_qext = parse_momentum(args.second_qext)
 total_qext = [first_qext[i] + second_qext[i] for i in range(3)]
 src_pos = [0, 0, 0, 0]
 sink_gamma_label = "5"
-src_gamma = "fixed_g5"
+src_gamma = "5"
 
 if getMPIComm().Get_rank() == 0:
     (data_dir / "current_current_response").mkdir(parents=True, exist_ok=True)
@@ -188,7 +191,8 @@ records = [
 
 if latt_info.mpi_rank == 0:
     out_tag = data_dir / "current_current_response" / (
-        f"{lat_tag}.pion_current_current_response.{conf}.pf{pf[0]}_{pf[1]}_{pf[2]}"
+        f"{lat_tag}.pion_current_current_response.{conf}.src{src_gamma}"
+        f".pf{pf[0]}_{pf[1]}_{pf[2]}"
         f".q1{first_qext[0]}_{first_qext[1]}_{first_qext[2]}"
         f".q2{second_qext[0]}_{second_qext[1]}_{second_qext[2]}.dt{args.tsep}"
     )
@@ -200,6 +204,7 @@ if latt_info.mpi_rank == 0:
             "config_num": conf,
             "src_pos": np.asarray(src_pos, dtype=np.int32),
             "no_per_tau_response_propagator_cache": True,
+            **source_gamma_provenance(src_gamma),
         },
     )
     print("[pion current-current response]")

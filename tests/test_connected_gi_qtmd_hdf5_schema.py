@@ -37,9 +37,11 @@ def test_connected_gi_qtmd_qmax1_hdf5_layout_and_metadata(tmp_path):
     corr = corr.reshape(len(w_index_list), len(plist), len(gammalist), tsep + 2).astype(np.complex128)
     tag = str(tmp_path / "qTMD" / "S8T32.qTMD.0.GI_qTMD.ex.x0y0z0t0.schema")
     attrs = {
-        "src_interpolator": "fixed_g5",
+        "src_interpolator": "5",
         "sink_interpolator": "5",
         "operator_gamma": "T",
+        "source_gamma_label": "5",
+        "source_gamma_mode": "fixed",
         "staple_convention": "fixed_length",
         "staple_mode": "link_cache",
         "qmax": 1,
@@ -54,9 +56,11 @@ def test_connected_gi_qtmd_qmax1_hdf5_layout_and_metadata(tmp_path):
         assert h5.attrs["staple_convention"] == "fixed_length"
         assert h5.attrs["staple_mode"] == "link_cache"
         assert h5.attrs["qmax"] == 1
-        assert h5.attrs["src_interpolator"] == "fixed_g5"
+        assert h5.attrs["src_interpolator"] == "5"
         assert h5.attrs["sink_interpolator"] == "5"
         assert h5.attrs["operator_gamma"] == "T"
+        assert h5.attrs["source_gamma_label"] == "5"
+        assert h5.attrs["source_gamma_mode"] == "fixed"
 
         datasets = []
         h5.visititems(lambda name, obj: datasets.append(name) if isinstance(obj, h5py.Dataset) else None)

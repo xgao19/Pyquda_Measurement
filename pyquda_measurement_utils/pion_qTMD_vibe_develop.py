@@ -36,7 +36,7 @@ two-point function is
             S_anti(x, x0) Gamma_g S_q(x, x0) Gamma_src
         ].
 
-The default ``src_gamma='fixed_g5'`` gives the usual pseudoscalar pion source,
+The default ``src_gamma='5'`` gives the usual pseudoscalar pion source,
 while all 16 sink gamma structures are still scanned and saved.  This is cheap
 and useful for diagnostics or later operator studies.
 
@@ -148,6 +148,7 @@ from pyquda_measurement_utils.pion_utils_vibe_develop import (
     meson_backward_line,
     my_gammas,
     source_gamma_stack,
+    source_gamma_provenance,
 )
 
 
@@ -171,7 +172,7 @@ class pion_TMD:
 
     def contract_2pt_pion(
         self, latt_info, prop_f, prop_b, phases, tag,
-        src_gamma="fixed_g5", attrs=None,
+        src_gamma="5", attrs=None,
     ):
         mpi_print(latt_info, "Begin pion sink smearing")
         prop_f = boosted_smearing(prop_f, w=self.width, boost=self.pos_boost)
@@ -181,12 +182,14 @@ class pion_TMD:
         corr = contract_pion_2pt(latt_info, prop_f, prop_b, phases, src_gamma=src_gamma)
 
         if latt_info.mpi_rank == 0:
+            output_attrs = dict(attrs or {})
+            output_attrs.update(source_gamma_provenance(src_gamma))
             save_proton_c2pt_hdf5(
-                corr, tag, my_gammas, self.pilist, attrs=attrs
+                corr, tag, my_gammas, self.pilist, attrs=output_attrs
             )
         del corr
 
-    def contract_qTMD_CG(self, latt_info, prop_f, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="fixed_g5"):
+    def contract_qTMD_CG(self, latt_info, prop_f, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="5"):
         xp = _get_xp_from_array(prop_f.data)
         phases = _asarray_on_queue(phases, xp, prop_f.data)
         sink_gamma_ls = gamma_stack(prop_f.data)
@@ -214,7 +217,7 @@ class pion_TMD:
 
         return np.array(pion_TMDs)
 
-    def contract_qTMD_GI(self, latt_info, gauge, prop_f, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="fixed_g5"):
+    def contract_qTMD_GI(self, latt_info, gauge, prop_f, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="5"):
         xp = _get_xp_from_array(prop_f.data)
         phases = _asarray_on_queue(phases, xp, prop_f.data)
         sink_gamma_ls = gamma_stack(prop_f.data)
@@ -234,7 +237,7 @@ class pion_TMD:
 
         return np.array(pion_TMDs)
 
-    def contract_PDF(self, latt_info, gauge, prop_f, seq_bw_prop, phases, W_index_list, src_gamma="fixed_g5", gauge_invariant=True):
+    def contract_PDF(self, latt_info, gauge, prop_f, seq_bw_prop, phases, W_index_list, src_gamma="5", gauge_invariant=True):
         xp = _get_xp_from_array(prop_f.data)
         phases = _asarray_on_queue(phases, xp, prop_f.data)
         sink_gamma_ls = gamma_stack(prop_f.data)

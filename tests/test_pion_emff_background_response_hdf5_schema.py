@@ -12,7 +12,7 @@ def test_background_response_hdf5_schema_v2_records_metadata(tmp_path):
         {
             "current_gamma": "T",
             "sink_gamma": "5",
-            "src_gamma": "fixed_g5",
+            "src_gamma": "5",
             "tau_window": "restricted",
             "tau_min": 2,
             "tau_list": [2, 3, 4],
@@ -43,6 +43,8 @@ def test_background_response_hdf5_schema_v2_records_metadata(tmp_path):
             "lat_tag": "S8T32",
             "no_per_tau_response_propagator_cache": True,
             "current_gamma_list": np.asarray(["T", "Z"], dtype="S"),
+            "source_gamma_label": "5",
+            "source_gamma_mode": "fixed",
         },
     )
 
@@ -50,6 +52,8 @@ def test_background_response_hdf5_schema_v2_records_metadata(tmp_path):
         assert h5.attrs["measurement"] == "pion_EMFF_background_response"
         assert h5.attrs["schema_version"] == "2"
         assert h5.attrs["no_per_tau_response_propagator_cache"]
+        assert h5.attrs["source_gamma_label"] == "5"
+        assert h5.attrs["source_gamma_mode"] == "fixed"
         summary = h5["summary"]
         np.testing.assert_array_equal(summary["record_index"][:], [0])
         assert summary["current_gamma"][0].decode() == "T"

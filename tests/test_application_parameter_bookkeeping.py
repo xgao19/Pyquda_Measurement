@@ -335,6 +335,7 @@ def test_pion_channel_provenance_is_explicit_and_rank_zero_writes_qtmd():
         assert '"src_interpolator"' in source
         assert '"sink_interpolator"' in source
         assert '"operator_gamma"' in source
+        assert "source_gamma_provenance" in source
         assert "tasks if rank == 0 else ()" in source
 
     emff = _source("application/EMFF_pion/perlmutter/Pyquda_pion_EMFF.py")
@@ -342,6 +343,15 @@ def test_pion_channel_provenance_is_explicit_and_rank_zero_writes_qtmd():
     assert '"src_interpolator"' in emff
     assert '"sink_interpolator"' in emff
     assert '"current_gamma_basis": "all_16"' in emff
+    assert "source_gamma_provenance" in emff
+
+    for relpath in [
+        "application/EMFF_pion_background_response/perlmutter/Pyquda_pion_EMFF_background_response.py",
+        "application/pion_current_current_response/perlmutter/Pyquda_pion_current_current_response.py",
+    ]:
+        source = _source(relpath)
+        assert "source_gamma_provenance" in source
+        assert ".src{src_gamma}" in source
     assert "channel_set_tag" in emff
 
 
