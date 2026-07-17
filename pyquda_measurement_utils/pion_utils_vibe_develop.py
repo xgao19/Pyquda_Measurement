@@ -1,6 +1,7 @@
 import numpy as np
 
-from pyquda_utils import core, gamma
+from pyquda_utils import core, gamma, source
+from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.fermion_bilinear_basis import (
     GAMMA_LABELS,
     PYQUDA_GAMMA_IDS,
@@ -13,6 +14,41 @@ my_gammas = list(GAMMA_LABELS)
 pyquda_gammas_order = list(PYQUDA_GAMMA_IDS)
 my_pyquda_gammas = [gamma.gamma(idx) for idx in pyquda_gammas_order]
 G5 = gamma.gamma(15)
+
+
+def build_pion_source_propagators(
+    dirac,
+    latt_info,
+    src_pos,
+    *,
+    gaussian_smearing,
+    width,
+    pos_boost,
+    neg_boost,
+):
+    """Return positive spectator and negative active point-sink propagators.
+
+    The two lines share one inversion only when their source smearing is
+    identical.  Gauge restore/load ownership remains with the caller.
+    """
+    src_positive = source.propagator(latt_info, "point", src_pos)
+    if not gaussian_smearing:
+        prop_positive = core.invertPropagator(dirac, src_positive, 1, 0)
+        return prop_positive, prop_positive.copy()
+
+    src_positive = boosted_smearing(
+        src_positive, w=width, boost=pos_boost
+    )
+    prop_positive = core.invertPropagator(dirac, src_positive, 1, 0)
+    if list(pos_boost) == list(neg_boost):
+        return prop_positive, prop_positive.copy()
+
+    src_negative = source.propagator(latt_info, "point", src_pos)
+    src_negative = boosted_smearing(
+        src_negative, w=width, boost=neg_boost
+    )
+    prop_negative = core.invertPropagator(dirac, src_negative, 1, 0)
+    return prop_positive, prop_negative
 
 
 def _gamma_matrix(gamma_like):

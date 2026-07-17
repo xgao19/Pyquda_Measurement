@@ -4,6 +4,27 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-16: Fix the unequal-boost pion EMT active line
+
+- Kept the positive-boost propagator as the fixed-sink spectator used to build
+  the sequential source, including its positive sink smearing and the outer
+  negative active-line sink smearing.
+- Corrected the direct EMT insertion field to use the independently inverted
+  negative-boost propagator.  The previous code incorrectly reused the
+  positive spectator when the two boosts differed.
+- Replaced ambiguous pion `source_boost`/`sink_boost` HDF5 attrs with
+  `pos_boost`/`neg_boost` and recorded the negative-active line convention.
+- Added structural line-identity and provenance tests.  S8T8 tests at solver
+  tolerance `1e-15`, for both 1-rank and 4-rank layouts, found exact
+  reference/candidate equality for equal boosts and unchanged C2 for opposite
+  boosts.  The corrected unequal-boost C3 is distinctly different from the
+  old positive-active result, while its 1-rank/4-rank relative L2 difference
+  is below `2e-15`.
+- Added explicit `--pos-boost` and `--neg-boost` options to the pion EMT
+  Python, run, and submit entrypoints.  The default smearing tag now encodes
+  both line boosts, preventing unequal-boost outputs from sharing the old
+  `k0` identity; a user-supplied `EMT_SM_TAG` remains an explicit override.
+
 ## 2026-07-13: Extend quark EMT to the complete Dirac bilinear basis
 
 - Added one canonical 16-element PyQUDA Gamma definition shared by EMT, qTMD,
@@ -944,3 +965,25 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   `dagger_of_sink` and `5/X/T x 16` outputs were also unchanged.  Maximum
   one/four-rank relative L2 differences were `1.03e-13` for pion qTMD/PDF,
   `8.30e-14` for EMFF and `3.41e-16` for qDA.
+
+## 2026-07-16: Correct pion qTMD/PDF unequal-boost lines
+
+- Unified connected pion qTMD/PDF with the pion EMT line convention: the
+  positive-boost propagator is the spectator and the negative-boost propagator
+  is the active operator line. Equal boosts reuse one inversion; unequal
+  boosts now perform the physically required second source inversion.
+- The positive spectator is positive-boost smeared at the fixed sink, the
+  sequential source receives negative outer smearing, and CG/GI qTMD plus
+  CG/GI PDF all displace or transport the negative active propagator.
+- Added explicit `--pos-boost` and `--neg-boost` application arguments, encoded
+  both in the default setup tag, and recorded the two boosts and line convention
+  in C2/three-point HDF5 output. Historical unequal-boost output must be
+  regenerated; zero-boost output remains the numerical reference.
+- Removed the duplicate `application/pion_TMD_CG` workflow. The canonical
+  `application/pion_TMD` entry point now covers CG/GI qTMD and CG/GI PDF.
+- The S8T8 gate used solver tolerance `1e-15`, one rank (`1.1.1.1`) and four
+  ranks (`2.2.1.1`). Zero-boost reference/candidate outputs and the opposite-
+  boost shared-helper/explicit-line outputs were bitwise identical. The old
+  opposite-boost single-source path differed in C2 and all four operator paths.
+  The largest one/four-rank relative L2 difference was `3.22e-15`, and the
+  largest true solver residual was `9.52e-16`.

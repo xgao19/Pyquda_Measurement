@@ -1,5 +1,0 @@
-data/
-logs/
-.quda-cache/
-.cupy-cache/
-profile_*

@@ -8,7 +8,7 @@ from pyquda.field import (
     LatticeGauge,
     LatticePropagator,
 )
-from pyquda_utils import core, source, phase
+from pyquda_utils import core, phase
 from pyquda_measurement_utils.io_corr import (
     save_emt_quark_3pt_hdf5,
     save_emt_meson_2pt_hdf5,
@@ -24,6 +24,9 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
     IDENTITY_GAMMA_POSITION,
     basis_attrs,
     symmetric_vector_emt,
+)
+from pyquda_measurement_utils.pion_utils_vibe_develop import (
+    build_pion_source_propagators,
 )
 from pyquda_measurement_utils.tools import _get_xp_from_array, mpi_print, mpi_timer_print
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
@@ -58,54 +61,21 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
     ):
         """Build source-smeared point-sink forward/backward meson propagators."""
         latt_info = U.latt_info
-        src_fw = source.propagator(latt_info, "point", src_pos)
-
-        if self.CG_GaussSmear and self.pos_boost == self.neg_boost:
-            mpi_print(latt_info, f"source smearing starts, boost = {self.pos_boost}")
-            src_fw = boosted_smearing(src_fw, w=self.width, boost=self.pos_boost)
-            mpi_print(latt_info, "source smearing ends")
-
-            if restore_original_gauge:
-                restore_t0 = perf_counter()
-                dirac.loadGauge(U, thin_update_only=True)
-                mpi_timer_print(latt_info, "pion_emt_source_restore", perf_counter() - restore_t0)
-            invert_t0 = perf_counter()
-            prop_fw_SP = core.invertPropagator(dirac, src_fw, 1, 0)
-            mpi_timer_print(latt_info, "pion_emt_source_inversion", perf_counter() - invert_t0)
-            prop_bw_SP = prop_fw_SP.copy()
-            del src_fw
-            return prop_fw_SP, prop_bw_SP
-
-        if self.CG_GaussSmear:
-            mpi_print(latt_info, f"forward source smearing starts, boost = {self.pos_boost}")
-            src_fw = boosted_smearing(src_fw, w=self.width, boost=self.pos_boost)
-            mpi_print(latt_info, "forward source smearing ends")
-
-            src_bw = source.propagator(latt_info, "point", src_pos)
-            mpi_print(latt_info, f"backward source smearing starts, boost = {self.neg_boost}")
-            src_bw = boosted_smearing(src_bw, w=self.width, boost=self.neg_boost)
-            mpi_print(latt_info, "backward source smearing ends")
-
-            if restore_original_gauge:
-                restore_t0 = perf_counter()
-                dirac.loadGauge(U, thin_update_only=True)
-                mpi_timer_print(latt_info, "pion_emt_source_restore", perf_counter() - restore_t0)
-            invert_t0 = perf_counter()
-            prop_fw_SP = core.invertPropagator(dirac, src_fw, 1, 0)
-            prop_bw_SP = core.invertPropagator(dirac, src_bw, 1, 0)
-            mpi_timer_print(latt_info, "pion_emt_source_inversion", perf_counter() - invert_t0)
-            del src_fw, src_bw
-            return prop_fw_SP, prop_bw_SP
-
         if restore_original_gauge:
             restore_t0 = perf_counter()
             dirac.loadGauge(U, thin_update_only=True)
             mpi_timer_print(latt_info, "pion_emt_source_restore", perf_counter() - restore_t0)
         invert_t0 = perf_counter()
-        prop_fw_SP = core.invertPropagator(dirac, src_fw, 1, 0)
+        prop_fw_SP, prop_bw_SP = build_pion_source_propagators(
+            dirac,
+            latt_info,
+            src_pos,
+            gaussian_smearing=self.CG_GaussSmear,
+            width=self.width,
+            pos_boost=self.pos_boost,
+            neg_boost=self.neg_boost,
+        )
         mpi_timer_print(latt_info, "pion_emt_source_inversion", perf_counter() - invert_t0)
-        prop_bw_SP = prop_fw_SP.copy()
-        del src_fw
         return prop_fw_SP, prop_bw_SP
 
     @classmethod
@@ -247,21 +217,23 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
 
         1. Build point sources and invert to obtain source-smeared point-sink
            forward/backward propagators.
-        2. Optionally apply sink smearing to the forward propagator.
+        2. Optionally apply positive-boost sink smearing to the spectator.
         3. Build and invert the meson fixed-sink sequential source with
            ``create_meson_bw_seq_pyquda``.
-        4. Starting from the unflowed gauge field, flow both the forward
-           propagator and sequential backward propagator together and measure
-           C2, C3_chi(q,t), and C3_Tmunu(q,t) at each flow time.
+        4. Starting from the unflowed gauge field, flow the negative-boost
+           active propagator and sequential backward propagator together and
+           measure C2, C3_chi(q,t), and C3_Tmunu(q,t) at each flow time.
 
         Notes on special objects
         ------------------------
         ``prop_fw_SP`` / ``prop_bw_SP``
-            source-smeared, point-sink forward/backward propagators.
+            Source-smeared, point-sink propagators for the positive-boost
+            spectator line and negative-boost active line, respectively.
 
         ``prop_fw_SS``
-            source-smeared and sink-smeared forward propagator used to build
-            the fixed-sink sequential source.
+            Source- and sink-smeared positive-boost spectator propagator used
+            to build the fixed-sink sequential source.  The outer smearing of
+            that source uses ``neg_boost`` for the active line at the sink.
 
         ``seq_bw_prop``
             fixed-sink backward sequential propagator.  The underlying source
@@ -328,8 +300,8 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             "sink_gamma_scan": "all_16",
             "gaussian_smearing": self.CG_GaussSmear,
             "smearing_width": self.width,
-            "source_boost": np.asarray(self.pos_boost, dtype=np.int32),
-            "sink_boost": np.asarray(self.neg_boost, dtype=np.int32),
+            "pos_boost": np.asarray(self.pos_boost, dtype=np.int32),
+            "neg_boost": np.asarray(self.neg_boost, dtype=np.int32),
             "dataset_axes": "gamma,p,t",
         }
         C2 += self.contract_meson_2pt(
@@ -378,7 +350,10 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
                 perf_counter() - inversion_t0, t_sep=t_sep,
             )
 
-            prop_fw_flow = prop_fw_SP.copy()
+            # The sequential line was built from the positive-boost spectator
+            # propagator.  The EMT insertion therefore contracts with the
+            # independent negative-boost active propagator.
+            active_prop_flow = prop_bw_SP.copy()
             seq_bw_prop_flow = seq_bw_prop.copy()
             U_f = U.copy()
             U_f.setAntiPeriodicT()
@@ -388,7 +363,7 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
                 primitive_t0 = perf_counter()
                 with U_f.use() as gauge_dirac:
                     local_step, derivative_step = self.get_C3_primitive_bilinears(
-                        U_f, gauge_dirac, prop_fw_flow, seq_bw_prop_flow,
+                        U_f, gauge_dirac, active_prop_flow, seq_bw_prop_flow,
                         src_gamma, phases_3pt, t0,
                     )
                 mpi_timer_print(
@@ -406,9 +381,9 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
                 )
 
                 flow_t0 = perf_counter()
-                prop_fw_flow, seq_bw_prop_flow = self._advance_flowed_props(
+                active_prop_flow, seq_bw_prop_flow = self._advance_flowed_props(
                     U_f,
-                    prop_fw_flow,
+                    active_prop_flow,
                     seq_bw_prop_flow,
                     step,
                     stepsize,
@@ -420,7 +395,7 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
                         t_sep=t_sep, step=f"{step}_to_{step + 1}",
                     )
 
-            del U_f, prop_fw_flow, seq_bw_prop_flow, seq_bw_prop
+            del U_f, active_prop_flow, seq_bw_prop_flow, seq_bw_prop
 
         attrs = {
             "measurement": "quark_3pt",
@@ -438,8 +413,10 @@ class QuarkEMT(EMTDisconnectedQuark1pt):
             "p_2pt": np.asarray(self.pilist, dtype=np.int32),
             "gaussian_smearing": self.CG_GaussSmear,
             "smearing_width": self.width,
-            "source_boost": np.asarray(self.pos_boost, dtype=np.int32),
-            "sink_boost": np.asarray(self.neg_boost, dtype=np.int32),
+            "pos_boost": np.asarray(self.pos_boost, dtype=np.int32),
+            "neg_boost": np.asarray(self.neg_boost, dtype=np.int32),
+            "operator_insertion_line": "neg_boost",
+            "boost_line_convention": "pos_spectator_neg_active",
             "flow_type": self.flow_type,
             "flow_epsilon": self.flow_epsilon,
             "flow_steps": self.flow_steps,

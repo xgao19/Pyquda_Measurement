@@ -1,5 +1,9 @@
 # `pyquda_charm_mass.py` README
 
+This DA calculation uses independent positive- and negative-boost source
+propagators. It is a two-propagator correlator and does not use the fixed-sink
+sequential active-line convention of connected pion qTMD/PDF.
+
 ## 1. Purpose
 
 `pyquda_charm_mass.py` is a stripped-down PyQUDA script for tuning the charmonium two-point correlator before running the full DA production workflow.

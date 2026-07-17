@@ -12,8 +12,31 @@
 
 set -euo pipefail
 
+pos_boost="0.0.0"
+neg_boost="0.0.0"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --pos-boost)
+      [[ $# -ge 2 ]] || { echo "Missing value for --pos-boost" >&2; exit 2; }
+      pos_boost="$2"
+      shift 2
+      ;;
+    --neg-boost)
+      [[ $# -ge 2 ]] || { echo "Missing value for --neg-boost" >&2; exit 2; }
+      neg_boost="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$script_dir/logs"
 
 export PION_TMD_MPI_GEOMETRY="${PION_TMD_MPI_GEOMETRY:-1.1.1.1}"
-srun --cpu-bind=cores "$script_dir/run_pion_TMD.sh"
+srun --cpu-bind=cores "$script_dir/run_pion_TMD.sh" \
+  --pos-boost "$pos_boost" \
+  --neg-boost "$neg_boost"

@@ -4,7 +4,6 @@ from pathlib import Path
 
 CALL_SITES = [
     "application/EMFF_pion/perlmutter/Pyquda_pion_EMFF.py",
-    "application/pion_TMD_CG/perlmutter/Pyquda_pion_TMD_CG.py",
     "application/pion_TMD/perlmutter/Pyquda_pion_TMD.py",
     "pyquda_measurement_utils/pion_EMT_vibe_develop.py",
 ]

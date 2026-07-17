@@ -1,6 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 
+pos_boost="0.0.0"
+neg_boost="0.0.0"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --pos-boost)
+      [[ $# -ge 2 ]] || { echo "Missing value for --pos-boost" >&2; exit 2; }
+      pos_boost="$2"
+      shift 2
+      ;;
+    --neg-boost)
+      [[ $# -ge 2 ]] || { echo "Missing value for --neg-boost" >&2; exit 2; }
+      neg_boost="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+boost_re='^-?[0-9]+[.](-?[0-9]+)[.](-?[0-9]+)$'
+[[ "$pos_boost" =~ $boost_re ]] || { echo "Invalid --pos-boost: $pos_boost" >&2; exit 2; }
+[[ "$neg_boost" =~ $boost_re ]] || { echo "Invalid --neg-boost: $neg_boost" >&2; exit 2; }
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
 measurement_root="${MEASUREMENT_ROOT:-$software_root/Pyquda_Measurement}"
@@ -49,6 +74,8 @@ echo "  PION_TMD_T_INSERT=$PION_TMD_T_INSERT"
 echo "  PION_TMD_RUN_CG_QTMD=$PION_TMD_RUN_CG_QTMD"
 echo "  PION_TMD_RUN_GI_QTMD=$PION_TMD_RUN_GI_QTMD"
 echo "  PION_TMD_RUN_PDF=$PION_TMD_RUN_PDF"
+echo "  pos_boost=$pos_boost"
+echo "  neg_boost=$neg_boost"
 
 python3 -u "$script_dir/Pyquda_pion_TMD.py" \
   --config_num "$PION_TMD_CONFIG_NUM" \
@@ -62,6 +89,8 @@ python3 -u "$script_dir/Pyquda_pion_TMD.py" \
   --eta "$PION_TMD_ETA" \
   --t_insert "$PION_TMD_T_INSERT" \
   --width "$PION_TMD_WIDTH" \
+  --pos-boost="$pos_boost" \
+  --neg-boost="$neg_boost" \
   --run_cg_qtmd "$PION_TMD_RUN_CG_QTMD" \
   --run_gi_qtmd "$PION_TMD_RUN_GI_QTMD" \
   --run_pdf "$PION_TMD_RUN_PDF"

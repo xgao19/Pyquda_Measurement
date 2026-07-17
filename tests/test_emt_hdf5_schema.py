@@ -116,16 +116,25 @@ def test_proton_per_tsep_schema_has_no_singleton_tsep_axis():
 
 
 def test_connected_emt_provenance_fields_are_declared():
-    required = {
+    common_required = {
         "config_num", "mass", "csw", "tol", "maxiter",
         "gauge_preprocessing", "t_boundary", "source_position",
         "pf", "qext", "p_2pt", "gaussian_smearing", "smearing_width",
-        "source_boost", "sink_boost", "flow_times",
+        "flow_times",
         "source_interpolator", "sink_interpolator",
         "primitive_local_axes", "primitive_derivative_axes", "derived_emt_axes",
     }
     root = Path(__file__).resolve().parents[1] / "pyquda_measurement_utils"
-    for filename in ("pion_EMT_vibe_develop.py", "proton_EMT_vibe_develop.py"):
+    requirements = {
+        "pion_EMT_vibe_develop.py": common_required | {
+            "pos_boost", "neg_boost", "operator_insertion_line",
+            "boost_line_convention",
+        },
+        "proton_EMT_vibe_develop.py": common_required | {
+            "source_boost", "sink_boost",
+        },
+    }
+    for filename, required in requirements.items():
         source = (root / filename).read_text()
         for key in required:
             assert f'"{key}"' in source, f"{filename} is missing {key} provenance"

@@ -8,6 +8,24 @@ import numpy as np
 from pyquda import getMPIComm, init
 
 
+def parse_spatial_boost(value):
+    fields = value.replace(",", ".").split(".")
+    if len(fields) != 3:
+        raise argparse.ArgumentTypeError(
+            f"invalid boost {value!r}; expected three integers as X.Y.Z"
+        )
+    try:
+        return [int(field) for field in fields]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid boost {value!r}; expected three integers as X.Y.Z"
+        ) from exc
+
+
+def boost_tag(boost):
+    return "_".join(f"m{abs(value)}" if value < 0 else str(value) for value in boost)
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, default=int(os.environ.get("PION_TMD_CONFIG_NUM", 0)))
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("PION_TMD_MPI_GEOMETRY", "1.1.1.1"))
@@ -22,15 +40,19 @@ parser.add_argument("--t_insert", type=int, default=int(os.environ.get("PION_TMD
 parser.add_argument("--width", type=float, default=float(os.environ.get("PION_TMD_WIDTH", 1.0)))
 parser.add_argument("--src_interpolator", type=str, default=os.environ.get("PION_TMD_SRC_INTERPOLATOR", "5"))
 parser.add_argument("--sink_interpolator", type=str, default=os.environ.get("PION_TMD_SINK_INTERPOLATOR", "5"))
+parser.add_argument("--pos-boost", type=parse_spatial_boost, default=[0, 0, 0])
+parser.add_argument("--neg-boost", type=parse_spatial_boost, default=[0, 0, 0])
 parser.add_argument("--run_cg_qtmd", type=int, default=int(os.environ.get("PION_TMD_RUN_CG_QTMD", 1)))
 parser.add_argument("--run_gi_qtmd", type=int, default=int(os.environ.get("PION_TMD_RUN_GI_QTMD", 1)))
 parser.add_argument("--run_pdf", type=int, default=int(os.environ.get("PION_TMD_RUN_PDF", 1)))
-args, unknown = parser.parse_known_args()
+args = parser.parse_args()
+pos_boost = args.pos_boost
+neg_boost = args.neg_boost
 
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
 init(mpi_geometry, enable_mps=True)
 
-from pyquda_utils import core, gamma, io, phase, source
+from pyquda_utils import core, gamma, io, phase
 from pyquda_utils.phase import MomentumPhase
 
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
@@ -43,7 +65,10 @@ from pyquda_measurement_utils.io_corr import (
     save_qTMD_pion_hdf5_noRoll,
 )
 from pyquda_measurement_utils.pion_qTMD_vibe_develop import my_gammas, pion_TMD
-from pyquda_measurement_utils.pion_utils_vibe_develop import source_gamma_provenance
+from pyquda_measurement_utils.pion_utils_vibe_develop import (
+    build_pion_source_propagators,
+    source_gamma_provenance,
+)
 from pyquda_measurement_utils.tools import mpi_print, srcLoc_distri_eq
 
 
@@ -88,7 +113,13 @@ script_dir = Path(__file__).resolve().parent
 data_dir = Path(args.data_dir) if args.data_dir else script_dir / "data"
 gauge_path = args.gauge_path or str(software_root / "Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0")
 lat_tag = os.environ.get("PION_TMD_LAT_TAG", "S8T32")
-sm_tag = os.environ.get("PION_TMD_SM_TAG", f"1HYP_GSRC_W{args.width:g}_k0")
+sm_tag = os.environ.get(
+    "PION_TMD_SM_TAG",
+    (
+        f"1HYP_GSRC_W{args.width:g}"
+        f"_pos{boost_tag(pos_boost)}_neg{boost_tag(neg_boost)}"
+    ),
+)
 channel_tag = get_pion_channel_tag(
     sm_tag, args.src_interpolator, args.sink_interpolator
 )
@@ -110,11 +141,10 @@ parameters = {
     "qext_PDF": qext_PDF,
     "pf": [0, 0, 0, 0],
     "p_2pt": p_2pt,
-    "pos_boost": [0, 0, 0],
-    "neg_boost": [0, 0, 0],
+    "pos_boost": pos_boost,
+    "neg_boost": neg_boost,
     "width": args.width,
     "t_insert": args.t_insert,
-    "save_propagators": False,
 }
 pf = parameters["pf"]
 pf_tag = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{parameters['t_insert']}"
@@ -134,6 +164,8 @@ if getMPIComm().Get_rank() == 0:
     print(f"--run_cg_qtmd {int(run_cg_qtmd)}")
     print(f"--run_gi_qtmd {int(run_gi_qtmd)}")
     print(f"--run_pdf {int(run_pdf)}")
+    print(f"--pos-boost {'.'.join(map(str, args.pos_boost))}")
+    print(f"--neg-boost {'.'.join(map(str, args.neg_boost))}")
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
@@ -169,13 +201,26 @@ for pos in src_positions:
     mpi_print(latt_info, f"START: {sample_log_tag}")
 
     t0 = time.time()
-    srcD = source.propagator(latt_info, "point", pos)
-    srcDp = boosted_smearing(srcD, w=parameters["width"], boost=parameters["pos_boost"])
-    mpi_print(latt_info, f"TIME PyQUDA: Generating boosted source {time.time() - t0}s")
+    spectator_prop, active_prop = build_pion_source_propagators(
+        dirac,
+        latt_info,
+        pos,
+        gaussian_smearing=True,
+        width=parameters["width"],
+        pos_boost=parameters["pos_boost"],
+        neg_boost=parameters["neg_boost"],
+    )
+    mpi_print(
+        latt_info,
+        f"TIME PyQUDA: Positive-spectator/negative-active source inversions {time.time() - t0}s",
+    )
 
-    t0 = time.time()
-    prop_fw = core.invertPropagator(dirac, srcDp, 1, 0)
-    mpi_print(latt_info, f"TIME PyQUDA: Forward propagator inversion {time.time() - t0}s")
+    line_attrs = {
+        "pos_boost": np.asarray(parameters["pos_boost"], dtype=np.int32),
+        "neg_boost": np.asarray(parameters["neg_boost"], dtype=np.int32),
+        "operator_insertion_line": "neg_boost",
+        "boost_line_convention": "pos_spectator_neg_active",
+    }
 
     t0 = time.time()
     c2_tag = get_c2pt_file_tag(
@@ -185,30 +230,35 @@ for pos in src_positions:
     phases_2pt = MomentumPhase(latt_info).getPhases(p_2pt_xyz, x0=pos)
     measurement.contract_2pt_pion(
         latt_info,
-        prop_fw,
-        prop_fw,
+        spectator_prop,
+        active_prop,
         phases_2pt,
         c2_tag,
         src_gamma=args.src_interpolator,
         attrs={
             "src_interpolator": args.src_interpolator,
             "sink_interpolator": "all_16_gamma_scan",
+            **line_attrs,
             **source_gamma_provenance(args.src_interpolator),
         },
     )
     mpi_print(latt_info, f"TIME PyQUDA: Pion 2pt contraction {time.time() - t0}s")
 
     t0 = time.time()
-    prop_sink_smeared = boosted_smearing(prop_fw.copy(), w=parameters["width"], boost=parameters["neg_boost"])
+    spectator_sink_prop = boosted_smearing(
+        spectator_prop.copy(),
+        w=parameters["width"],
+        boost=parameters["pos_boost"],
+    )
     seq_bw_prop = create_meson_bw_seq_pyquda(
         dirac,
-        prop_sink_smeared,
+        spectator_sink_prop,
         pos,
         parameters["pf"],
         parameters["t_insert"],
         sink_gamma,
         parameters["width"],
-        parameters["pos_boost"],
+        parameters["neg_boost"],
     )
     mpi_print(latt_info, f"TIME PyQUDA: Pion meson sequential propagator {time.time() - t0}s")
 
@@ -229,7 +279,7 @@ for pos in src_positions:
         t0 = time.time()
         pion_TMDs = measurement.contract_qTMD_CG(
             latt_info,
-            prop_fw,
+            active_prop,
             seq_bw_prop,
             phases_TMD,
             W_index_list_CG_dir0,
@@ -267,6 +317,7 @@ for pos in src_positions:
                     "src_interpolator": args.src_interpolator,
                     "sink_interpolator": args.sink_interpolator,
                     "operator_gamma": gm,
+                    **line_attrs,
                     **source_gamma_provenance(args.src_interpolator),
                 },
             )
@@ -276,7 +327,7 @@ for pos in src_positions:
         pion_TMDs = measurement.contract_qTMD_GI(
             latt_info,
             gauge,
-            prop_fw,
+            active_prop,
             seq_bw_prop,
             phases_TMD,
             W_index_list_GI_dir0,
@@ -314,6 +365,7 @@ for pos in src_positions:
                     "src_interpolator": args.src_interpolator,
                     "sink_interpolator": args.sink_interpolator,
                     "operator_gamma": gm,
+                    **line_attrs,
                     **source_gamma_provenance(args.src_interpolator),
                 },
             )
@@ -324,7 +376,7 @@ for pos in src_positions:
             pion_PDFs = measurement.contract_PDF(
                 latt_info,
                 gauge,
-                prop_fw,
+                active_prop,
                 seq_bw_prop,
                 phases_PDF,
                 W_index_list_PDF,
@@ -362,10 +414,12 @@ for pos in src_positions:
                         "src_interpolator": args.src_interpolator,
                         "sink_interpolator": args.sink_interpolator,
                         "operator_gamma": gm,
+                        **line_attrs,
                         **source_gamma_provenance(args.src_interpolator),
                     },
                 )
-    sync_backend_array(prop_fw.data)
+    sync_backend_array(spectator_prop.data)
+    sync_backend_array(active_prop.data)
 
     if latt_info.mpi_rank == 0:
         with sample_log_file.open("a+") as f:

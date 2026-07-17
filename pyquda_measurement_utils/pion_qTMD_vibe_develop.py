@@ -3,10 +3,9 @@ Pion connected qTMD and PDF contractions in PyQUDA.
 
 This module is the pion analogue of ``proton_qTMD_pyquda.py``.  The main
 structural difference is that a pion correlator contains one quark line and one
-antiquark line, while the proton code contracts three quark lines.  For this
-reason the pion code uses ``pos_boost`` and ``neg_boost`` to describe the
-smearing boosts of the quark and antiquark lines, matching the convention used
-in ``pion_qTMDWF_pyquda.py``.
+antiquark line, while the proton code contracts three quark lines.  The
+positive-boost line is the fixed-sink spectator and the negative-boost line is
+the active line on which the qTMD/PDF operator acts, matching pion EMT.
 
 Conventions and propagators
 ---------------------------
@@ -64,7 +63,7 @@ slice,
     eta_seq(y; pf, tsep) =
         delta_{t_y,tsep}
         phase_pf(y - x0)
-        Gamma_seq S_neg(y, x0),
+        Gamma_seq Q_pos_SS(y, x0),
 
     Gamma_seq = gamma5 Gamma_sink^dagger gamma5,
 
@@ -84,7 +83,7 @@ The contraction used in the code is therefore the sink-summed form
         Tr[
             S_seq_anti(x, x0; pf, tsep)
             Gamma_g
-            O_b S_q(x, x0)
+            O_b Q_neg_SP(x, x0)
             Gamma_src
         ].
 
@@ -168,18 +167,23 @@ class pion_TMD:
         self.neg_boost = parameters["neg_boost"]
 
         self.t_insert = parameters["t_insert"]
-        self.save_propagators = parameters["save_propagators"]
 
     def contract_2pt_pion(
-        self, latt_info, prop_f, prop_b, phases, tag,
+        self, latt_info, spectator_prop, active_prop, phases, tag,
         src_gamma="5", attrs=None,
     ):
         mpi_print(latt_info, "Begin pion sink smearing")
-        prop_f = boosted_smearing(prop_f, w=self.width, boost=self.pos_boost)
-        prop_b = boosted_smearing(prop_b, w=self.width, boost=self.neg_boost)
+        spectator_prop = boosted_smearing(
+            spectator_prop, w=self.width, boost=self.pos_boost
+        )
+        active_prop = boosted_smearing(
+            active_prop, w=self.width, boost=self.neg_boost
+        )
         mpi_print(latt_info, "Pion sink smearing completed")
 
-        corr = contract_pion_2pt(latt_info, prop_f, prop_b, phases, src_gamma=src_gamma)
+        corr = contract_pion_2pt(
+            latt_info, spectator_prop, active_prop, phases, src_gamma=src_gamma
+        )
 
         if latt_info.mpi_rank == 0:
             output_attrs = dict(attrs or {})
@@ -189,39 +193,39 @@ class pion_TMD:
             )
         del corr
 
-    def contract_qTMD_CG(self, latt_info, prop_f, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="5"):
-        xp = _get_xp_from_array(prop_f.data)
-        phases = _asarray_on_queue(phases, xp, prop_f.data)
-        sink_gamma_ls = gamma_stack(prop_f.data)
-        source_gamma_ls = source_gamma_stack(src_gamma, sink_gamma_ls, prop_f.data)
+    def contract_qTMD_CG(self, latt_info, active_prop, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="5"):
+        xp = _get_xp_from_array(active_prop.data)
+        phases = _asarray_on_queue(phases, xp, active_prop.data)
+        sink_gamma_ls = gamma_stack(active_prop.data)
+        source_gamma_ls = source_gamma_stack(src_gamma, sink_gamma_ls, active_prop.data)
         seq_bw_line = meson_backward_line(seq_bw_prop)
 
         pion_TMDs = []
         W_index_list = W_index_list_dir0 + W_index_list_dir1
 
-        tmd_forward_prop_dir0 = prop_f.copy()
+        tmd_active_prop_dir0 = active_prop.copy()
         for iW, W_index in enumerate(W_index_list_dir0):
             mpi_print(latt_info, f"Contract pion qTMD CG {iW + 1}/{len(W_index_list)} {W_index}")
             W_index_previous = [0, 0, 0, 0] if iW == 0 else W_index_list_dir0[iW - 1]
-            tmd_forward_prop_dir0 = self.create_fw_prop_TMD_CG(tmd_forward_prop_dir0, W_index, W_index_previous)
-            pion_TMDs.append(self._contract_qTMD_one_shift(seq_bw_line, tmd_forward_prop_dir0, sink_gamma_ls, source_gamma_ls, phases))
-        del tmd_forward_prop_dir0
+            tmd_active_prop_dir0 = self.create_fw_prop_TMD_CG(tmd_active_prop_dir0, W_index, W_index_previous)
+            pion_TMDs.append(self._contract_qTMD_one_shift(seq_bw_line, tmd_active_prop_dir0, sink_gamma_ls, source_gamma_ls, phases))
+        del tmd_active_prop_dir0
 
-        tmd_forward_prop_dir1 = prop_f.copy()
+        tmd_active_prop_dir1 = active_prop.copy()
         for iW, W_index in enumerate(W_index_list_dir1):
             mpi_print(latt_info, f"Contract pion qTMD CG {iW + 1 + len(W_index_list_dir0)}/{len(W_index_list)} {W_index}")
             W_index_previous = [0, 0, 0, 0] if iW == 0 else W_index_list_dir1[iW - 1]
-            tmd_forward_prop_dir1 = self.create_fw_prop_TMD_CG(tmd_forward_prop_dir1, W_index, W_index_previous)
-            pion_TMDs.append(self._contract_qTMD_one_shift(seq_bw_line, tmd_forward_prop_dir1, sink_gamma_ls, source_gamma_ls, phases))
-        del tmd_forward_prop_dir1
+            tmd_active_prop_dir1 = self.create_fw_prop_TMD_CG(tmd_active_prop_dir1, W_index, W_index_previous)
+            pion_TMDs.append(self._contract_qTMD_one_shift(seq_bw_line, tmd_active_prop_dir1, sink_gamma_ls, source_gamma_ls, phases))
+        del tmd_active_prop_dir1
 
         return np.array(pion_TMDs)
 
-    def contract_qTMD_GI(self, latt_info, gauge, prop_f, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="5"):
-        xp = _get_xp_from_array(prop_f.data)
-        phases = _asarray_on_queue(phases, xp, prop_f.data)
-        sink_gamma_ls = gamma_stack(prop_f.data)
-        source_gamma_ls = source_gamma_stack(src_gamma, sink_gamma_ls, prop_f.data)
+    def contract_qTMD_GI(self, latt_info, gauge, active_prop, seq_bw_prop, phases, W_index_list_dir0, W_index_list_dir1, src_gamma="5"):
+        xp = _get_xp_from_array(active_prop.data)
+        phases = _asarray_on_queue(phases, xp, active_prop.data)
+        sink_gamma_ls = gamma_stack(active_prop.data)
+        source_gamma_ls = source_gamma_stack(src_gamma, sink_gamma_ls, active_prop.data)
         seq_bw_line = meson_backward_line(seq_bw_prop)
 
         W_index_list = W_index_list_dir0 + W_index_list_dir1
@@ -231,41 +235,41 @@ class pion_TMD:
         pion_TMDs = []
         for iW, W_index in enumerate(W_index_list):
             mpi_print(latt_info, f"Contract pion qTMD GI {iW + 1}/{len(W_index_list)} {W_index}")
-            shifted_prop = self.create_fw_prop_TMD_GI(gauge, prop_f, W_index, staple_links=staple_links)
+            shifted_prop = self.create_fw_prop_TMD_GI(gauge, active_prop, W_index, staple_links=staple_links)
             pion_TMDs.append(self._contract_qTMD_one_shift(seq_bw_line, shifted_prop, sink_gamma_ls, source_gamma_ls, phases))
             del shifted_prop
 
         return np.array(pion_TMDs)
 
-    def contract_PDF(self, latt_info, gauge, prop_f, seq_bw_prop, phases, W_index_list, src_gamma="5", gauge_invariant=True):
-        xp = _get_xp_from_array(prop_f.data)
-        phases = _asarray_on_queue(phases, xp, prop_f.data)
-        sink_gamma_ls = gamma_stack(prop_f.data)
-        source_gamma_ls = source_gamma_stack(src_gamma, sink_gamma_ls, prop_f.data)
+    def contract_PDF(self, latt_info, gauge, active_prop, seq_bw_prop, phases, W_index_list, src_gamma="5", gauge_invariant=True):
+        xp = _get_xp_from_array(active_prop.data)
+        phases = _asarray_on_queue(phases, xp, active_prop.data)
+        sink_gamma_ls = gamma_stack(active_prop.data)
+        source_gamma_ls = source_gamma_stack(src_gamma, sink_gamma_ls, active_prop.data)
         seq_bw_line = meson_backward_line(seq_bw_prop)
 
         pion_PDFs = []
-        pdf_forward_prop = prop_f.copy()
+        pdf_active_prop = active_prop.copy()
         for iW, W_index in enumerate(W_index_list):
             mpi_print(latt_info, f"Contract pion PDF {'GI' if gauge_invariant else 'CG'} {iW + 1}/{len(W_index_list)} {W_index}")
             if W_index[1] == 0:
                 W_index_previous = [0, 0, 0, 0]
-                pdf_forward_prop = prop_f.copy()
+                pdf_active_prop = active_prop.copy()
             elif W_index[1] > 0:
                 W_index_previous = W_index_list[iW - 1]
             elif W_index[1] == -1:
                 W_index_previous = [0, 0, 0, 0]
-                pdf_forward_prop = prop_f.copy()
+                pdf_active_prop = active_prop.copy()
             else:
                 W_index_previous = W_index_list[iW - 1]
 
             if gauge_invariant:
-                pdf_forward_prop = self.create_fw_prop_PDF_GI(gauge, pdf_forward_prop, W_index, W_index_previous)
+                pdf_active_prop = self.create_fw_prop_PDF_GI(gauge, pdf_active_prop, W_index, W_index_previous)
             else:
-                pdf_forward_prop = self.create_fw_prop_TMD_CG(pdf_forward_prop, W_index, W_index_previous)
+                pdf_active_prop = self.create_fw_prop_TMD_CG(pdf_active_prop, W_index, W_index_previous)
 
-            pion_PDFs.append(self._contract_qTMD_one_shift(seq_bw_line, pdf_forward_prop, sink_gamma_ls, source_gamma_ls, phases))
-        del pdf_forward_prop
+            pion_PDFs.append(self._contract_qTMD_one_shift(seq_bw_line, pdf_active_prop, sink_gamma_ls, source_gamma_ls, phases))
+        del pdf_active_prop
 
         return np.array(pion_PDFs)
 
@@ -347,7 +351,7 @@ class pion_TMD:
             reordered.append(sorted_list[-1])
         return reordered
 
-    def create_fw_prop_TMD_CG(self, prop_f, W_index, W_index_previous):
+    def create_fw_prop_TMD_CG(self, active_prop, W_index, W_index_previous):
         current_b_T = W_index[0]
         current_bz = W_index[1]
         transverse_direction = W_index[3]
@@ -356,15 +360,15 @@ class pion_TMD:
         previous_b_T = W_index_previous[0]
         previous_bz = W_index_previous[1]
 
-        return prop_f.shift(round(current_b_T - previous_b_T), transverse_direction).shift(round(current_bz - previous_bz), z_direction)
+        return active_prop.shift(round(current_b_T - previous_b_T), transverse_direction).shift(round(current_bz - previous_bz), z_direction)
 
-    def create_fw_prop_TMD_GI(self, gauge, prop_f, W_index, staple_links):
-        prop_shift = prop_f.copy()
+    def create_fw_prop_TMD_GI(self, gauge, active_prop, W_index, staple_links):
+        prop_shift = active_prop.copy()
         staple_link = staple_links[tuple(W_index)]
 
         for spin in range(4):
             for color in range(3):
-                fermion = prop_f.getFermion(spin, color)
+                fermion = active_prop.getFermion(spin, color)
                 fermion_shift = create_fermion_TMD_GI_from_link(staple_link, fermion, W_index)
                 prop_shift.setFermion(fermion_shift, spin, color)
 
@@ -382,13 +386,13 @@ class pion_TMD:
 
         return index_list
 
-    def create_fw_prop_PDF_GI(self, gauge, prop_f, W_index, W_index_previous):
+    def create_fw_prop_PDF_GI(self, gauge, active_prop, W_index, W_index_previous):
         current_bz = W_index[1]
         previous_bz = W_index_previous[1]
 
         for spin in range(4):
             for color in range(3):
-                fermion = prop_f.getFermion(spin, color)
+                fermion = active_prop.getFermion(spin, color)
                 if current_bz - previous_bz == 0:
                     fermion_shift = fermion
                 elif current_bz - previous_bz == 1:
@@ -397,6 +401,6 @@ class pion_TMD:
                     fermion_shift = gauge.pure_gauge.covDev(fermion, 6)
                 else:
                     raise ValueError("Invalid shift for PDF Wilson line")
-                prop_f.setFermion(fermion_shift, spin, color)
+                active_prop.setFermion(fermion_shift, spin, color)
 
-        return prop_f
+        return active_prop

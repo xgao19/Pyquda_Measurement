@@ -3,13 +3,10 @@
 This directory contains the connected pion TMD workflow with optional CG qTMD,
 GI qTMD, and PDF/local-limit contractions.
 
-## Relation To The Older CG Workflow
-
-- `application/pion_TMD_CG/perlmutter` is the older CG-only workflow.
-- `application/pion_TMD/perlmutter` keeps that connected CG path available and
-  adds connected GI qTMD support.
-- The GI qTMD path uses the fixed-length staple convention shared with the
-  disconnected qTMD code.
+This is the canonical connected pion entry point for CG qTMD, GI qTMD, CG PDF,
+and GI PDF.  The former duplicate CG-only application has been removed.  The GI
+qTMD path uses the fixed-length staple convention shared with the disconnected
+qTMD code.
 
 ## Perlmutter Entry Point
 
@@ -20,6 +17,28 @@ directory:
 bash application/pion_TMD/perlmutter/run_pion_TMD.sh
 ```
 
+For momentum smearing, pass both quark-line boosts explicitly:
+
+```bash
+bash application/pion_TMD/perlmutter/run_pion_TMD.sh \
+  --pos-boost 0.0.1 --neg-boost 0.0.-1
+```
+
+The connected-line convention is:
+
+```text
+positive-boost line = spectator
+negative-boost line = active operator line
+```
+
+Equal boosts require one source inversion and reuse a copy.  Unequal boosts
+require two inversions.  The positive spectator is positive-boost smeared at
+the sink before constructing the sequential source; the outer sequential
+smearing uses the negative boost.  CG/GI qTMD and CG/GI PDF operators all act
+on the unsmeared-at-insertion negative active propagator.  Only this
+negative-active orientation is produced.  The exchanged orientation requires
+swapping the two complete lines, not only swapping one smearing argument.
+
 Useful runtime switches:
 
 - `PION_TMD_RUN_CG_QTMD=0/1`
@@ -28,6 +47,13 @@ Useful runtime switches:
 
 GI qTMD production always uses the cached transporter path.  The direct
 covariant-shift implementation is test/reference code only.
+
+The output HDF5 attributes record `pos_boost`, `neg_boost`,
+`operator_insertion_line=neg_boost`, and
+`boost_line_convention=pos_spectator_neg_active`.  Default setup tags encode
+both boosts, so unequal-boost runs cannot share a sample log accidentally.
+Historical unequal-boost output used one positive source line for both roles
+and must be regenerated.  Zero-boost output is numerically unchanged.
 
 ## Pion Channel Identity
 
@@ -84,6 +110,13 @@ The connected pion GI qTMD workflow has passed S8T32 smoke tests on Perlmutter
 `login32`.  A nonzero-staple consistency test with `b_z=2`, `b_T=1`, `eta=1`,
 and `qmax=0` verified that the link cache agrees with the direct test reference
 to roundoff.
+
+The unequal-boost line correction was validated on S8T8 at solver tolerance
+`1e-15` with one rank (`1.1.1.1`) and four ranks (`2.2.1.1`).  Zero-boost
+reference/candidate outputs were bitwise identical.  For
+`pos=[0,0,1], neg=[0,0,-1]`, the shared helper was bitwise identical to an
+independent two-source explicit-line calculation for C2, CG/GI qTMD and CG/GI
+PDF.  The largest one/four-rank relative L2 difference was `3.22e-15`.
 
 The optional test script is:
 

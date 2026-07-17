@@ -303,6 +303,12 @@ Both the mature and development modules use the same boosted smearing implementa
 \end{equation}
 where $w$ is the Gaussian width (parameter \texttt{width}) and $\mathbf{k}$ is the boost momentum (parameters \texttt{pos\_boost} for the quark line, \texttt{neg\_boost} for the antiquark line).
 
+Unlike the fixed-sink connected pion qTMD/PDF workflow, qTMDWF is organized as
+a two-propagator correlator and has no sequential active-line ambiguity.  For
+unequal boosts it constructs and inverts the positive and negative source
+lines independently.  The zero-boost application may copy the positive
+propagator only because its two source-smearing kernels are identical.
+
 \subsection{Implementation Details}
 
 The boosted smearing is implemented via distributed FFT:

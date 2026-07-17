@@ -248,6 +248,26 @@ to every spin-color source column of a propagator.  The FFT is spatial only and
 the same kernel is used on each Euclidean time slice.  No explicit gauge
 rotation is applied in the current implementation.
 
+For the two opposite momentum-smearing choices used for the pion lines, write
+\(\mathcal S_+\equiv\mathcal S_{w,\mathtt{pos\_boost}}\) and
+\(\mathcal S_-\equiv\mathcal S_{w,\mathtt{neg\_boost}}\).  Each convolution
+is Hermitian,
+\begin{equation}
+  \mathcal S_+^\dagger=\mathcal S_+,
+  \qquad
+  \mathcal S_-^\dagger=\mathcal S_-,
+\end{equation}
+but unequal boosts define different operators,
+\begin{equation}
+  \mathcal S_+^\dagger\ne\mathcal S_-.
+\end{equation}
+Consequently gamma5 hermiticity does not turn a positive-boost source solve
+into the negative-boost source solve.  The code performs two source inversions
+when the boosts differ.  We call the positive-boost line the
+\emph{spectator} and the negative-boost line the \emph{active} line on which
+the EMT operator is inserted.  For equal boosts the two solves coincide and
+one propagator is safely reused.
+
 \subsection{Connected Three-Point Function (before sequential trick)}
 \label{sec:3pt_pre_seq}
 
@@ -411,7 +431,9 @@ The fixed-sink method absorbs the sum over the sink position $y$ into a sequenti
 
 \textbf{Step 1: Build the source-smeared, sink-smeared forward propagator.}
 
-Starting from the source-smeared point-sink forward propagator $\mathtt{prop\_fw\_SP}(y, x_0)$, optional sink smearing is applied:
+Starting from the positive-boost, source-smeared point-sink spectator
+propagator $\mathtt{prop\_fw\_SP}(y, x_0)$, optional positive-boost sink
+smearing is applied:
 
 \begin{equation}
   \mathtt{prop\_fw\_SS}(y, x_0)
@@ -466,6 +488,19 @@ The input \(\mathtt{prop\_fw\_SS}\) has already received the
 \(\mathcal{S}_{w,\mathtt{neg\_boost}}\) represents the active line associated
 with the backward sequential propagator in the current pion EMT implementation.
 
+More explicitly, suppressing spin--color indices and endpoint projectors, the
+three relevant fields are
+\begin{align}
+  Q_+^{SP} &= D^{-1}\mathcal S_+\,\delta_{x_0},
+  &Q_+^{SS} &= \mathcal S_+ Q_+^{SP},\\
+  Q_-^{SP} &= D^{-1}\mathcal S_-\,\delta_{x_0},
+  &\eta_{\rm seq}^{SS}
+    &= \mathcal S_- P_{t_f,\mathbf p_f}\Gamma_{\rm seq}Q_+^{SS}.
+\end{align}
+Thus \(Q_+^{SS}\) closes the spectator at the sink, whereas the outer
+\(\mathcal S_-\) supplies the active-line sink smearing.  The sequential
+solution is \(\Sigma_-=D^{-1}\eta_{\rm seq}^{SS}\).
+
 \textbf{Step 3: Invert the Dirac operator.}
 
 \begin{equation}
@@ -498,7 +533,7 @@ After the sequential inversion, the sink-summed three-point function takes the c
       \Tr_{sc}\Big[
         S_{\text{seq\_anti}}(x; p_f, t_{\text{sep}})\;
         \mathcal{O}_g(x)\;
-        S_q(x, x_0)\;
+        Q_-^{SP}(x, x_0)\;
         \Gamma_{\text{src}}
       \Big].
 \end{equation}
@@ -506,6 +541,18 @@ After the sequential inversion, the sink-summed three-point function takes the c
 This is the master formula used by \code{get\_C3\_primitive\_bilinears}; the
 identity local channel gives \code{C3\_chi}, while the four vector derivative
 channels give \code{C3\_Tmunu}.
+The direct field at the insertion is therefore \code{prop\_bw\_SP}, not the
+positive-boost spectator \code{prop\_fw\_SP}.  Gaussian momentum smearing is
+an endpoint construction: no Gaussian smearing is applied at the local EMT
+insertion.  Both \(Q_-^{SP}\) and the backward sequential field are,
+nevertheless, evolved by the same four-dimensional fermion-flow kernel before
+the flowed bilinear is contracted.
+
+This workflow publishes only the negative-boost-active orientation.  The
+opposite orientation is a distinct Wick-line assignment and would require
+interchanging the complete positive and negative line construction---source
+solves, spectator sink smearing, sequential-source outer smearing, and direct
+active field.  Exchanging only one boost does not produce that orientation.
 
 
 \subsection{Symmetric Covariant Derivative on a Propagator}
@@ -610,7 +657,9 @@ Thus output index \code{step} corresponds to flow time $t = \text{step} \times \
 
 \subsubsection{Flowing propagators together}
 
-The forward propagator and sequential backward propagator are flowed simultaneously as a single \code{MultiField} on the flowed gauge background:
+The negative-boost active propagator and sequential backward propagator are
+flowed simultaneously as a single \code{MultiField} on the flowed gauge
+background:
 
 \begin{verbatim}
   mf_a = propagatorToMultiFermion(prop_a)
@@ -631,11 +680,15 @@ The gauge field itself is flowed by \code{U\_f.wilsonFlow()} or \code{U\_f.syman
 The \code{connected\_3pt} method orchestrates the full measurement:
 
 \begin{enumerate}[nosep]
-  \item Build source-smeared point-sink forward and backward propagators (\code{\_make\_meson\_source\_props}).
+  \item Build the positive-boost spectator and negative-boost active
+        source-smeared point-sink propagators
+        (\code{\_make\_meson\_source\_props}).
   \item Contract the meson 2pt function as a diagnostic (\code{contract\_meson\_2pt}).
   \item For each source-sink separation $t_{\text{sep}}$:
   \begin{enumerate}
-    \item Build and invert the meson fixed-sink sequential source (\code{create\_meson\_bw\_seq\_pyquda}).
+    \item Build the fixed-sink sequential source from the positive-boost
+          spectator, apply the negative-boost active sink smearing, and invert
+          it (\code{create\_meson\_bw\_seq\_pyquda}).
     \item For each flow step:
     \begin{enumerate}
       \item Compute all 16 local and $16\times4$ derivative channels once via
@@ -1471,8 +1524,8 @@ The \code{QuarkEMT} class is initialized with a parameter dictionary containing:
 \code{pf}         & fixed sink momentum $[p_x, p_y, p_z, p_t]$ \\
 \code{p\_2pt}     & list of momenta for the 2pt function \\
 \code{CG\_GaussSmear} & whether to apply Gaussian smearing \\
-\code{pos\_boost} & momentum boost for forward source/sink \\
-\code{neg\_boost} & momentum boost for backward source/sink \\
+\code{pos\_boost} & momentum boost for the spectator source and sink \\
+\code{neg\_boost} & momentum boost for the active source and sequential sink \\
 \code{width}      & Gaussian smearing width \\
 \code{flow\_type} & \code{"wilson"} or \code{"symanzik"} \\
 \code{flow\_epsilon} & flow step size $\varepsilon$ \\

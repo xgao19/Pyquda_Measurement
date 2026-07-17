@@ -94,7 +94,7 @@ application/EMT_proton/         Proton EMT workflows.
 application/EMT_disconnected_1pt/ Guided quark-loop, convergence, and optional proton C2/3pt workflow; gluon is an advanced add-on.
 application/qTMD_disconnected_1pt/ Shared qTMD/PDF one-point workflows.
 application/EMFF_pion/          Pion electromagnetic form factor workflow.
-application/pion_TMD_CG/        Pion qTMD/PDF-style workflow.
+application/pion_TMD/           Connected pion CG/GI qTMD and PDF workflow.
 ```
 
 Each actively maintained application directory has its own README with
@@ -104,7 +104,8 @@ Perlmutter examples:
 
 ```bash
 # Pion/meson EMT
-bash application/EMT_meson/perlmutter/run_quark_3pt.sh
+bash application/EMT_meson/perlmutter/run_quark_3pt.sh \
+  --config_num 1000 --pos-boost 0.0.1 --neg-boost 0.0.-1
 
 # Proton EMT
 bash application/EMT_proton/perlmutter/run_proton_quark_3pt.sh
@@ -117,7 +118,8 @@ bash application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh --config_num 1
 bash application/qTMD_disconnected_1pt/perlmutter/run_qTMD_1pt.sh --config_num 1000
 
 # Pion qTMD and pion EMFF
-bash application/pion_TMD_CG/perlmutter/run_pion_TMD_CG.sh
+bash application/pion_TMD/perlmutter/run_pion_TMD.sh \
+  --pos-boost 0.0.1 --neg-boost 0.0.-1
 bash application/EMFF_pion/perlmutter/run_pion_EMFF.sh
 ```
 
@@ -260,6 +262,10 @@ For pion/meson EMT:
 - Meson 2pt scans all 16 sink gamma structures.
 - Connected quark 3pt uses the fixed-sink meson sequential-source convention
   referred to during development as convention B.
+- With unequal pion momentum-smearing boosts, the positive-boost line is the
+  fixed-sink spectator and the negative-boost line is the EMT insertion line.
+  Momentum smearing acts only at hadron endpoints; both insertion fields still
+  undergo the same four-dimensional fermion flow.
 - `meson_sign = 1` is the active convention.
 - Quark and gluon flow schedules are aligned: measure first, then flow.
 - `step = 0` is the unflowed measurement.

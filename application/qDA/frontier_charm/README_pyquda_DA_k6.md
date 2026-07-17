@@ -181,6 +181,13 @@ Important entries are:
 - `width`: smearing width,
 - `pos_boost`, `neg_boost`: boosts used in source/sink smearing.
 
+The DA workflow is a two-propagator correlator rather than a fixed-sink
+sequential three-point function. It independently constructs and inverts the
+positive- and negative-boost source lines, so it does not share the active-line
+ambiguity corrected in connected pion qTMD/PDF. CG and straight-link GI DA
+transport the designated forward line while retaining the independently
+inverted backward line.
+
 ---
 
 ### 3.4 Helper functions

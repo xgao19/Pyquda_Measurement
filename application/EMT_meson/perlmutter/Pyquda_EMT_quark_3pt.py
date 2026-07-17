@@ -11,12 +11,37 @@ from pyquda_measurement_utils.io_corr import get_emt_meson_2pt_file_tag, get_emt
 # Argument parsing
 # ============================================================
 import argparse
+
+
+def parse_spatial_boost(text):
+    """Parse the CLI X.Y.Z (or X,Y,Z) integer momentum-smearing boost."""
+    try:
+        values = [int(value) for value in text.replace(",", ".").split(".")]
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("boost must contain three integers") from error
+    if len(values) != 3:
+        raise argparse.ArgumentTypeError("boost must have the form X.Y.Z")
+    return values
+
+
+def boost_tag(values):
+    return "_".join(f"m{-value}" if value < 0 else str(value) for value in values)
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, required=True, help="Configuration number")
 parser.add_argument("--mpi_geometry", type=str, default="1.1.1.1", help="MPI geometry")
 parser.add_argument("--src_interpolator", type=str, default="5", help="Source interpolator gamma label")
 parser.add_argument("--sink_interpolator", type=str, default="5", help="Sink interpolator gamma label")
 parser.add_argument("--mg-block", default="8.8.4.4", help="X.Y.Z.T[;...] or none")
+parser.add_argument(
+    "--pos-boost", type=parse_spatial_boost, default=[0, 0, 0],
+    metavar="X.Y.Z", help="positive-boost spectator momentum smearing",
+)
+parser.add_argument(
+    "--neg-boost", type=parse_spatial_boost, default=[0, 0, 0],
+    metavar="X.Y.Z", help="negative-boost active-line momentum smearing",
+)
 args = parser.parse_args()
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -33,7 +58,11 @@ gauge_path = os.environ.get(
     str(repo_root / "test_gauge" / "S8T32_wilson_b6.cg.1e-08.0"),
 )
 lat_tag = os.environ.get("EMT_LAT_TAG", "S8T32")
-sm_tag = os.environ.get("EMT_SM_TAG", "1HYP_GSRC_W1_k0")
+default_sm_tag = (
+    f"1HYP_GSRC_W1_pos{boost_tag(args.pos_boost)}"
+    f"_neg{boost_tag(args.neg_boost)}"
+)
+sm_tag = os.environ.get("EMT_SM_TAG", default_sm_tag)
 qext = [[x, y, z, 0] for x in range(-2, 3) for y in range(-2, 3) for z in range(-2, 3)]
 parameters = {
     "config_num": conf,
@@ -41,8 +70,8 @@ parameters = {
     "pf": [0, 0, 0, 0],
     "p_2pt": qext,
     "CG_GaussSmear": True,
-    "pos_boost": [0, 0, 0],
-    "neg_boost": [0, 0, 0],
+    "pos_boost": args.pos_boost,
+    "neg_boost": args.neg_boost,
     "width": 1.0,
     "flow_type": "wilson",
     "flow_epsilon": 0.207936,

@@ -3,15 +3,21 @@ set -euo pipefail
 
 config_num=""
 mg_block="8.8.4.4"
+pos_boost="0.0.0"
+neg_boost="0.0.0"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config_num) config_num="${2:-}"; shift 2 ;;
     --mg-block) mg_block="${2:-}"; shift 2 ;;
+    --pos-boost) pos_boost="${2:-}"; shift 2 ;;
+    --neg-boost) neg_boost="${2:-}"; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
-if [[ ! "$config_num" =~ ^[0-9]+$ || -z "$mg_block" ]]; then
-  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]]" >&2
+boost_pattern='^-?[0-9]+[.,]-?[0-9]+[.,]-?[0-9]+$'
+if [[ ! "$config_num" =~ ^[0-9]+$ || -z "$mg_block" \
+      || ! "$pos_boost" =~ $boost_pattern || ! "$neg_boost" =~ $boost_pattern ]]; then
+  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]] [--pos-boost X.Y.Z] [--neg-boost X.Y.Z]" >&2
   exit 2
 fi
 
@@ -42,8 +48,12 @@ echo "  EMT_GAUGE_PATH=$EMT_GAUGE_PATH"
 echo "  EMT_DATA_DIR=$EMT_DATA_DIR"
 echo "  config_num=$config_num"
 echo "  EMT_MPI_GEOMETRY=$EMT_MPI_GEOMETRY"
+echo "  pos_boost=$pos_boost"
+echo "  neg_boost=$neg_boost"
 
 python3 -u "$script_dir/Pyquda_EMT_quark_3pt.py" \
   --config_num "$config_num" \
   --mpi_geometry "$EMT_MPI_GEOMETRY" \
-  --mg-block "$mg_block"
+  --mg-block "$mg_block" \
+  --pos-boost="$pos_boost" \
+  --neg-boost="$neg_boost"

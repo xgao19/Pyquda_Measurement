@@ -279,13 +279,20 @@ The final momentum-projected correlator is
 
 \subsection{Boosted Smearing}
 
-Before contraction, both the forward propagator $\texttt{prop\_f}$ and the
-backward propagator $\texttt{prop\_b}$ are boosted-smeared at the sink using
-separate boost parameters \texttt{pos\_boost} and \texttt{neg\_boost}:
+Two source-smeared, point-sink propagators are defined by
+\begin{equation}
+ Q_{+}^{SP}=D^{-1}\mathcal S_{+}\delta_{x_0},\qquad
+ Q_{-}^{SP}=D^{-1}\mathcal S_{-}\delta_{x_0}.
+ \label{eq:qtmd_source_lines}
+\end{equation}
+The positive line is the spectator and the negative line is the active
+operator line.  Equal boosts require one inversion and a copy; unequal boosts
+require two independent inversions.  For the two-point function they are
+boosted-smeared at the sink using their corresponding endpoint kernels:
 \begin{align}
-  \texttt{prop\_f} &\leftarrow \text{boosted\_smearing}(\texttt{prop\_f},
+  Q_+^{SS} &\leftarrow \text{boosted\_smearing}(Q_+^{SP},
                       w, \texttt{pos\_boost}), \\
-  \texttt{prop\_b} &\leftarrow \text{boosted\_smearing}(\texttt{prop\_b},
+  Q_-^{SS} &\leftarrow \text{boosted\_smearing}(Q_-^{SP},
                       w, \texttt{neg\_boost}).
 \end{align}
 The implementation in \verb|boosted_smearing_pyquda.py| uses a spatial
@@ -382,7 +389,8 @@ correlation.
 
 The meson fixed-sink sequential source is built in
 \verb|create_meson_bw_seq_pyquda|.  Given the sink-smeared propagator
-$\texttt{prop}$ (already boosted-smeared with \texttt{neg\_boost}), the source
+$Q_+^{SS}$ (the positive-boost spectator, already positive-boost smeared at
+the sink), the source
 position $x_0$, the sink momentum $p_f$, the sink-source separation $t_{\rm
 sep}$, and the sink Dirac matrix $\Gamma_{\rm sink}$, the right-hand side is
 placed on the sink time slice $t_{\rm sink} = t_0 + t_{\rm sep}$:
@@ -412,21 +420,26 @@ more before the sequential inversion:
 \begin{equation}
   \eta_{\rm seq}^{SS}
   =
-  \mathcal{S}_{w,\mathbf{k}_{\rm pos}}
+  \mathcal{S}_{w,\mathbf{k}_{\rm neg}}
   \left[
     \delta_{t_y,\, t_{\rm sink}}\;
     \Phi_{p_f}(\mathbf{y}-\mathbf{x}_0)\;
     \Gamma_{\rm seq}\,
-    S_q^{S\to S,\,{\rm neg}}(\mathbf{y},t_{\rm sink};\mathbf{x}_0,0)
+    Q_+^{SS}(\mathbf{y},t_{\rm sink};\mathbf{x}_0,0)
   \right].
   \label{eq:qtmd_eta_seq_smear}
 \end{equation}
-The input line \(S_q^{S\to S,\,{\rm neg}}\) already carries the spectator-line
-sink smearing with \texttt{neg\_boost}.  The outer
-\(\mathcal{S}_{w,\mathbf{k}_{\rm pos}}\) supplies the active-line sink smearing
-associated with the sequential propagator.  This extra smearing is needed for a
-consistent smeared-smeared three-point function and matches the proton
-fixed-sink sequential-source pattern.
+The input line $Q_+^{SS}$ carries the positive spectator endpoint smearing.
+The outer $\mathcal{S}_{w,\mathbf{k}_{\rm neg}}$ supplies the negative active
+endpoint smearing absorbed into the sequential propagator.  At the operator
+insertion the bilocal displacement or Wilson transporter acts on
+$Q_-^{SP}$; the insertion itself is not Gaussian smeared.  This is the same
+line convention used by connected pion EMT.
+
+Only the positive-spectator/negative-active orientation is produced.  The
+opposite orientation requires exchanging the two complete lines, including
+both source inversions and both endpoint smearings.  Swapping only one boost
+does not define that second contribution.
 
 The sequential propagator solves
 \begin{equation}
@@ -470,8 +483,8 @@ function reduces to a two-point-like form:
 \end{equation}
 
 The insertion gamma $\Gamma_{\rm ins}$ scans all 16 Dirac structures (the same
-set as in Sec.~\ref{sec:twopt}), while $\Gamma_{\rm src}$ is typically
-\texttt{fixed\_g5} and $\Gamma_{\rm sink}$ is set by the application (e.g.,
+set as in Sec.~\ref{sec:twopt}), while $\Gamma_{\rm src}$ is the explicit
+canonical label \texttt{5} by default and $\Gamma_{\rm sink}$ is set by the application (e.g.,
 $\gamma_5$ for the pseudoscalar pion).
 
 The einsum contraction pattern in \verb|_contract_qTMD_one_shift| mirrors the
@@ -488,8 +501,9 @@ two-point function:
   (\text{shifted\_prop})[w,t,z,y,x_{\rm cb},l,b,a]\;
   (\Gamma_{\rm src})_{l j}.
 \end{align}
-Here $\texttt{shifted\_prop}$ is the forward propagator with the nonlocal
-displacement operator already applied (see Sec.~\ref{sec:cg_tmd_op}).
+Here $\texttt{shifted\_prop}$ is the negative active propagator $Q_-^{SP}$
+with the nonlocal displacement operator already applied (see
+Sec.~\ref{sec:cg_tmd_op}).
 
 %==========================================================================
 \section{CG qTMD Operator}
@@ -716,20 +730,19 @@ Constructs the measurement object from a parameter dictionary with keys:
   \item \texttt{pos\_boost}, \texttt{neg\_boost}: boosted smearing momentum
         boosts for quark and antiquark lines.
   \item \texttt{t\_insert}: sink-source separation $t_{\rm sep}$.
-  \item \texttt{save\_propagators}: whether to save propagators to disk.
 \end{itemize}
 
 \subsection{\texttt{contract\_2pt\_pion}}
 
 \begin{lstlisting}
-def contract_2pt_pion(self, latt_info, prop_f, prop_b, phases, tag,
+def contract_2pt_pion(self, latt_info, spectator_prop, active_prop, phases, tag,
                        src_gamma="5"):
 \end{lstlisting}
 
 Workflow:
 \begin{enumerate}[nosep]
-  \item Boosted-smeared \texttt{prop\_f} (with \texttt{pos\_boost}) and
-        \texttt{prop\_b} (with \texttt{neg\_boost}).
+  \item Sink-smear \texttt{spectator\_prop} with \texttt{pos\_boost} and
+        \texttt{active\_prop} with \texttt{neg\_boost}.
   \item Build sink gamma stack (\verb|_gamma_stack|) and source gamma stack
         (\verb|_source_gamma_stack|).
   \item Construct antiquark line via \verb|_meson_backward_line| (einsum with
@@ -746,7 +759,7 @@ The output shape is \texttt{[gamma, momentum, time]}.
 \subsection{\texttt{contract\_qTMD\_CG}}
 
 \begin{lstlisting}
-def contract_qTMD_CG(self, latt_info, prop_f, seq_bw_prop, phases,
+def contract_qTMD_CG(self, latt_info, active_prop, seq_bw_prop, phases,
                       W_index_list_dir0, W_index_list_dir1,
                       src_gamma="5"):
 \end{lstlisting}
@@ -758,7 +771,7 @@ Workflow:
         $\texttt{seq\_bw\_line} = \gamma_5\,
         \texttt{seq\_bw\_prop}^\dagger \gamma_5$.
   \item For direction 0 ($x$): iterate over \texttt{W\_index\_list\_dir0},
-        incrementally shifting \texttt{tmd\_forward\_prop\_dir0} using
+        incrementally shifting the negative active propagator using
         \verb|create_fw_prop_TMD_CG| and contracting at each step via
         \verb|_contract_qTMD_one_shift|.
   \item Reset and repeat for direction 1 ($y$) with
@@ -778,7 +791,7 @@ Gamma-inserted line at a time and accumulates the small
 \subsection{\texttt{contract\_PDF}}
 
 \begin{lstlisting}
-def contract_PDF(self, latt_info, gauge, prop_f, seq_bw_prop, phases,
+def contract_PDF(self, latt_info, gauge, active_prop, seq_bw_prop, phases,
                   W_index_list, src_gamma="5",
                   gauge_invariant=True):
 \end{lstlisting}
@@ -787,7 +800,7 @@ Same structure as \verb|contract_qTMD_CG| but:
 \begin{itemize}[nosep]
   \item Uses a single \texttt{W\_index\_list} (no transverse direction
         separation).
-  \item Resets the forward propagator to the original copy whenever $b_z$
+  \item Resets the negative active propagator to the original copy whenever $b_z$
         returns to $0$ (handling the split between positive and negative
         branches).
   \item Calls \verb|create_fw_prop_PDF_GI| when \texttt{gauge\_invariant=True}
@@ -987,11 +1000,15 @@ effectively selecting quark fields that carry momentum $\mathbf{k}_{\rm boost}$.
 This improves the overlap of the interpolating operator with a moving pion state
 and is essential for achieving good signal at finite boost $p_f$.
 
-In the current pion qTMD workflow, both \texttt{pos\_boost} and
-\texttt{neg\_boost} are set to $\mathbf{0}$, and the pion boost is provided
-solely by the sink momentum $p_f$ encoded in the sequential source.  The
-parameters are retained for future workflows that may use non-zero boost
-smearing to improve overlap with boosted pion states.
+The application accepts both boosts explicitly through
+\texttt{--pos-boost X.Y.Z} and \texttt{--neg-boost X.Y.Z}.  The zero-boost
+default reuses one source inversion.  For unequal boosts the two propagators in
+Eq.~\eqref{eq:qtmd_source_lines} are inverted separately.  The default setup
+tag encodes both boosts, and HDF5 records
+\texttt{operator\_insertion\_line=neg\_boost} and
+\texttt{boost\_line\_convention=pos\_spectator\_neg\_active}.  Results from the
+old unequal-boost single-source implementation are not valid under this
+convention and must be regenerated.
 
 %==========================================================================
 \section{Comparison with Proton TMD}

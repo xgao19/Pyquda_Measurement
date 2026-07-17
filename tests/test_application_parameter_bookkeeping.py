@@ -277,8 +277,36 @@ def test_pion_connected_driver_has_no_shared_output_override():
     assert ".spin" not in source
     assert "src_interpolator" in source
     assert "sink_interpolator" in source
+    assert '"--pos-boost"' in source
+    assert '"--neg-boost"' in source
+    assert '"pos_boost": args.pos_boost' in source
+    assert '"neg_boost": args.neg_boost' in source
+    assert "default_sm_tag" in source
+    assert "boost_tag(args.pos_boost)" in source
+    assert "boost_tag(args.neg_boost)" in source
     assert 'os.environ.get("EMT_LAT_TAG", "S8T32")' in source
     assert "1e-10" in source
+
+
+def test_pion_connected_wrappers_forward_boost_cli_and_reject_bad_values():
+    wrappers = [
+        "application/EMT_meson/perlmutter/run_quark_3pt.sh",
+        "application/EMT_meson/perlmutter/submit_quark_3pt.sh",
+    ]
+    for relpath in wrappers:
+        source = _source(relpath)
+        assert "--pos-boost" in source
+        assert "--neg-boost" in source
+        result = subprocess.run(
+            [
+                "bash", str(REPO_ROOT / relpath), "--config_num", "1",
+                "--pos-boost", "0.1", "--neg-boost", "0.0.-1",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 2
+        assert "--pos-boost" in result.stderr
 
 
 def test_emt_backend_transfers_do_not_call_cupy_get_directly():
@@ -326,10 +354,7 @@ def test_proton_qtmd_parameters_use_only_active_measurement_fields():
 
 
 def test_pion_channel_provenance_is_explicit_and_rank_zero_writes_qtmd():
-    for relpath in [
-        "application/pion_TMD/perlmutter/Pyquda_pion_TMD.py",
-        "application/pion_TMD_CG/perlmutter/Pyquda_pion_TMD_CG.py",
-    ]:
+    for relpath in ["application/pion_TMD/perlmutter/Pyquda_pion_TMD.py"]:
         source = _source(relpath)
         assert "get_pion_channel_tag" in source
         assert '"src_interpolator"' in source
@@ -337,6 +362,13 @@ def test_pion_channel_provenance_is_explicit_and_rank_zero_writes_qtmd():
         assert '"operator_gamma"' in source
         assert "source_gamma_provenance" in source
         assert "tasks if rank == 0 else ()" in source
+        assert '"pos_boost"' in source
+        assert '"neg_boost"' in source
+        assert '"operator_insertion_line": "neg_boost"' in source
+        assert '"boost_line_convention": "pos_spectator_neg_active"' in source
+        assert "parse_known_args" not in source
+
+    assert not (REPO_ROOT / "application/pion_TMD_CG").exists()
 
     emff = _source("application/EMFF_pion/perlmutter/Pyquda_pion_EMFF.py")
     assert "get_pion_channel_tag" in emff
