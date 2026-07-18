@@ -4,6 +4,23 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-18: Fix GI qTMD staple composition order
+
+- Reversed `covDev` traversal of the unchanged fixed-length geometric staple
+  segments and synchronized the direct test reference and fake-path
+  expectations.
+- Added a fixed-seed, position-dependent, noncommuting SU(3) ordered-product
+  CPU test covering positive and negative `b_z` and both transverse
+  directions.
+- Validated the HYP-smeared S8T8 gauge in one-rank and four-rank Perlmutter
+  layouts, including cached/direct agreement, local gauge covariance,
+  gauge-invariant contractions, straight-PDF limits, and a minimal connected
+  pion GI-qTMD workflow.
+- Added the staple geometry and operator-order TikZ figure, recorded numerical
+  validation results in the pion TMD README, and rebuilt the tracked PDF.
+- Verified `274 passed, 12 skipped`, two-pass LaTeX compilation, visual figure
+  layout, and `git diff --check`.
+
 ## 2026-07-17: Unify proton qTMD production and resume
 
 - Replaced the duplicated Perlmutter, Aurora GI, and Aurora CG-only drivers

@@ -15,6 +15,6 @@ def apply_signed_covariant_shift(gauge, fermion, direction, steps):
 
 def create_fermion_TMD_GI(gauge, fermion, W_index):
     shifted = fermion.copy()
-    for direction, steps in gi_qtmd_staple_segments(W_index):
+    for direction, steps in reversed(gi_qtmd_staple_segments(W_index)):
         shifted = apply_signed_covariant_shift(gauge, shifted, direction, steps)
     return shifted

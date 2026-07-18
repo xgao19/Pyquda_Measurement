@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-07-16
+Last updated: 2026-07-18
 
 This file contains only reusable environment facts, stable conventions, and
 pitfalls that are easy to repeat.  Commit history and completed-work summaries
@@ -185,6 +185,10 @@ python tests/run_smoke_tests.py
 - Fixed-length GI staple index is
   `[b_T, b_z, eta, transverse_direction]`, with even `b_z`,
   `eta >= abs(b_z)/2`, `b_T >= 0`, and total length `2*eta + b_T`.
+- With `D_mu psi(x) = U_mu(x) psi(x+mu)`, `covDev` composition acts on the
+  endpoint field in the reverse order of the geometric staple segments.  Keep
+  the geometric segment list unchanged and reverse it only when transporting
+  the endpoint fermion or gauge-link basis field.
 - Prefer cached gauge-only staple transporters and apply them to the shifted
   endpoint field.  Keep the direct covariant-shift path for validation.
 - The disconnected estimator is `xi^dagger P Gamma O_b eta`, with

@@ -120,10 +120,31 @@ constraints are `b_z` even and `eta >= abs(b_z) / 2`.
 
 ## Validation
 
-The connected pion GI qTMD workflow has passed S8T32 smoke tests on Perlmutter
-`login32`.  A nonzero-staple consistency test with `b_z=2`, `b_T=1`, `eta=1`,
-and `qmax=0` verified that the link cache agrees with the direct test reference
-to roundoff.
+The GI staple composition order was validated with an independent,
+position-dependent, noncommuting SU(3) ordered-product CPU test.  It covers
+positive and negative `b_z` and both transverse directions at
+`rtol=atol=1e-13`; the former segment order differs from the correct result by
+more than `1e-8`.  The geometric path and the reverse `covDev` composition
+order are shown in the "Connected GI qTMD Update" figure in
+[`docs/pion_qTMD/pion_qTMD.pdf`](../../docs/pion_qTMD/pion_qTMD.pdf).
+
+The repository `test_gauge/S8T8_wilson_b6.0` gauge was also tested on one
+Perlmutter node after one production-style 4D HYP step.  Runs used one rank
+(`1.1.1.1`) and four ranks (`2.2.1.1`).  For `b_T=1`, `b_z=0,+2,-2`, both
+transverse directions, and the straight-PDF limits, cached staples agreed with
+an independent direct-`covDev` reference to relative L2 error at most
+`3.62e-16`.  Field covariance, cached-link endpoint covariance, and
+`xi_dagger Gamma O eta` invariance were all at relative L2 error at most
+`4.08e-16`; the link-free CG positive control changed by `0.29--0.96`.
+Complete gathered staple fields were bitwise identical between the one- and
+four-rank layouts.  On the non-straight paths, the former segment order differed
+by relative L2 error `0.438--0.675`.
+
+A minimal connected GI-qTMD run used one source, `tol=1e-15`, `qmax=0`,
+`eta=2`, `b_z=2`, `b_T=1`, and `t_sep=3`, with CG/PDF outputs disabled.  The
+one- and four-rank runs produced the same 16-file, 192-dataset HDF5 structure;
+the maximum dataset relative L2 difference was `1.31e-13`, the maximum absolute
+difference was `1.42e-16`, and the largest true residual was `8.54e-16`.
 
 The unequal-boost line correction was validated on S8T8 at solver tolerance
 `1e-15` with one rank (`1.1.1.1`) and four ranks (`2.2.1.1`).  Zero-boost

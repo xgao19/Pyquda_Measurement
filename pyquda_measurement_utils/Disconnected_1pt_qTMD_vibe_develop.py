@@ -128,8 +128,14 @@ def _apply_signed_covariant_shift(gauge, fermion, direction, steps):
 
 
 def _transport_staple_field(gauge, fermion, W_index):
+    """Transport along the geometric staple returned by ``gi_qtmd_staple_segments``.
+
+    Since ``D_mu psi(x) = U_mu(x) psi(x + mu)``, composed covariant
+    shifts act on the endpoint field in the reverse order of the geometric
+    Wilson path.
+    """
     shifted = fermion.copy()
-    for direction, steps in gi_qtmd_staple_segments(W_index):
+    for direction, steps in reversed(gi_qtmd_staple_segments(W_index)):
         shifted = _apply_signed_covariant_shift(gauge, shifted, direction, steps)
     return shifted
 

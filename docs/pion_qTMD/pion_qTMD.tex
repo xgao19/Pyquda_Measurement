@@ -9,6 +9,8 @@
 \usepackage{enumitem}
 \usepackage{listings}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
 
 \lstset{
   basicstyle=\ttfamily\footnotesize,
@@ -1207,6 +1209,71 @@ implemented with the fixed-length convention
        + b_T \hat e_{d_\perp}, \\
   &\rightarrow x + b_z \hat z + b_T \hat e_{d_\perp}.
 \end{align}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+      >=Latex,
+      path/.style={->, very thick, blue!70!black},
+      point/.style={circle, fill=black, inner sep=1.8pt},
+      label/.style={font=\small, align=center}
+    ]
+    \coordinate (p0) at (0,0);
+    \coordinate (p1) at (0,3.2);
+    \coordinate (p2) at (5.4,3.2);
+    \coordinate (p3) at (5.4,1.1);
+
+    \draw[path] (p0) -- node[left, label]
+      {$1:\ \eta+b_z/2$} (p1);
+    \draw[path] (p1) -- node[above, label]
+      {$2:\ b_T$} (p2);
+    \draw[path] (p2) -- node[right, label]
+      {$3:\ \eta-b_z/2$} (p3);
+
+    \node[point] at (p0) {};
+    \node[point] at (p1) {};
+    \node[point] at (p2) {};
+    \node[point] at (p3) {};
+
+    \node[label, below left=2pt and 2pt of p0] {$x$};
+    \node[label, above left=3pt and 2pt of p1]
+      {$x+(\eta+b_z/2)\hat z$};
+    \node[label, above right=3pt and 2pt of p2]
+      {$x+(\eta+b_z/2)\hat z+b_T\hat e_{d_\perp}$};
+    \node[label, below right=2pt and 2pt of p3]
+      {$x+b_z\hat z+b_T\hat e_{d_\perp}$};
+
+    \draw[->, thick] (-0.8,0.15) -- (-0.8,1.15)
+      node[above, label] {$\hat z$};
+    \draw[->, thick] (-0.65,0) -- (0.55,0)
+      node[right, label] {$\hat e_{d_\perp}$};
+
+    \node[
+      draw,
+      rounded corners,
+      fill=blue!4,
+      label,
+      text width=9.0cm
+    ] at (2.7,-1.35) {
+      Geometric path: $1\rightarrow2\rightarrow3$,
+      \qquad $L_{\rm staple}=2\eta+b_T$.\\
+      Acting on the endpoint fermion, \texttt{covDev} must be called in
+      the reverse segment order $3\rightarrow2\rightarrow1$.
+    };
+  \end{tikzpicture}
+  \caption{Fixed-length GI qTMD staple geometry, drawn for a representative
+  positive $b_z$.  Segment 3 has signed displacement
+  $(b_z/2-\eta)\hat z$; its displayed downward length is
+  $\eta-b_z/2$.  The same formulas cover negative $b_z$.}
+  \label{fig:gi_qtmd_staple}
+\end{figure}
+
+Figure~\ref{fig:gi_qtmd_staple} distinguishes the geometric path from the
+operator-composition order.  With
+$D_\mu\psi(x)=U_\mu(x)\psi(x+\hat\mu)$, the rightmost displacement acts on
+the endpoint field first, so the implementation traverses the segment list in
+reverse when constructing the transporter.
+
 Thus the total staple length is
 \begin{equation}
   L_{\rm staple} = 2\eta + b_T,
@@ -1244,6 +1311,22 @@ the expected equality is
   C_3^{\rm GI\_PDF}(b_z=\pm 2\eta),
 \end{equation}
 up to the common momentum, gamma, source, and sink conventions.
+
+The corrected composition order was validated on the repository
+\texttt{S8T8\_wilson\_b6.0} gauge after one production-style four-dimensional
+HYP step.  One-rank (\texttt{1.1.1.1}) and four-rank (\texttt{2.2.1.1}) runs
+gave bitwise-identical gathered staple fields.  Across positive and negative
+$b_z$, both transverse directions, and the straight-PDF limits, the largest
+cached-versus-direct relative $L_2$ error was $3.62\times10^{-16}$.  Field
+covariance, cached-link endpoint covariance, and contracted-loop gauge
+invariance were all below $4.08\times10^{-16}$ in relative $L_2$ error, while
+the link-free coordinate-shift control changed by $0.29$--$0.96$.  The former
+segment order differs from the corrected result by $0.438$--$0.675$ on the
+non-straight actual-gauge paths.  A minimal connected GI-qTMD comparison
+produced the same 16 HDF5 files and 192 datasets in both layouts; its maximum
+dataset relative $L_2$ difference was $1.31\times10^{-13}$, maximum absolute
+difference was $1.42\times10^{-16}$, and maximum solver true residual was
+$8.54\times10^{-16}$.
 
 \begin{center}
 \begin{tabular}{c|c|l}
