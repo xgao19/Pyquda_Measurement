@@ -1100,11 +1100,11 @@ indices satisfy
   b_z \in 2\mathbb{Z}, \qquad \eta \geq \frac{|b_z|}{2}, \qquad b_T \geq 0.
 \end{equation}
 
-The source module exposes this through two new helpers:
+The neutral \texttt{qtmd\_operator\_utils.py} module exposes this through:
 \begin{itemize}
-  \item \texttt{create\_TMD\_Wilsonline\_index\_list\_GI()} generates the
-    connected staple-index list.
-  \item \texttt{create\_fw\_prop\_TMD\_GI(gauge, prop, W, staple\_links)}
+  \item \texttt{create\_gi\_qtmd\_wilsonline\_index\_lists(...)} generates
+    the shared staple-index lists.
+  \item \texttt{apply\_gi\_qtmd\_staple\_to\_propagator(...)}
     applies a cached gauge-only staple transporter to each spin-color source
     column of the forward propagator.
 \end{itemize}

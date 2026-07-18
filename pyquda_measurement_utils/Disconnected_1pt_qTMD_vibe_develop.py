@@ -37,16 +37,28 @@ import h5py
 import numpy as np
 
 from pyquda import getMPIComm
-from pyquda.field import LatticeFermion, LatticeGauge, LatticeLink
+from pyquda.field import LatticeGauge
 from pyquda_utils import core, phase
-from pyquda_utils.convert import fermionToLink, linkToFermion
 
 from pyquda_measurement_utils.pion_utils_vibe_develop import gamma_stack, my_gammas
-from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array, mpi_print
+from pyquda_measurement_utils.qtmd_operator_utils import (
+    apply_gi_qtmd_staple_to_fermion,
+    build_gi_qtmd_staple_links,
+    create_cg_qtmd_wilsonline_index_lists,
+    create_gi_qtmd_wilsonline_index_lists,
+    create_pdf_wilsonline_index_list,
+    shift_fermion_pdf_gi,
+    shift_qtmd_cg,
+)
+from pyquda_measurement_utils.tools import (
+    _asarray_on_queue,
+    _get_xp_from_array,
+    array_to_numpy,
+    mpi_print,
+)
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
     append_completed_base,
-    array_to_numpy,
     base_part_ranges,
     canonical_temp_path,
     discover_shard_layout,
@@ -68,99 +80,6 @@ _VALID_OPERATOR_KINDS = {"CG_qTMD", "CG_PDF", "GI_PDF", "GI_qTMD"}
 QTMD_SCHEMA_VERSION = 3
 QTMD_LOOP_CONVENTION = "xi_dagger_Gamma_O_b_eta"
 QTMD_TRACE_TARGET = "Tr[P_qtau Gamma O_b Dinv]"
-
-
-def create_gi_qtmd_wilsonline_index_lists(eta_list, max_b_z, max_b_T):
-    """Create fixed-length GI qTMD Wilson-index lists for transverse x/y."""
-    index_list_trans0 = []
-    index_list_trans1 = []
-    for eta in eta_list:
-        eta = int(eta)
-        for current_bz in range(0, int(max_b_z) + 1, 2):
-            if eta < current_bz // 2:
-                continue
-            for current_b_T in range(0, int(max_b_T) + 1):
-                index_list_trans0.append([current_b_T, current_bz, eta, 0])
-                index_list_trans1.append([current_b_T, current_bz, eta, 1])
-                if current_bz != 0:
-                    index_list_trans0.append([current_b_T, -current_bz, eta, 0])
-                    index_list_trans1.append([current_b_T, -current_bz, eta, 1])
-    return index_list_trans0, index_list_trans1
-
-
-def gi_qtmd_staple_segments(W_index):
-    """Return signed nearest-neighbor path segments for a GI qTMD staple.
-
-    Each segment is ``(direction, signed_steps)`` with direction ``0, 1, 2``
-    corresponding to x, y, z.  The fixed-staple-length convention is
-    z(eta + b_z / 2), transverse(b_T), z(b_z / 2 - eta).
-    """
-    b_T, b_z, eta, transverse_direction = [int(round(v)) for v in W_index]
-    if b_T < 0:
-        raise ValueError("GI_qTMD requires non-negative b_T")
-    if b_z % 2 != 0:
-        raise ValueError("GI_qTMD requires even b_z in the fixed-staple-length convention")
-    if eta < 0:
-        raise ValueError("GI_qTMD requires non-negative eta")
-    if eta < abs(b_z) // 2:
-        raise ValueError("GI_qTMD requires eta >= abs(b_z) / 2")
-    if transverse_direction not in {0, 1}:
-        raise ValueError("GI_qTMD transverse_direction should be 0 or 1")
-
-    half_bz = b_z // 2
-    return [
-        (2, eta + half_bz),
-        (transverse_direction, b_T),
-        (2, half_bz - eta),
-    ]
-
-
-def _apply_signed_covariant_shift(gauge, fermion, direction, steps):
-    """Transport a field while constructing a cached staple link."""
-    shifted = fermion
-    if steps > 0:
-        for _ in range(steps):
-            shifted = gauge.pure_gauge.covDev(shifted, direction)
-    elif steps < 0:
-        for _ in range(-steps):
-            shifted = gauge.pure_gauge.covDev(shifted, direction + 4)
-    return shifted
-
-
-def _transport_staple_field(gauge, fermion, W_index):
-    """Transport along the geometric staple returned by ``gi_qtmd_staple_segments``.
-
-    Since ``D_mu psi(x) = U_mu(x) psi(x + mu)``, composed covariant
-    shifts act on the endpoint field in the reverse order of the geometric
-    Wilson path.
-    """
-    shifted = fermion.copy()
-    for direction, steps in reversed(gi_qtmd_staple_segments(W_index)):
-        shifted = _apply_signed_covariant_shift(gauge, shifted, direction, steps)
-    return shifted
-
-
-def build_gi_qtmd_staple_link(gauge: LatticeGauge, W_index):
-    """Build a gauge-only staple transporter matching direct covDev convention."""
-    link = LatticeLink(gauge.latt_info)
-    link_as_fermion = linkToFermion(link)
-    transported = _transport_staple_field(gauge, link_as_fermion, W_index)
-    return fermionToLink(transported)
-
-
-def build_gi_qtmd_staple_links(gauge: LatticeGauge, W_index_list):
-    """Build reusable gauge-only staple transporters for a Wilson-index list."""
-    return {tuple(W_index): build_gi_qtmd_staple_link(gauge, W_index) for W_index in W_index_list}
-
-
-def create_fermion_TMD_GI_from_link(staple_link: LatticeLink, fermion: LatticeFermion, W_index):
-    """Apply a cached GI qTMD staple transporter to the endpoint fermion."""
-    b_T, b_z, _eta, transverse_direction = [int(round(v)) for v in W_index]
-    endpoint = fermion.shift(b_T, transverse_direction).shift(b_z, 2)
-    shifted = LatticeFermion(fermion.latt_info)
-    xp = _get_xp_from_array(fermion.data)
-    shifted.data[:] = xp.einsum("wtzyxab,wtzyxib->wtzyxia", staple_link.data, endpoint.data, optimize=True)
-    return shifted
 
 
 def _contract_xi_dagger_gamma_shifted_eta(xi_data, gamma_ls, shifted_eta_data):
@@ -194,91 +113,6 @@ class DisconnectedQuarkqTMD1pt:
         self.gauge_preprocessing = parameters.get("gauge_preprocessing", "unspecified")
         validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
 
-    def create_TMD_Wilsonline_index_list_CG(self):
-        """Create the connected-code-compatible CG qTMD displacement list."""
-        index_list_trans0 = []
-        index_list_trans1 = []
-
-        for current_bz in range(0, self.b_z + 1):
-            for current_b_T in range(0, self.b_T + 1):
-                index_list_trans0.append([current_b_T, current_bz, 0, 0])
-                index_list_trans1.append([current_b_T, current_bz, 0, 1])
-
-                if current_bz != 0:
-                    index_list_trans0.append([current_b_T, -current_bz, 0, 0])
-                    index_list_trans1.append([current_b_T, -current_bz, 0, 1])
-
-        return self._reorder_wilson_indices(index_list_trans0), self._reorder_wilson_indices(index_list_trans1)
-
-    def _reorder_wilson_indices(self, index_list):
-        sorted_list = sorted(index_list, key=lambda x: (x[0], x[1]))
-        reordered = []
-        i = 0
-        while i < len(sorted_list) - 1:
-            current = sorted_list[i]
-            next_index = sorted_list[i + 1]
-            if abs(current[0] - next_index[0]) > 1 or abs(current[1] - next_index[1]) > 1:
-                best_match = next_index
-                best_diff = max(abs(current[0] - next_index[0]), abs(current[1] - next_index[1]))
-                for candidate in sorted_list[i + 2 :]:
-                    diff = max(abs(current[0] - candidate[0]), abs(current[1] - candidate[1]))
-                    if diff < best_diff:
-                        best_match = candidate
-                        best_diff = diff
-                if best_match != next_index:
-                    best_index = sorted_list.index(best_match)
-                    sorted_list[i + 1], sorted_list[best_index] = sorted_list[best_index], sorted_list[i + 1]
-            reordered.append(current)
-            i += 1
-
-        if i < len(sorted_list):
-            reordered.append(sorted_list[-1])
-        return reordered
-
-    def create_PDF_Wilsonline_index_list(self):
-        """Create the straight-z PDF displacement list."""
-        index_list = []
-
-        for current_bz in range(0, self.b_z + 1):
-            index_list.append([0, current_bz, 0, 0])
-
-        for current_bz in range(0, self.b_z + 1):
-            if current_bz != 0:
-                index_list.append([0, -current_bz, 0, 0])
-
-        return index_list
-
-    def create_TMD_Wilsonline_index_list_GI(self):
-        """Create the fixed-length gauge-invariant qTMD staple list."""
-        return create_gi_qtmd_wilsonline_index_lists(self.eta, self.b_z, self.b_T)
-
-    @staticmethod
-    def create_fermion_TMD_CG(fermion, W_index, W_index_previous):
-        """Apply the coordinate-gauge qTMD displacement to a fermion field."""
-        current_b_T = W_index[0]
-        current_bz = W_index[1]
-        transverse_direction = W_index[3]
-        z_direction = 2
-
-        previous_b_T = W_index_previous[0]
-        previous_bz = W_index_previous[1]
-
-        return fermion.shift(round(current_b_T - previous_b_T), transverse_direction).shift(round(current_bz - previous_bz), z_direction)
-
-    @staticmethod
-    def create_fermion_PDF_GI(gauge: LatticeGauge, fermion, W_index, W_index_previous):
-        """Apply a straight-z gauge-invariant PDF displacement to a fermion."""
-        current_bz = W_index[1]
-        previous_bz = W_index_previous[1]
-
-        if current_bz - previous_bz == 0:
-            return fermion
-        if current_bz - previous_bz == 1:
-            return gauge.pure_gauge.covDev(fermion, 2)
-        if current_bz - previous_bz == -1:
-            return gauge.pure_gauge.covDev(fermion, 6)
-        raise ValueError("Invalid shift for PDF Wilson line")
-
     def _contract_one_operator_list(self, latt_info, gauge, eta, xi, phases, W_index_list, operator_kind, staple_links=None):
         xp = _get_xp_from_array(xi.data)
         phases = _asarray_on_queue(phases, xp, xi.data)
@@ -297,16 +131,22 @@ class DisconnectedQuarkqTMD1pt:
                 if operator_kind == "CG_qTMD" and W_index[3] != W_index_previous[3]:
                     shifted_eta = eta.copy()
                     W_index_previous = [0, 0, 0, W_index[3]]
-                shifted_eta = self.create_fermion_TMD_CG(shifted_eta, W_index, W_index_previous)
+                shifted_eta = shift_qtmd_cg(
+                    shifted_eta, W_index, W_index_previous
+                )
             elif operator_kind == "GI_PDF":
                 if W_index[1] in {0, -1}:
                     shifted_eta = eta.copy()
                     W_index_previous = [0, 0, 0, 0]
-                shifted_eta = self.create_fermion_PDF_GI(gauge, shifted_eta, W_index, W_index_previous)
+                shifted_eta = shift_fermion_pdf_gi(
+                    gauge, shifted_eta, W_index, W_index_previous
+                )
             elif operator_kind == "GI_qTMD":
                 if staple_links is None:
                     raise ValueError("GI_qTMD production requires the staple-link cache")
-                shifted_eta = create_fermion_TMD_GI_from_link(staple_links[tuple(W_index)], eta, W_index)
+                shifted_eta = apply_gi_qtmd_staple_to_fermion(
+                    staple_links[tuple(W_index)], eta, W_index
+                )
             else:
                 raise ValueError(f"Unsupported operator_kind {operator_kind!r}")
 
@@ -410,13 +250,21 @@ class DisconnectedQuarkqTMD1pt:
 
         qlist = self.qlist if operator_kind in {"CG_qTMD", "GI_qTMD"} else self.qlist_PDF
         if operator_kind == "CG_qTMD":
-            W_index_list_dir0, W_index_list_dir1 = self.create_TMD_Wilsonline_index_list_CG()
+            W_index_list_dir0, W_index_list_dir1 = (
+                create_cg_qtmd_wilsonline_index_lists(
+                    self.b_z, self.b_T
+                )
+            )
             W_index_list = W_index_list_dir0 + W_index_list_dir1
         elif operator_kind == "GI_qTMD":
-            W_index_list_dir0, W_index_list_dir1 = self.create_TMD_Wilsonline_index_list_GI()
+            W_index_list_dir0, W_index_list_dir1 = (
+                create_gi_qtmd_wilsonline_index_lists(
+                    self.eta, self.b_z, self.b_T
+                )
+            )
             W_index_list = W_index_list_dir0 + W_index_list_dir1
         else:
-            W_index_list = self.create_PDF_Wilsonline_index_list()
+            W_index_list = create_pdf_wilsonline_index_list(self.b_z)
         if len(W_index_list) == 0:
             raise ValueError(f"No Wilson-line indices were generated for operator_kind {operator_kind!r}")
         n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)

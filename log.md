@@ -4,6 +4,22 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-18: Decouple connected qTMD operator utilities
+
+- Moved the unchanged CG/GI qTMD and PDF Wilson-index, displacement, staple
+  construction, and cached transport operations into the neutral
+  `qtmd_operator_utils.py` module.
+- Rewired connected pion/proton and disconnected qTMD production to the same
+  pure operator functions, removing connected imports of disconnected
+  production modules without changing execution order or output schema.
+- Consolidated NumPy/CuPy/dpnp host conversion in `tools.array_to_numpy` and
+  removed the disconnected and pion duplicate implementations.
+- S8T8 reference/candidate runs covered connected pion/proton and disconnected
+  CG/GI qTMD/PDF with one-rank `1.1.1.1` and four-rank `2.2.1.1` layouts.
+  All 27,655 same-layout datasets were bitwise identical at both solver
+  tolerances `1e-15` and `1e-10`; the full regression suite passes with
+  279 tests and 12 skips.
+
 ## 2026-07-18: Unify sink-separation interfaces
 
 - Replaced the remaining insertion-time production arguments with the common

@@ -160,7 +160,6 @@ def _sync_backend_array(arr):
 def _contract_operator_list(
     *,
     latt_info,
-    measurement,
     gauge,
     prop_f,
     seq_down,
@@ -172,8 +171,11 @@ def _contract_operator_list(
 ):
     from pyquda import getMPIComm
     from pyquda_utils import core
-    from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+    from pyquda_measurement_utils.qtmd_operator_utils import (
+        apply_gi_qtmd_staple_to_propagator,
         build_gi_qtmd_staple_links,
+        shift_propagator_pdf_gi,
+        shift_qtmd_cg,
     )
     from pyquda_measurement_utils.tools import (
         _asarray_on_queue,
@@ -211,7 +213,7 @@ def _contract_operator_list(
             if wilson_index[3] != previous[3]:
                 shifted_prop = prop_f.copy()
                 previous = [0, 0, 0, wilson_index[3]]
-            shifted_prop = measurement.create_fw_prop_TMD_CG(
+            shifted_prop = shift_qtmd_cg(
                 shifted_prop, wilson_index, previous
             )
             current_prop = shifted_prop
@@ -222,16 +224,16 @@ def _contract_operator_list(
             else:
                 previous = wilson_indices[index - 1]
             if operator_kind == "CG_PDF":
-                shifted_prop = measurement.create_fw_prop_TMD_CG(
+                shifted_prop = shift_qtmd_cg(
                     shifted_prop, wilson_index, previous
                 )
             else:
-                shifted_prop = measurement.create_fw_prop_PDF_GI(
+                shifted_prop = shift_propagator_pdf_gi(
                     gauge, shifted_prop, wilson_index, previous
                 )
             current_prop = shifted_prop
         elif operator_kind == "GI_qTMD":
-            current_prop = measurement.create_fw_prop_TMD_GI(
+            current_prop = apply_gi_qtmd_staple_to_propagator(
                 prop_f, wilson_index, staple_links
             )
         else:
@@ -386,6 +388,11 @@ def run(defaults, argv=None):
         get_sample_log_tag,
     )
     from pyquda_measurement_utils.proton_qTMD_pyquda import proton_TMD
+    from pyquda_measurement_utils.qtmd_operator_utils import (
+        create_cg_qtmd_wilsonline_index_lists,
+        create_gi_qtmd_wilsonline_index_lists,
+        create_pdf_wilsonline_index_list,
+    )
     from pyquda_measurement_utils.tools import (
         append_sample_log_entry,
         mpi_print,
@@ -557,20 +564,21 @@ def run(defaults, argv=None):
             [[v[0], v[1], v[2]] for v in qext_pdf],
             x0=source_position,
         )
-        cg_dir0, cg_dir1 = (
-            measurement.create_TMD_Wilsonline_index_list_CG()
+        cg_dir0, cg_dir1 = create_cg_qtmd_wilsonline_index_lists(
+            parameters["b_z"], parameters["b_T"]
         )
         cg_indices = cg_dir0 + cg_dir1
-        gi_dir0, gi_dir1 = (
-            measurement.create_TMD_Wilsonline_index_list_GI()
+        gi_dir0, gi_dir1 = create_gi_qtmd_wilsonline_index_lists(
+            parameters["eta"], parameters["b_z"], parameters["b_T"]
         )
         gi_indices = gi_dir0 + gi_dir1
-        pdf_indices = measurement.create_PDF_Wilsonline_index_list()
+        pdf_indices = create_pdf_wilsonline_index_list(
+            parameters["b_z"]
+        )
 
         if run_cg_qtmd:
             down, up = _contract_operator_list(
                 latt_info=latt_info,
-                measurement=measurement,
                 gauge=gauge,
                 prop_f=prop_fw,
                 seq_down=seq_down,
@@ -602,7 +610,6 @@ def run(defaults, argv=None):
         if run_gi_qtmd:
             down, up = _contract_operator_list(
                 latt_info=latt_info,
-                measurement=measurement,
                 gauge=gauge,
                 prop_f=prop_fw,
                 seq_down=seq_down,
@@ -635,7 +642,6 @@ def run(defaults, argv=None):
             for operator_kind in ("GI_PDF", "CG_PDF"):
                 down, up = _contract_operator_list(
                     latt_info=latt_info,
-                    measurement=measurement,
                     gauge=gauge,
                     prop_f=prop_fw,
                     seq_down=seq_down,

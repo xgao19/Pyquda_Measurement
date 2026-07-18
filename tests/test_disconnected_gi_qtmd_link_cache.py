@@ -21,12 +21,12 @@ def _run_link_cache_check():
         from pyquda import init
         from pyquda.field import LatticeFermion
         from pyquda_utils import io
-        from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+        from pyquda_measurement_utils.qtmd_operator_utils import (
+            apply_gi_qtmd_staple_to_fermion,
             build_gi_qtmd_staple_link,
-            create_fermion_TMD_GI_from_link,
         )
         from qtmd_gi_reference import create_fermion_TMD_GI
-        from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
+        from pyquda_measurement_utils.tools import array_to_numpy
     except Exception as err:
         raise SkipTest(f"PyQUDA environment is not available: {err}") from err
 
@@ -72,7 +72,9 @@ def _run_link_cache_check():
     for W_index in cases:
         direct = create_fermion_TMD_GI(gauge, fermion, W_index)
         staple_link = build_gi_qtmd_staple_link(gauge, W_index)
-        from_link = create_fermion_TMD_GI_from_link(staple_link, fermion, W_index)
+        from_link = apply_gi_qtmd_staple_to_fermion(
+            staple_link, fermion, W_index
+        )
         np.testing.assert_allclose(array_to_numpy(from_link.data), array_to_numpy(direct.data), atol=1e-12, rtol=1e-12)
 
     for b_z in (-2, 2):
@@ -82,7 +84,7 @@ def _run_link_cache_check():
             pdf = gauge.pure_gauge.covDev(pdf, direction)
         w_index = [0, b_z, abs(b_z) // 2, 0]
         staple_link = build_gi_qtmd_staple_link(gauge, w_index)
-        qtmd_pdf_limit = create_fermion_TMD_GI_from_link(
+        qtmd_pdf_limit = apply_gi_qtmd_staple_to_fermion(
             staple_link, fermion, w_index
         )
         np.testing.assert_allclose(

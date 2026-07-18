@@ -176,6 +176,10 @@ python tests/run_smoke_tests.py
 
 ## qTMD Conventions And Pitfalls
 
+- Keep CG/GI qTMD/PDF index geometry and transport in the neutral
+  `qtmd_operator_utils.py`; connected pion/proton code must not import
+  disconnected production modules.  Convert backend arrays to host only via
+  `tools.array_to_numpy`.
 - qTMDWF and qDA local pion C2 use explicit fixed source Gamma labels and a
   full 16-Gamma sink scan.
 - For pion qTMD/PDF and EMFF, the smearing tag describes only the gauge and

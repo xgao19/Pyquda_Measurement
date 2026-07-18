@@ -3,13 +3,13 @@ from pathlib import Path
 import numpy as np
 
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
-    array_to_numpy,
     matrix_on_backend,
     matrix_stack_on_backend,
     zeros_on_backend,
 )
 from pyquda_measurement_utils.tools import (
     append_sample_log_entry,
+    array_to_numpy,
     read_sample_log_entries,
 )
 

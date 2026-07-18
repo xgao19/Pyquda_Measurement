@@ -92,6 +92,11 @@ from pyquda_measurement_utils.pion_utils_vibe_develop import (
     build_pion_source_propagators,
     source_gamma_provenance,
 )
+from pyquda_measurement_utils.qtmd_operator_utils import (
+    create_cg_qtmd_wilsonline_index_lists,
+    create_gi_qtmd_wilsonline_index_lists,
+    create_pdf_wilsonline_index_list,
+)
 from pyquda_measurement_utils.tools import (
     append_sample_log_entry,
     mpi_print,
@@ -299,11 +304,19 @@ for pos in src_positions:
     phases_TMD = phase.MomentumPhase(latt_info).getPhases(qext_xyz, pos)
     qext_pdf_xyz = [[v[0], v[1], v[2]] for v in parameters["qext_PDF"]]
     phases_PDF = MomentumPhase(latt_info).getPhases(qext_pdf_xyz, x0=pos)
-    W_index_list_CG_dir0, W_index_list_CG_dir1 = measurement.create_TMD_Wilsonline_index_list_CG()
+    W_index_list_CG_dir0, W_index_list_CG_dir1 = (
+        create_cg_qtmd_wilsonline_index_lists(
+            parameters["b_z"], parameters["b_T"]
+        )
+    )
     W_index_list_CG = W_index_list_CG_dir0 + W_index_list_CG_dir1
-    W_index_list_GI_dir0, W_index_list_GI_dir1 = measurement.create_TMD_Wilsonline_index_list_GI()
+    W_index_list_GI_dir0, W_index_list_GI_dir1 = (
+        create_gi_qtmd_wilsonline_index_lists(
+            parameters["eta"], parameters["b_z"], parameters["b_T"]
+        )
+    )
     W_index_list_GI = W_index_list_GI_dir0 + W_index_list_GI_dir1
-    W_index_list_PDF = measurement.create_PDF_Wilsonline_index_list()
+    W_index_list_PDF = create_pdf_wilsonline_index_list(parameters["b_z"])
 
     tasks = list(range(len(my_gammas)))
     rank = latt_info.mpi_rank

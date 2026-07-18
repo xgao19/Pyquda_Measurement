@@ -6,7 +6,9 @@ GI qTMD, and PDF/local-limit contractions.
 This is the canonical connected pion entry point for CG qTMD, GI qTMD, CG PDF,
 and GI PDF.  The former duplicate CG-only application has been removed.  The GI
 qTMD path uses the fixed-length staple convention shared with the disconnected
-qTMD code.
+qTMD code. Both connected and disconnected production obtain the shared
+Wilson-index geometry, CG/PDF shifts, and cached GI staple transport from
+`pyquda_measurement_utils/qtmd_operator_utils.py`.
 
 ## Perlmutter Entry Point
 

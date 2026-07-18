@@ -1,5 +1,11 @@
-from pyquda_measurement_utils.pion_qTMD_vibe_develop import pion_TMD
-from pyquda_measurement_utils.proton_qTMD_pyquda import proton_TMD
+import pytest
+
+from pyquda_measurement_utils.qtmd_operator_utils import (
+    apply_gi_qtmd_staple_to_propagator,
+    create_cg_qtmd_wilsonline_index_lists,
+    shift_propagator_pdf_gi,
+    shift_qtmd_cg,
+)
 
 
 class FakeFermion:
@@ -35,53 +41,79 @@ class FakePropagator:
         self.values[(spin, color)] = fermion
 
 
+class FakeShiftField:
+    def __init__(self, shifts=None):
+        self.shifts = list(shifts or [])
+
+    def shift(self, steps, direction):
+        return FakeShiftField(self.shifts + [(steps, direction)])
+
+
 def _all_paths(prop):
     return {tuple(value.path) for value in prop.values.values()}
 
 
-def test_connected_pion_and_proton_pdf_gi_one_step_helpers_match():
+def test_connected_pdf_gi_one_step_helper_supports_both_directions():
     gauge = FakeGauge()
-    pion = object.__new__(pion_TMD)
-    proton = object.__new__(proton_TMD)
-
-    pion_prop = pion.create_fw_prop_PDF_GI(gauge, FakePropagator(), [0, 1, 0, 0], [0, 0, 0, 0])
-    proton_prop = proton.create_fw_prop_PDF_GI(gauge, FakePropagator(), [0, 1, 0, 0], [0, 0, 0, 0])
-    assert _all_paths(pion_prop) == {(2,)}
-    assert _all_paths(proton_prop) == {(2,)}
-
-    pion_prop = pion.create_fw_prop_PDF_GI(gauge, FakePropagator(), [0, -1, 0, 0], [0, 0, 0, 0])
-    proton_prop = proton.create_fw_prop_PDF_GI(gauge, FakePropagator(), [0, -1, 0, 0], [0, 0, 0, 0])
-    assert _all_paths(pion_prop) == {(6,)}
-    assert _all_paths(proton_prop) == {(6,)}
+    positive = shift_propagator_pdf_gi(
+        gauge, FakePropagator(), [0, 1, 0, 0], [0, 0, 0, 0]
+    )
+    negative = shift_propagator_pdf_gi(
+        gauge, FakePropagator(), [0, -1, 0, 0], [0, 0, 0, 0]
+    )
+    assert _all_paths(positive) == {(2,)}
+    assert _all_paths(negative) == {(6,)}
 
 
 def test_connected_pdf_gi_helpers_reject_non_incremental_jumps():
     gauge = FakeGauge()
-    pion = object.__new__(pion_TMD)
-    proton = object.__new__(proton_TMD)
-
-    for measurement in (pion, proton):
-        try:
-            measurement.create_fw_prop_PDF_GI(gauge, FakePropagator(), [0, 2, 0, 0], [0, 0, 0, 0])
-        except ValueError:
-            continue
-        raise AssertionError("PDF GI helper should reject jumps larger than one lattice spacing")
+    with pytest.raises(ValueError):
+        shift_propagator_pdf_gi(
+            gauge,
+            FakePropagator(),
+            [0, 2, 0, 0],
+            [0, 0, 0, 0],
+        )
 
 
 def test_connected_gi_qtmd_production_requires_link_cache():
-    gauge = FakeGauge()
-    pion = object.__new__(pion_TMD)
-    proton = object.__new__(proton_TMD)
     w_index = [2, 4, 3, 0]
+    with pytest.raises(TypeError):
+        apply_gi_qtmd_staple_to_propagator(
+            FakePropagator(), w_index
+        )
 
-    for measurement in (pion, proton):
-        with pytest.raises(TypeError):
-            if measurement is proton:
-                measurement.create_fw_prop_TMD_GI(
-                    FakePropagator(), w_index
-                )
-            else:
-                measurement.create_fw_prop_TMD_GI(
-                    gauge, FakePropagator(), w_index
-                )
+
+def test_cg_qtmd_incremental_shift_order_is_unchanged():
+    shifted = shift_qtmd_cg(
+        FakeShiftField(),
+        [3, -2, 0, 1],
+        [1, 1, 0, 1],
+    )
+    assert shifted.shifts == [(2, 1), (-3, 2)]
+
+
+def test_cg_qtmd_greedy_execution_order_is_unchanged():
+    direction0, direction1 = create_cg_qtmd_wilsonline_index_lists(2, 2)
+    expected = [
+        [0, -2, 0, 0],
+        [0, -1, 0, 0],
+        [0, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 2, 0, 0],
+        [1, 1, 0, 0],
+        [1, 0, 0, 0],
+        [1, -1, 0, 0],
+        [1, -2, 0, 0],
+        [2, -2, 0, 0],
+        [2, -1, 0, 0],
+        [2, 0, 0, 0],
+        [2, 1, 0, 0],
+        [1, 2, 0, 0],
+        [2, 2, 0, 0],
+    ]
+    assert direction0 == expected
+    assert direction1 == [
+        [b_T, b_z, eta, 1] for b_T, b_z, eta, _direction in expected
+    ]
 import pytest

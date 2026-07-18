@@ -110,7 +110,7 @@ def test_operator_is_applied_to_eta_and_xi_remains_on_the_left(
     monkeypatch.setattr(qtmd.core, "gatherLattice", lambda values, _axes: values)
     monkeypatch.setattr(
         qtmd,
-        "create_fermion_TMD_GI_from_link",
+        "apply_gi_qtmd_staple_to_fermion",
         lambda _link, fermion, _w_index: fermion.shift(1, 3),
     )
 

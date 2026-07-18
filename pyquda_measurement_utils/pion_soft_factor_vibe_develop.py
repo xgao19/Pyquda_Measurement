@@ -82,11 +82,14 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
 )
 from pyquda_measurement_utils.io_corr import ensure_parent_dir
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
-    array_to_numpy,
     matrix_on_backend,
     matrix_stack_on_backend,
 )
-from pyquda_measurement_utils.tools import _get_xp_from_array, mpi_print
+from pyquda_measurement_utils.tools import (
+    _get_xp_from_array,
+    array_to_numpy,
+    mpi_print,
+)
 
 
 soft_factor_gammas = ["5", "I", "X", "Y", "X5", "Y5"]

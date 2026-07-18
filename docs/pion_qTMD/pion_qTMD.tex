@@ -559,7 +559,8 @@ where:
         $\mathbf{e}_y$.
 \end{itemize}
 
-The incremental shift operation in \verb|create_fw_prop_TMD_CG| computes
+The shared incremental shift operation
+\verb|qtmd_operator_utils.shift_qtmd_cg| computes
 \begin{equation}
   \Delta b_T = \text{round}(b_T^{\rm current} - b_T^{\rm previous}),\qquad
   \Delta b_z = \text{round}(b_z^{\rm current} - b_z^{\rm previous}),
@@ -592,7 +593,7 @@ The CG PDF operator is identical in spirit to the CG qTMD operator
   S_q(x + b_z\mathbf{e}_z,\; x_0).
 \end{equation}
 No gauge links are included.  This is implemented by the same
-\verb|create_fw_prop_TMD_CG| method, which applies a lattice shift in the $z$
+\verb|shift_qtmd_cg| function, which applies a lattice shift in the $z$
 direction (direction index 2).
 
 \subsection{GI PDF (Gauge Invariant)}
@@ -608,9 +609,9 @@ and for a unit step in the $-z$ direction:
            = U_z^\dagger(x - \hat{z})\,\psi(x - \hat{z}).
 \end{equation}
 
-The implementation in \verb|create_fw_prop_PDF_GI| applies the gauge-covariant
-derivative \texttt{gauge.pure\_gauge.covDev(fermion, dir)} spin-color by
-spin-color:
+The implementation in \verb|shift_propagator_pdf_gi| applies the
+gauge-covariant derivative
+\texttt{gauge.pure\_gauge.covDev(fermion, dir)} spin-color by spin-color:
 \begin{itemize}[nosep]
   \item \texttt{covDev(fermion, 2)}: covariant shift in $+z$ ($\Delta b_z =
         +1$).
@@ -653,7 +654,8 @@ datasets agree with the pion EMFF output at machine precision.
 
 \subsection{TMD Wilson Line Indices}
 
-The method \verb|create_TMD_Wilsonline_index_list_CG| returns two lists:
+The shared function \verb|create_cg_qtmd_wilsonline_index_lists| returns two
+lists:
 \texttt{index\_list\_trans0} (transverse direction 0, i.e., $x$) and
 \texttt{index\_list\_trans1} (transverse direction 1, i.e., $y$).
 
@@ -673,9 +675,9 @@ projection.
 
 \subsection{Reordering for Minimal Adjacent Differences}
 
-After enumeration, \verb|_reorder_wilson_indices| reorders each list to
-minimize the maximum absolute difference in $(b_T, b_z)$ between adjacent
-indices.  The algorithm:
+After enumeration, an internal helper in
+\verb|qtmd_operator_utils.py| reorders each list to minimize the maximum
+absolute difference in $(b_T, b_z)$ between adjacent indices.  The algorithm:
 \begin{enumerate}[nosep]
   \item Sort by $(b_T, b_z)$ lexicographically.
   \item Walk through the sorted list; if the jump from index $i$ to $i+1$
@@ -689,8 +691,8 @@ the PyQUDA propagator implementation.
 
 \subsection{PDF Wilson Line Indices}
 
-The method \verb|create_PDF_Wilsonline_index_list| returns a single list
-(because $b_T = 0$ always):
+The shared function \verb|create_pdf_wilsonline_index_list| returns a single
+list (because $b_T = 0$ always):
 \begin{verbatim}
 for bz in 0 .. b_z:
     add [0, bz, 0, 0]
@@ -719,20 +721,18 @@ The core implementation resides in
 
 \subsection{\texttt{\_\_init\_\_(parameters)}}
 
-Constructs the measurement object from a parameter dictionary with keys:
+Constructs the lightweight contraction object from a parameter dictionary
+with keys:
 \begin{itemize}[nosep]
-  \item \texttt{eta}: staple length parameter (list, typically \texttt{[0]}).
-  \item \texttt{b\_z}, \texttt{b\_T}: maximum longitudinal and transverse
-        displacements.
-  \item \texttt{pf}: sink boost momentum $[p_x, p_y, p_z, p_t]$.
-  \item \texttt{qext}, \texttt{qext\_PDF}: insertion momentum lists for qTMD
-        and PDF respectively.
   \item \texttt{p\_2pt}: momentum list for the two-point function.
   \item \texttt{width}: Gaussian smearing width.
   \item \texttt{pos\_boost}, \texttt{neg\_boost}: boosted smearing momentum
         boosts for quark and antiquark lines.
-  \item \texttt{t\_insert}: sink-source separation $t_{\rm sep}$.
 \end{itemize}
+The application layer owns $\eta$, $b_z$, $b_T$, insertion momenta,
+$t_{\rm sep}$, and output scheduling.  It constructs the Wilson-index lists
+with the neutral \verb|qtmd_operator_utils| functions and passes them to the
+contraction object.
 
 \subsection{\texttt{contract\_2pt\_pion}}
 
@@ -769,7 +769,7 @@ Workflow:
         \texttt{seq\_bw\_prop}^\dagger \gamma_5$.
   \item For direction 0 ($x$): iterate over \texttt{W\_index\_list\_dir0},
         incrementally shifting the negative active propagator using
-        \verb|create_fw_prop_TMD_CG| and contracting at each step via
+        \verb|shift_qtmd_cg| and contracting at each step via
         the shared Gamma-scan kernel.
   \item Reset and repeat for direction 1 ($y$) with
         \texttt{W\_index\_list\_dir1}.
@@ -800,8 +800,9 @@ Same structure as \verb|contract_qTMD_CG| but:
   \item Resets the negative active propagator to the original copy whenever $b_z$
         returns to $0$ (handling the split between positive and negative
         branches).
-  \item Calls \verb|create_fw_prop_PDF_GI| when \texttt{gauge\_invariant=True}
-        or \verb|create_fw_prop_TMD_CG| when \texttt{gauge\_invariant=False}.
+  \item Calls \verb|shift_propagator_pdf_gi| when
+        \texttt{gauge\_invariant=True} or \verb|shift_qtmd_cg| when
+        \texttt{gauge\_invariant=False}.
 \end{itemize}
 
 \subsection{Shared per-shift Gamma scan}
@@ -836,23 +837,23 @@ The index conventions are:
   \item $a,b,c,f$: color indices.
 \end{itemize}
 
-\subsection{\texttt{create\_fw\_prop\_TMD\_CG}}
+\subsection{\texttt{shift\_qtmd\_cg}}
 
 \begin{lstlisting}
-def create_fw_prop_TMD_CG(self, prop_f, W_index, W_index_previous):
+def shift_qtmd_cg(field, W_index, W_index_previous):
     dbT = current_b_T - previous_b_T
     dbz = current_bz - previous_bz
-    return prop_f.shift(round(dbT), trans_dir).shift(round(dbz), 2)
+    return field.shift(round(dbT), trans_dir).shift(round(dbz), 2)
 \end{lstlisting}
 
 Applies incremental lattice shifts to propagate the forward propagator from one
 Wilson index to the next.  The $z$-direction is always index 2 (the third
 spatial axis in PyQUDA's convention).
 
-\subsection{\texttt{create\_fw\_prop\_PDF\_GI}}
+\subsection{\texttt{shift\_propagator\_pdf\_gi}}
 
 \begin{lstlisting}
-def create_fw_prop_PDF_GI(self, gauge, prop_f, W_index, W_index_previous):
+def shift_propagator_pdf_gi(gauge, prop_f, W_index, W_index_previous):
     for spin in range(4):
         for color in range(3):
             fermion = prop_f.getFermion(spin, color)
@@ -1285,14 +1286,14 @@ staple length.  The constraints are
   b_z \in 2\mathbb{Z}, \qquad \eta \geq \frac{|b_z|}{2}, \qquad b_T \geq 0.
 \end{equation}
 
-The implementation uses the same tested helper convention as the disconnected
-qTMD one-point code: first build reusable gauge-only staple transporters, then
-apply each transporter to the endpoint-shifted forward propagator.  In the pion
-source file this is exposed through
+The implementation uses the same tested neutral helper convention as the
+disconnected qTMD one-point code: first build reusable gauge-only staple
+transporters, then apply each transporter to the endpoint-shifted forward
+propagator.  The shared \texttt{qtmd\_operator\_utils.py} interface contains
 \begin{itemize}[nosep]
-  \item \texttt{create\_TMD\_Wilsonline\_index\_list\_GI()},
-  \item \texttt{create\_fw\_prop\_TMD\_GI(...)},
-  \item \texttt{contract\_qTMD\_GI(...)}.
+  \item \texttt{create\_gi\_qtmd\_wilsonline\_index\_lists(...)},
+  \item \texttt{build\_gi\_qtmd\_staple\_links(...)},
+  \item \texttt{apply\_gi\_qtmd\_staple\_to\_propagator(...)}.
 \end{itemize}
 
 The HDF5 tag for the connected pion gauge-invariant staple output is

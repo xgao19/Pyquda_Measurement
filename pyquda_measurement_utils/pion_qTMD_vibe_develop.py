@@ -132,11 +132,12 @@ written with the wrong momentum/gamma interpretation.
 import numpy as np
 
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
-from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+from pyquda_measurement_utils.qtmd_operator_utils import (
+    apply_gi_qtmd_staple_to_propagator,
     build_gi_qtmd_staple_links,
-    create_fermion_TMD_GI_from_link,
+    shift_propagator_pdf_gi,
+    shift_qtmd_cg,
 )
-from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import create_gi_qtmd_wilsonline_index_lists
 from pyquda_measurement_utils.io_corr import save_proton_c2pt_hdf5
 from pyquda_measurement_utils.tools import mpi_print
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
@@ -150,10 +151,6 @@ from pyquda_measurement_utils.pion_utils_vibe_develop import (
 
 class pion_TMD:
     def __init__(self, parameters):
-        self.eta = parameters["eta"]
-        self.b_z = parameters["b_z"]
-        self.b_T = parameters["b_T"]
-
         self.pilist = parameters["p_2pt"]
 
         self.width = parameters["width"]
@@ -195,7 +192,9 @@ class pion_TMD:
         for iW, W_index in enumerate(W_index_list_dir0):
             mpi_print(latt_info, f"Contract pion qTMD CG {iW + 1}/{len(W_index_list)} {W_index}")
             W_index_previous = [0, 0, 0, 0] if iW == 0 else W_index_list_dir0[iW - 1]
-            tmd_active_prop_dir0 = self.create_fw_prop_TMD_CG(tmd_active_prop_dir0, W_index, W_index_previous)
+            tmd_active_prop_dir0 = shift_qtmd_cg(
+                tmd_active_prop_dir0, W_index, W_index_previous
+            )
             corr = contract_pion_gamma_scan_from_backward_line(
                 latt_info, tmd_active_prop_dir0, seq_bw_line, phases, [src_gamma]
             )[src_gamma]
@@ -207,7 +206,9 @@ class pion_TMD:
         for iW, W_index in enumerate(W_index_list_dir1):
             mpi_print(latt_info, f"Contract pion qTMD CG {iW + 1 + len(W_index_list_dir0)}/{len(W_index_list)} {W_index}")
             W_index_previous = [0, 0, 0, 0] if iW == 0 else W_index_list_dir1[iW - 1]
-            tmd_active_prop_dir1 = self.create_fw_prop_TMD_CG(tmd_active_prop_dir1, W_index, W_index_previous)
+            tmd_active_prop_dir1 = shift_qtmd_cg(
+                tmd_active_prop_dir1, W_index, W_index_previous
+            )
             corr = contract_pion_gamma_scan_from_backward_line(
                 latt_info, tmd_active_prop_dir1, seq_bw_line, phases, [src_gamma]
             )[src_gamma]
@@ -227,7 +228,9 @@ class pion_TMD:
         pion_TMDs = []
         for iW, W_index in enumerate(W_index_list):
             mpi_print(latt_info, f"Contract pion qTMD GI {iW + 1}/{len(W_index_list)} {W_index}")
-            shifted_prop = self.create_fw_prop_TMD_GI(gauge, active_prop, W_index, staple_links=staple_links)
+            shifted_prop = apply_gi_qtmd_staple_to_propagator(
+                active_prop, W_index, staple_links
+            )
             corr = contract_pion_gamma_scan_from_backward_line(
                 latt_info, shifted_prop, seq_bw_line, phases, [src_gamma]
             )[src_gamma]
@@ -256,9 +259,13 @@ class pion_TMD:
                 W_index_previous = W_index_list[iW - 1]
 
             if gauge_invariant:
-                pdf_active_prop = self.create_fw_prop_PDF_GI(gauge, pdf_active_prop, W_index, W_index_previous)
+                pdf_active_prop = shift_propagator_pdf_gi(
+                    gauge, pdf_active_prop, W_index, W_index_previous
+                )
             else:
-                pdf_active_prop = self.create_fw_prop_TMD_CG(pdf_active_prop, W_index, W_index_previous)
+                pdf_active_prop = shift_qtmd_cg(
+                    pdf_active_prop, W_index, W_index_previous
+                )
 
             corr = contract_pion_gamma_scan_from_backward_line(
                 latt_info, pdf_active_prop, seq_bw_line, phases, [src_gamma]
@@ -268,100 +275,3 @@ class pion_TMD:
         del pdf_active_prop
 
         return np.asarray(pion_PDFs) if latt_info.mpi_rank == 0 else None
-
-    def create_TMD_Wilsonline_index_list_CG(self):
-        index_list_trans0 = []
-        index_list_trans1 = []
-
-        for current_bz in range(0, self.b_z + 1):
-            for current_b_T in range(0, self.b_T + 1):
-                index_list_trans0.append([current_b_T, current_bz, 0, 0])
-                index_list_trans1.append([current_b_T, current_bz, 0, 1])
-
-                if current_bz != 0:
-                    index_list_trans0.append([current_b_T, -current_bz, 0, 0])
-                    index_list_trans1.append([current_b_T, -current_bz, 0, 1])
-
-        return self._reorder_wilson_indices(index_list_trans0), self._reorder_wilson_indices(index_list_trans1)
-
-    def create_TMD_Wilsonline_index_list_GI(self):
-        return create_gi_qtmd_wilsonline_index_lists(self.eta, self.b_z, self.b_T)
-
-    def _reorder_wilson_indices(self, index_list):
-        sorted_list = sorted(index_list, key=lambda x: (x[0], x[1]))
-        reordered = []
-        i = 0
-        while i < len(sorted_list) - 1:
-            current = sorted_list[i]
-            next_index = sorted_list[i + 1]
-            if abs(current[0] - next_index[0]) > 1 or abs(current[1] - next_index[1]) > 1:
-                best_match = next_index
-                best_diff = max(abs(current[0] - next_index[0]), abs(current[1] - next_index[1]))
-                for candidate in sorted_list[i + 2 :]:
-                    diff = max(abs(current[0] - candidate[0]), abs(current[1] - candidate[1]))
-                    if diff < best_diff:
-                        best_match = candidate
-                        best_diff = diff
-                if best_match != next_index:
-                    best_index = sorted_list.index(best_match)
-                    sorted_list[i + 1], sorted_list[best_index] = sorted_list[best_index], sorted_list[i + 1]
-            reordered.append(current)
-            i += 1
-
-        if i < len(sorted_list):
-            reordered.append(sorted_list[-1])
-        return reordered
-
-    def create_fw_prop_TMD_CG(self, active_prop, W_index, W_index_previous):
-        current_b_T = W_index[0]
-        current_bz = W_index[1]
-        transverse_direction = W_index[3]
-        z_direction = 2
-
-        previous_b_T = W_index_previous[0]
-        previous_bz = W_index_previous[1]
-
-        return active_prop.shift(round(current_b_T - previous_b_T), transverse_direction).shift(round(current_bz - previous_bz), z_direction)
-
-    def create_fw_prop_TMD_GI(self, gauge, active_prop, W_index, staple_links):
-        prop_shift = active_prop.copy()
-        staple_link = staple_links[tuple(W_index)]
-
-        for spin in range(4):
-            for color in range(3):
-                fermion = active_prop.getFermion(spin, color)
-                fermion_shift = create_fermion_TMD_GI_from_link(staple_link, fermion, W_index)
-                prop_shift.setFermion(fermion_shift, spin, color)
-
-        return prop_shift
-
-    def create_PDF_Wilsonline_index_list(self):
-        index_list = []
-
-        for current_bz in range(0, self.b_z + 1):
-            index_list.append([0, current_bz, 0, 0])
-
-        for current_bz in range(0, self.b_z + 1):
-            if current_bz != 0:
-                index_list.append([0, -current_bz, 0, 0])
-
-        return index_list
-
-    def create_fw_prop_PDF_GI(self, gauge, active_prop, W_index, W_index_previous):
-        current_bz = W_index[1]
-        previous_bz = W_index_previous[1]
-
-        for spin in range(4):
-            for color in range(3):
-                fermion = active_prop.getFermion(spin, color)
-                if current_bz - previous_bz == 0:
-                    fermion_shift = fermion
-                elif current_bz - previous_bz == 1:
-                    fermion_shift = gauge.pure_gauge.covDev(fermion, 2)
-                elif current_bz - previous_bz == -1:
-                    fermion_shift = gauge.pure_gauge.covDev(fermion, 6)
-                else:
-                    raise ValueError("Invalid shift for PDF Wilson line")
-                active_prop.setFermion(fermion_shift, spin, color)
-
-        return active_prop

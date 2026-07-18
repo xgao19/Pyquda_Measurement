@@ -20,7 +20,6 @@ from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import (
     my_gammas,
     parse_multigrid_blocks,
 )
-from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.fermion_bilinear_basis import (
     IDENTITY_GAMMA_POSITION,
     basis_attrs,
@@ -30,7 +29,11 @@ from pyquda_measurement_utils.pion_utils_vibe_develop import (
     build_pion_source_propagators,
     contract_pion_2pt,
 )
-from pyquda_measurement_utils.tools import mpi_print, mpi_timer_print
+from pyquda_measurement_utils.tools import (
+    array_to_numpy,
+    mpi_print,
+    mpi_timer_print,
+)
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_meson_bw_seq_pyquda
 

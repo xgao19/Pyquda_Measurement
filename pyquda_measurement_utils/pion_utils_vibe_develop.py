@@ -7,7 +7,11 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
     PYQUDA_GAMMA_IDS,
     gamma_stack as canonical_gamma_stack,
 )
-from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array
+from pyquda_measurement_utils.tools import (
+    _asarray_on_queue,
+    _get_xp_from_array,
+    array_to_numpy,
+)
 
 
 my_gammas = list(GAMMA_LABELS)
@@ -55,18 +59,6 @@ def _gamma_matrix(gamma_like):
     if hasattr(gamma_like, "matrix"):
         return gamma_like.matrix
     return gamma_like
-
-
-def array_to_numpy(arr):
-    if hasattr(arr, "get"):
-        return arr.get()
-    if type(arr).__module__.split(".")[0] == "cupy":
-        return arr.get()
-    if type(arr).__module__.split(".")[0] == "dpnp":
-        import dpnp
-
-        return dpnp.asnumpy(arr)
-    return np.asarray(arr)
 
 
 def matrix_on_backend(value, reference_array):

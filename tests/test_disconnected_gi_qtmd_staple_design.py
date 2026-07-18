@@ -1,8 +1,8 @@
 import numpy as np
 
-from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
-    DisconnectedQuarkqTMD1pt,
+from pyquda_measurement_utils.qtmd_operator_utils import (
     _transport_staple_field,
+    create_gi_qtmd_wilsonline_index_lists,
     gi_qtmd_staple_segments,
 )
 from qtmd_gi_reference import create_fermion_TMD_GI
@@ -49,16 +49,9 @@ def test_gi_qtmd_staple_invalid_indices():
 
 
 def test_gi_qtmd_production_wilson_index_list():
-    measurement = DisconnectedQuarkqTMD1pt(
-        {
-            "config_num": 0,
-            "eta": [0, 1, 2],
-            "b_z": 4,
-            "b_T": 1,
-            "qext": [[0, 0, 0, 0]],
-        }
+    dir0, dir1 = create_gi_qtmd_wilsonline_index_lists(
+        [0, 1, 2], 4, 1
     )
-    dir0, dir1 = measurement.create_TMD_Wilsonline_index_list_GI()
 
     assert [0, 0, 0, 0] in dir0
     assert [0, 2, 1, 0] in dir0

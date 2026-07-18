@@ -1,5 +1,4 @@
 import importlib.util
-import inspect
 from pathlib import Path
 import subprocess
 
@@ -141,7 +140,7 @@ def test_proton_qtmd_has_one_shared_runner_and_two_thin_platform_entries():
     ).exists()
 
 
-def test_proton_qtmd_measurement_keeps_only_active_state_and_gi_signature():
+def test_proton_qtmd_measurement_keeps_only_c2_state():
     measurement = proton_TMD(
         {
             "eta": [1],
@@ -152,11 +151,17 @@ def test_proton_qtmd_measurement_keeps_only_active_state_and_gi_signature():
             "boost_out": [0, 0, 0],
         }
     )
-    for field in ("pf", "plist", "qlist", "pol_list", "t_separations"):
+    for field in (
+        "eta",
+        "b_z",
+        "b_T",
+        "pf",
+        "plist",
+        "qlist",
+        "pol_list",
+        "t_separations",
+    ):
         assert not hasattr(measurement, field)
-    assert tuple(
-        inspect.signature(measurement.create_fw_prop_TMD_GI).parameters
-    ) == ("prop_f", "W_index", "staple_links")
 
 
 def test_proton_emt_requires_explicit_nonempty_t_separations():

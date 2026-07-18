@@ -28,6 +28,7 @@ from pyquda_measurement_utils.io_corr import (
 from pyquda_measurement_utils.tools import (
     _asarray_on_queue,
     _get_xp_from_array,
+    array_to_numpy,
     mpi_print,
     mpi_timer_print,
     timing_enabled,
@@ -52,7 +53,6 @@ from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import (
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
     append_completed_base,
-    array_to_numpy,
     base_part_ranges,
     canonical_temp_path,
     discover_shard_layout,

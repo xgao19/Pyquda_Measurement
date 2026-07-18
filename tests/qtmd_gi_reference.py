@@ -1,6 +1,6 @@
 """Slow direct-covDev GI qTMD reference used only by tests."""
 
-from pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop import (
+from pyquda_measurement_utils.qtmd_operator_utils import (
     gi_qtmd_staple_segments,
 )
 

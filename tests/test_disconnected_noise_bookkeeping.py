@@ -132,7 +132,7 @@ def test_noise_iterator_requires_counter_configuration():
 
 
 def test_array_to_numpy_accepts_numpy_and_get_backends():
-    from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
+    from pyquda_measurement_utils.tools import array_to_numpy
 
     values = np.asarray([1.0, 2.0])
     assert array_to_numpy(values) is values

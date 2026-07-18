@@ -32,6 +32,9 @@ For `GI_qTMD`, the fixed-length staple requires even `b_z` and
 `eta >= abs(b_z)/2`. Gauge-only staple links are built once per configuration
 and reused for every stochastic source. The slow direct-covDev implementation
 exists only under `tests/` as a numerical reference.
+The same neutral operator geometry and transport implementation in
+`pyquda_measurement_utils/qtmd_operator_utils.py` is used by connected
+pion/proton production.
 
 Run a measurement and then finalize complete bases:
 

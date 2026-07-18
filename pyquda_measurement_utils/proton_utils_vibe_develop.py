@@ -3,11 +3,11 @@
 from pyquda_utils import core, gamma
 
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
-from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.fermion_bilinear_basis import gamma_stack
 from pyquda_measurement_utils.tools import (
     _asarray_on_queue,
     _get_xp_from_array,
+    array_to_numpy,
     mpi_print,
 )
 

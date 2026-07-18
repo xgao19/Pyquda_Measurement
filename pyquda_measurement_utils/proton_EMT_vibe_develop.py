@@ -17,7 +17,6 @@ from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import (
     flow_times as _flow_times,
     parse_multigrid_blocks,
 )
-from pyquda_measurement_utils.Disconnected_utils_vibe_develop import array_to_numpy
 from pyquda_measurement_utils.boosted_smearing_pyquda import boosted_smearing
 from pyquda_measurement_utils.bw_seq_pyquda import create_bw_seq_raw_pyquda
 from pyquda_measurement_utils.io_corr import (
@@ -34,7 +33,11 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
     basis_attrs,
     symmetric_vector_emt,
 )
-from pyquda_measurement_utils.tools import mpi_print, mpi_timer_print
+from pyquda_measurement_utils.tools import (
+    array_to_numpy,
+    mpi_print,
+    mpi_timer_print,
+)
 
 
 class ProtonQuarkEMT(FlowedFermionBilinearKernel):

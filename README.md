@@ -58,6 +58,7 @@ pion_EMFF_vibe_develop.py       Pion local-current EMFF contractions.
 pion_EMT_vibe_develop.py        Pion/meson flowed EMT contractions and one-point observables.
 pion_qTMD_vibe_develop.py       Pion qTMD and PDF-style connected contractions.
 Disconnected_1pt_qTMD_vibe_develop.py Shared disconnected qTMD/PDF one-point loops.
+qtmd_operator_utils.py          Shared CG/GI qTMD/PDF displacement and staple transport.
 fermion_bilinear_basis.py       Canonical 16-Gamma ordering and physics-basis transform.
 pion_qTMDWF_pyquda.py           Mature pion qTMDWF reference workflow.
 proton_EMT_vibe_develop.py      Proton flowed EMT connected contractions.
@@ -65,6 +66,11 @@ proton_utils_vibe_develop.py    Shared calculation-only proton C2 kernel.
 proton_qTMD_pyquda.py           Mature proton qTMD/PDF reference workflow.
 tools.py                        Shared MPI/backend utility helpers.
 ```
+
+Connected pion/proton and disconnected qTMD production share operator
+geometry and transport through `qtmd_operator_utils.py`; connected
+measurements do not import disconnected production modules. Backend arrays are
+converted to host NumPy arrays only through `tools.array_to_numpy`.
 
 Connected proton qTMD/PDF production uses the single backend-independent
 runner in `application/nucleon_TMD/shared_runner.py`; Perlmutter and Aurora

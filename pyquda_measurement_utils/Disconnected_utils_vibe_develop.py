@@ -52,19 +52,6 @@ _PART_ATTRS = {
 }
 
 
-def array_to_numpy(arr):
-    """Convert backend arrays to NumPy arrays."""
-    if hasattr(arr, "get"):
-        return arr.get()
-    if type(arr).__module__.split(".")[0] == "cupy":
-        return arr.get()
-    if type(arr).__module__.split(".")[0] == "dpnp":
-        import dpnp
-
-        return dpnp.asnumpy(arr)
-    return np.asarray(arr)
-
-
 def normalize_noise_scheme(noise_scheme: str) -> str:
     """Normalize and validate the stochastic noise scheme name."""
     scheme = str(noise_scheme).strip().lower()
@@ -760,7 +747,6 @@ __all__ = [
     "VALID_NOISE_SCHEMES",
     "append_completed_base",
     "apply_hierarchical_probe",
-    "array_to_numpy",
     "base_part_ranges",
     "canonical_temp_path",
     "ceil_log2",

@@ -67,3 +67,6 @@ disconnected qTMD code.  The index is
 ```
 
 and the staple length is `2*eta+b_T`, independent of `b_z`.
+The connected runner calls the neutral
+`pyquda_measurement_utils/qtmd_operator_utils.py` implementation directly; it
+does not import disconnected production code.
