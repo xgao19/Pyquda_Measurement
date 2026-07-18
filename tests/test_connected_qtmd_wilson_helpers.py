@@ -76,5 +76,12 @@ def test_connected_gi_qtmd_production_requires_link_cache():
 
     for measurement in (pion, proton):
         with pytest.raises(TypeError):
-            measurement.create_fw_prop_TMD_GI(gauge, FakePropagator(), w_index)
+            if measurement is proton:
+                measurement.create_fw_prop_TMD_GI(
+                    FakePropagator(), w_index
+                )
+            else:
+                measurement.create_fw_prop_TMD_GI(
+                    gauge, FakePropagator(), w_index
+                )
 import pytest

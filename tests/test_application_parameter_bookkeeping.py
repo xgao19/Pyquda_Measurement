@@ -111,9 +111,8 @@ def test_connected_tmd_application_env_argument_mapping():
         },
     )
     _assert_parser_envs(
-        "application/nucleon_TMD/perlmutter/Pyquda_nucleon_TMD.py",
+        "application/nucleon_TMD/shared_runner.py",
         {
-            "--config_num": "NUCLEON_TMD_CONFIG_NUM",
             "--mpi_geometry": "NUCLEON_TMD_MPI_GEOMETRY",
             "--data_dir": "NUCLEON_TMD_DATA_DIR",
             "--qmax": "NUCLEON_TMD_QMAX",
@@ -335,24 +334,18 @@ def test_proton_qtmd_parameters_use_only_active_measurement_fields():
     assert "self.pos_boost" not in module
     assert "self.boost_in" not in module
     assert 'self.boost_out = parameters["boost_out"]' in module
+    for field in ("self.pf", "self.plist", "self.qlist", "self.pol_list", "self.t_insert"):
+        assert field not in module
 
-    for relpath in [
-        "application/nucleon_TMD/perlmutter/Pyquda_nucleon_TMD.py",
-        "application/nucleon_TMD/Aurora/pyquda_nucleon_TMD_GI.py",
-        "application/nucleon_TMD_CG/Aurora/pyquda_nucleon_TMD.py",
-    ]:
-        source = _source(relpath)
-        assert '"save_propagators"' not in source
-        assert 'boost=parameters["boost_in"]' in source
-        assert source.count('parameters["boost_out"]') >= 2
-        assert "my_pyquda_gammas" not in source
-        assert "gamma_stack" in source
-
-    driver = _source(
-        "application/nucleon_TMD/perlmutter/Pyquda_nucleon_TMD.py"
-    )
-    assert driver.count("if latt_info.mpi_rank != 0:\n        return") >= 2
-    assert 'for flavor in ("D", "U")' in driver
+    runner = _source("application/nucleon_TMD/shared_runner.py")
+    assert '"save_propagators"' not in runner
+    assert 'boost=parameters["boost_in"]' in runner
+    assert runner.count('parameters["boost_out"]') >= 2
+    assert "my_pyquda_gammas" not in runner
+    assert "gamma_stack" in runner
+    assert runner.count("if latt_info.mpi_rank != 0:\n        return") >= 2
+    assert 'for flavor, corr in (("D", corr_down), ("U", corr_up))' in runner
+    assert not (REPO_ROOT / "application/nucleon_TMD_CG").exists()
 
 
 def test_pion_channel_provenance_is_explicit_and_rank_zero_writes_qtmd():
@@ -543,12 +536,11 @@ def test_disconnected_shell_wrappers_reject_missing_or_unknown_configuration():
 
 def test_connected_tmd_parameter_dict_contains_analysis_knobs():
     pion_keys = _dict_keys(_literal_dict_assignment("application/pion_TMD/perlmutter/Pyquda_pion_TMD.py", "parameters"))
-    nucleon_keys = _dict_keys(_literal_dict_assignment("application/nucleon_TMD/perlmutter/Pyquda_nucleon_TMD.py", "parameters"))
-
-    for keys in (pion_keys, nucleon_keys):
-        assert {"eta", "b_z", "b_T", "qext", "qext_PDF", "pf", "p_2pt", "width", "t_insert"} <= keys
+    runner = _source("application/nucleon_TMD/shared_runner.py")
+    assert {"eta", "b_z", "b_T", "qext", "qext_PDF", "pf", "p_2pt", "width", "t_insert"} <= pion_keys
     assert {"pos_boost", "neg_boost"} <= pion_keys
-    assert {"boost_in", "boost_out", "pol"} <= nucleon_keys
+    for key in ("eta", "b_z", "b_T", "qext", "qext_PDF", "pf", "p_2pt", "width", "t_insert", "boost_in", "boost_out", "pol"):
+        assert f'"{key}"' in runner
 
 
 def test_pion_emff_application_env_argument_mapping_and_parameter_keys():

@@ -64,7 +64,6 @@ sm_tag = os.environ.get(
 )
 
 parameters = {
-    "config_num": conf,
     "qext": qext,
     "pf": pf,
     "p_2pt": qext,
@@ -73,12 +72,11 @@ parameters = {
     "boost_out": boost_out,
     "width": width,
     "pol": pol_list,
-    "t_insert": max(t_separations),
     "t_separations": t_separations,
     "flow_type": os.environ.get("EMT_PROTON_FLOW_TYPE", "wilson"),
     "flow_epsilon": float(os.environ.get("EMT_PROTON_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_PROTON_FLOW_STEPS", "1")),
-    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,project=-1)",
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,dir_ignore=-1)",
     "multigrid": parse_optional_multigrid_blocks(args.mg_block),
 }
 
@@ -102,7 +100,7 @@ init(
 )
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
-gauge.hypSmear(1, 0.75, 0.6, 0.3, int(os.environ.get("EMT_PROTON_HYP_PROJECT", "-1")))
+gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)
 gauge.latt_info.t_boundary = -1
 
 # Inverter knobs: mass, clover coefficient, tolerance, max iterations.

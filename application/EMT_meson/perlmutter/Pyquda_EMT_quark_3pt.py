@@ -76,7 +76,7 @@ parameters = {
     "flow_type": "wilson",
     "flow_epsilon": 0.207936,
     "flow_steps": 10,
-    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,4)",
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,dir_ignore=-1)",
     "multigrid": parse_optional_multigrid_blocks(args.mg_block),
 }
 src_pos = [0, 0, 0, 0]
@@ -103,7 +103,7 @@ init(mpi_geometry, enable_mps=True)
 # Gauge field
 # ============================================================
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
-gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
+gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)
 gauge.latt_info.t_boundary = -1
 
 # ============================================================

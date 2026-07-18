@@ -46,16 +46,14 @@ parameters = {
     "noise_scheme": os.environ.get("QTMD_1PT_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("QTMD_1PT_HP_NUM_VECTORS", "1")),
     "hp_ordering": os.environ.get("QTMD_1PT_HP_ORDERING", "global_xyzt_gray_projected_to_evenodd"),
-    "gauge_preprocessing": os.environ.get(
-        "QTMD_1PT_GAUGE_PREPROCESSING", "HYP(1,0.75,0.6,0.3,4)"
-    ),
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,dir_ignore=-1)",
 }
 tag = get_disconnected_qTMD_loop_file_tag(data_dir, lat_tag, conf, 0, sm_tag)
 
 init(mpi_geometry, enable_mps=True)
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
-gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
+gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)
 gauge.latt_info.t_boundary = -1
 
 invPara = [

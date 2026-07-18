@@ -1336,10 +1336,11 @@ The dimensions are:
   \item $N_{t}$ = temporal lattice extent.
 \end{itemize}
 
-The attributes store configuration, Dirac parameters, the actual multigrid
-hierarchy, gauge preprocessing, temporal boundary, source position,
+The attributes store configuration, Dirac parameters, gauge preprocessing,
+temporal boundary, source position,
 source/sink interpolators, separate source/sink/sequential smearing flags and
-boosts, \(p_f\), \(q\), two-point momenta, flow schedule, scalar \code{t\_sep},
+the canonical \code{boost\_in}/\code{boost\_out} endpoint boosts, \(p_f\),
+\(q\), two-point momenta, flow schedule, scalar \code{t\_sep},
 and explicit dataset-axis labels.  They also record convention metadata:
 \begin{itemize}
   \item \code{operator\_normalization = unringed\_flowed\_bilinear};

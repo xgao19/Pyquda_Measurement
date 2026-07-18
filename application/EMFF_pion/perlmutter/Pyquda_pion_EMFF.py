@@ -159,7 +159,7 @@ if getMPIComm().Get_rank() == 0:
     print(f"--t_insert {t_insert_list}")
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
-gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
+gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)
 gauge.latt_info.t_boundary = -1
 latt_info = gauge.latt_info
 mpi_print(latt_info, f"DEBUG plaquette U_hyp: {gauge.plaquette()}")

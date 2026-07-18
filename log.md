@@ -4,6 +4,23 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-17: Unify proton qTMD production and resume
+
+- Replaced the duplicated Perlmutter, Aurora GI, and Aurora CG-only drivers
+  with one backend-independent application runner plus two thin platform
+  entrypoints.
+- Added exact-line source-level resume, mandatory CLI configuration, and an
+  explicit runtime-only `--mg-block` interface defaulting to `8.8.4.4`.
+- Removed unused proton qTMD/EMT state, duplicate Gamma aliases, the unused GI
+  gauge argument, and the old `application/nucleon_TMD_CG` workflow.
+- Kept MG, tolerance, and maxiter out of HDF5 and sample-log identity.
+- S8T8 reference/candidate runs at solver tolerance `1e-15` covered two
+  sources, C2, CG/GI qTMD, CG/GI PDF, zero/nonzero momenta, all 16 Gamma
+  channels, and every Wilson index.  Same-layout relative L2 differences were
+  at most `6.41e-13`; one-rank/four-rank differences were at most `4.36e-13`.
+  A repeated candidate run skipped both sources before inversion.
+- The final CPU regression suite passes with 273 tests and 12 skips.
+
 ## 2026-07-16: Fix the unequal-boost pion EMT active line
 
 - Kept the positive-boost propagator as the fixed-sink spectator used to build
@@ -1119,3 +1136,16 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   boosts, so their standard output is unchanged.  Older manually produced
   unequal-boost C2 data used the source boost at both endpoints and must be
   recomputed.
+
+## 2026-07-17: Unify four-dimensional HYP smearing
+
+- Audited every active `gauge.hypSmear` call and fixed the final
+  `dir_ignore` argument to literal `-1`.
+- Removed the ringed and Aurora proton EMT environment overrides for that
+  argument, and made HYP provenance explicitly say `dir_ignore=-1`.
+- QUDA converts both the historical value `4` and `-1` to its internal
+  four-dimensional sentinel `4`, so this cleanup changes interface identity
+  and documentation but not the smeared gauge field.
+- A one-rank S8T8 field-level comparison found bitwise-identical smeared links
+  and plaquettes for `dir_ignore=4` and `dir_ignore=-1`.  The full CPU suite
+  passes with 266 tests and 12 skips.

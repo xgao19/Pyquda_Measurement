@@ -65,10 +65,7 @@ parameters = {
     "noise_scheme": os.environ.get("EMT_1PT_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("EMT_1PT_HP_NUM_VECTORS", "1")),
     "hp_ordering": os.environ.get("EMT_1PT_HP_ORDERING", "interleaved_xyzt_binary_projected_to_evenodd"),
-    "gauge_preprocessing": os.environ.get(
-        "EMT_1PT_GAUGE_PREPROCESSING",
-        "HYP(1,0.75,0.6,0.3,4)",
-    ),
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,dir_ignore=-1)",
     "multigrid": parse_multigrid_blocks(args.mg_block),
 }
 quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, setup_tag)
@@ -76,7 +73,7 @@ quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, setup_ta
 init(mpi_geometry, enable_mps=True)
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
-gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
+gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)
 gauge.latt_info.t_boundary = -1
 
 # Inverter knobs: mass, clover coefficient, tolerance, max iterations.

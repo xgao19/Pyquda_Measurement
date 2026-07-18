@@ -5,6 +5,7 @@
 
 import os
 from pathlib import Path
+import numpy as np
 
 # ---------- Backend Helpers (consistent with boosted_smearing_pyquda) ----------
 def _get_xp_from_array(a):
@@ -38,6 +39,18 @@ def _asarray_on_queue(val, xp, ref_arr):
     
     # 2. Fallback for standard numpy/cupy or if ref_arr has no queue info
     return xp.asarray(val)
+
+
+def array_to_numpy(arr):
+    """Copy an array from NumPy, CuPy, or dpnp to host NumPy."""
+    backend = type(arr).__module__.split(".")[0]
+    if backend == "dpnp":
+        import dpnp
+
+        return dpnp.asnumpy(arr)
+    if backend == "cupy" or hasattr(arr, "get"):
+        return arr.get()
+    return np.asarray(arr)
 
 
 def read_sample_log_entries(path):

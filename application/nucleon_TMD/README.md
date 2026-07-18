@@ -1,72 +1,63 @@
-# Connected Nucleon TMD Application
+# Connected Proton qTMD/PDF
 
-This directory contains the connected nucleon TMD workflow with optional CG
-qTMD, GI qTMD, and PDF/local-limit contractions.
+This application computes the connected proton C2 together with optional CG
+qTMD, GI qTMD, CG PDF, and GI PDF contractions.  Perlmutter and Aurora call the
+same production implementation in `shared_runner.py`; their thin entry points
+only select backend and ensemble defaults.
 
-## Relation To The Older CG Workflow
+## Entry points
 
-- `application/nucleon_TMD_CG/Aurora` is the older CG-only workflow.
-- `application/nucleon_TMD/Aurora` extends the Aurora-style workflow with
-  connected GI qTMD support.
-- `application/nucleon_TMD/perlmutter` is the CUDA/CuPy Perlmutter workflow used
-  for smoke tests and Perlmutter-oriented runs.
-- The GI qTMD path uses the fixed-length staple convention shared with the
-  disconnected qTMD code.
-
-## Perlmutter Entry Point
-
-Run the Perlmutter wrapper from the repository root or from this directory:
+Perlmutter:
 
 ```bash
-bash application/nucleon_TMD/perlmutter/run_nucleon_TMD.sh
+bash application/nucleon_TMD/perlmutter/run_nucleon_TMD.sh \
+  --config_num 1000 --mg-block 8.8.4.4
 ```
 
-Useful runtime switches:
+Aurora:
 
-- `NUCLEON_TMD_RUN_CG_QTMD=0/1`
-- `NUCLEON_TMD_RUN_GI_QTMD=0/1`
-- `NUCLEON_TMD_RUN_PDF=0/1`
-
-GI qTMD production always uses the cached transporter path.  The direct
-covariant-shift implementation is test/reference code only.
-
-The default smoke gauge is:
-
-```text
-test_gauge/S8T32_wilson_b6.cg.1e-08.0
+```bash
+python application/nucleon_TMD/Aurora/Pyquda_nucleon_TMD.py \
+  --stream b --config_num 1000 --mpi_geometry 1.5.4.5 \
+  --mg-block 8.8.4.4
 ```
 
-## GI qTMD Staple Convention
+`--config_num` is mandatory and is never read from an environment variable.
+Unknown command-line arguments are errors.  `--mg-block` accepts one or more
+levels such as `8.8.4.4` or `4.4.4.4;4.4.4.4`; use `none` to disable
+multigrid.  MG blocks, solver tolerance, and maximum iteration count are
+runtime choices only.  They are not stored in HDF5 and do not enter the
+sample-log identity.
 
-The GI Wilson-line index is:
+The operator switches are `NUCLEON_TMD_RUN_CG_QTMD`,
+`NUCLEON_TMD_RUN_GI_QTMD`, and `NUCLEON_TMD_RUN_PDF`.  The PDF switch produces
+both CG and GI straight-link measurements.
+
+## Resume
+
+The text sample log is the only resume state.  Rank 0 reads exact, non-empty
+lines once at startup and broadcasts the completed source set.  A completed
+source is skipped before source construction or inversion, even if its HDF5
+files have already been transferred elsewhere.
+
+A source is appended only after C2 and every product enabled for that run have
+closed successfully.  The log does not contain a parameter fingerprint and the
+code does not inspect HDF5 files.  Therefore a log may be reused only when the
+enabled products, momentum grids, Wilson-line grids, sink separation,
+interpolator, and smearing setup are unchanged.  Concurrent writers to the
+same log are not supported.
+
+## Conventions
+
+`boost_in` is source smearing.  `boost_out` is C2 sink smearing and the
+fixed-sink sequential smearing.  The current standard production setup uses
+zero boosts at both endpoints.
+
+The GI qTMD path uses the cached fixed-length staple convention shared with the
+disconnected qTMD code.  The index is
 
 ```text
 [b_T, b_z, eta, transverse_direction]
 ```
 
-The fixed-length staple path is:
-
-```text
-x
--> x + (eta + b_z / 2) zhat
--> x + (eta + b_z / 2) zhat + b_T e_perp
--> x + b_z zhat + b_T e_perp
-```
-
-The total staple length is `2 * eta + b_T`, independent of `b_z`.  Current
-constraints are `b_z` even and `eta >= abs(b_z) / 2`.
-
-## Validation
-
-The connected nucleon GI qTMD workflow has passed S8T32 smoke tests on
-Perlmutter `login32`.  A nonzero-staple consistency test with `b_z=2`,
-`b_T=1`, `eta=1`, and `qmax=0` verified that the link cache agrees with the
-direct test reference to roundoff for both `U` and `D` connected insertions.
-
-The optional test script is:
-
-```bash
-python tests/test_connected_gi_qtmd_link_cache_consistency.py
-```
-
-It expects paired HDF5 outputs under `/tmp/pyquda_connected_gi_qtmd_consistency`.
+and the staple length is `2*eta+b_T`, independent of `b_z`.

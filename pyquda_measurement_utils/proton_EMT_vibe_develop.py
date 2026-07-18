@@ -1,106 +1,6 @@
-"""Proton EMT measurement formulas and conventions.
+"""Connected proton EMT production through flowed bilinear primitives.
 
-This module is the proton analogue of ``pion_EMT_vibe_develop.py``.  It keeps
-the flowed quark/gluon EMT definitions from the meson code, but replaces the
-connected fixed-sink contraction with the baryon sequential-source convention
-already used by ``proton_qTMD_pyquda.py``.
-
-Common notation
----------------
-The source is ``x0 = (t0, x0)``.  The EMT insertion is ``x = (tau, x)``.  The
-fixed proton sink is ``y = (tsep, y)``.  The proton interpolating field is
-schematically
-
-    chi_alpha(y) =
-        epsilon_abc [u_a^T(y) C Gamma_interp d_b(y)] u_{c,alpha}(y).
-
-The sink spin projection is supplied by ``PolProjections`` in
-``bw_seq_pyquda.py``.  Momentum phases are written as ``Phi_k(r - x0)``; the
-actual sign convention is the one used by ``MomentumPhase``.
-
-Connected proton three-point function before the sequential trick
------------------------------------------------------------------
-For a connected insertion on flavor ``f`` in {U, D}, the target correlator is
-
-    C3_f(q, tau; pf, tsep, P)
-      = sum_x sum_y Phi_q(x - x0) Phi_pf(y - x0)
-        P_{alpha alpha'}
-        < chi_alpha(y) O_f(x) bar_chi_{alpha'}(x0) >_connected.
-
-After Wick contraction the sink-side baryon contraction, spin projection,
-final momentum, and sink time are absorbed into a flavor-dependent fixed-sink
-sequential source built by ``create_bw_seq_pyquda``.
-
-Proton sequential-source contraction
-------------------------------------
-``create_bw_seq_pyquda`` returns a sequential backward object with shape
-
-    [polarization, w, t, z, y, x_cb, spin_a, spin_b, color_a, color_b].
-
-For qTMD/PDF insertions the mature proton code contracts it as
-
-    Seq_f(p, x) Gamma_g S_q(x, x0).
-
-The EMT contractions here use the same object and replace ``Gamma_g S_q`` by
-the local derivative bilinear.  The scalar diagnostic is
-
-    C3_chi_f(q, tau)
-      = sum_x Phi_q(x - x0)
-        Seq_f(x) S_q(x, x0).
-
-The connected quark EMT insertion is evaluated as
-
-    C3_{f,mu nu}^{first}(q, tau)
-      = +1/2 sum_x Phi_q(x - x0)
-        Seq_f(x) gamma_nu D_mu S_q(x, x0),
-
-    C3_{f,mu nu}^{second}(q, tau)
-      = -1/2 sum_x Phi_q(x - x0)
-        (left_D_mu Seq_f)(x) gamma_nu S_q(x, x0).
-
-The measured tensor is the sum of these two terms, symmetrized under
-``mu <-> nu``.  This is the direct proton counterpart of the meson convention B
-used in ``pion_EMT_vibe_develop.py``.
-
-One-point and gradient-flow data
---------------------------------
-The stochastic quark 1pt, ringed-fermion kinetic normalization, and gluon 1pt
-building blocks are inherited from the shared
-``Disconnected_1pt_EMT_vibe_develop.py`` implementation.  The quark 1pt output
-contains ``avg/Tmunu/T11`` through ``T44`` for reconstructing the zero-momentum
-``bar_chi overleftrightarrow{not D} chi`` normalization, and the gluon 1pt
-output provides the flowed gluonic EMT building block.  The final renormalized
-gradient-flow EMT is assembled in analysis from connected 3pt, quark 1pt, and
-gluon 1pt data.
-
-Limitations
------------
-This module computes connected proton EMT three-point functions for U and D
-insertions.  Disconnected diagrams, renormalization coefficients, vacuum
-subtractions, and flavor mixing are intentionally left to separate workflows or
-analysis code.
-
-Future upgrade targets
-----------------------
-The proton connected 3pt contractions use sequential propagators, while the
-disconnected quark EMT contribution is inherited from the shared stochastic
-quark 1pt loop estimator.  The next variance-reduction upgrades should
-therefore target ``Disconnected_1pt_EMT_vibe_develop.py``:
-
-1. Hierarchical probing, following arXiv:1302.4018.  Structured probing vectors
-   on the toroidal lattice can reduce the stochastic variance of trace
-   estimators by canceling near-neighbor contributions of the inverse Dirac
-   operator more systematically than independent noise alone.
-
-2. Frequency splitting / propagator-decomposition variance reduction, following
-   the strategies reviewed in arXiv:2605.00643.  Splitting the quark propagator
-   or loop estimator into frequency components can let the code treat low-mode,
-   high-mode, and flowed ultraviolet-suppressed pieces with different estimator
-   budgets.
-
-These upgrades are roadmap items only.  They should be implemented in the
-shared quark 1pt path and recorded in HDF5 metadata before being mixed with
-connected proton EMT data in disconnected-diagram analyses.
+The detailed operator and fixed-sink conventions live in ``docs/proton_EMT``.
 """
 
 import gc
@@ -145,7 +45,6 @@ class ProtonQuarkEMT(FlowedFermionBilinearKernel):
         self.qlist = parameters["qext"]
         self.flow_epsilon = parameters["flow_epsilon"]
         self.flow_steps = parameters["flow_steps"]
-        self.config_num = parameters.get("config_num")
         self.gauge_preprocessing = parameters.get(
             "gauge_preprocessing", "unspecified"
         )
@@ -158,8 +57,11 @@ class ProtonQuarkEMT(FlowedFermionBilinearKernel):
         self.CG_GaussSmear = bool(parameters.get("CG_GaussSmear", False))
         self.width = parameters["width"]
         self.pol_list = parameters["pol"]
-        self.t_insert = parameters["t_insert"]
-        self.t_separations = [int(t_sep) for t_sep in parameters.get("t_separations", [self.t_insert])]
+        self.t_separations = [
+            int(t_sep) for t_sep in parameters["t_separations"]
+        ]
+        if not self.t_separations:
+            raise ValueError("t_separations must contain at least one sink time")
         self.boost_in = parameters["boost_in"]
         self.boost_out = parameters["boost_out"]
 

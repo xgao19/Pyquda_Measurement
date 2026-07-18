@@ -9,7 +9,6 @@ from pyquda_measurement_utils.proton_EMT_vibe_develop import ProtonQuarkEMT
 
 def _measurement(smearing):
     return ProtonQuarkEMT({
-        "config_num": 1,
         "qext": [[0, 0, 0, 0]],
         "pf": [0, 0, 0, 0],
         "p_2pt": [[0, 0, 0, 0]],
@@ -18,7 +17,7 @@ def _measurement(smearing):
         "boost_out": [0, 0, 0],
         "width": 1.0,
         "pol": ["PpUnpol"],
-        "t_insert": 2,
+        "t_separations": [2],
         "flow_type": "wilson",
         "flow_epsilon": 0.1,
         "flow_steps": 0,
@@ -128,10 +127,8 @@ def test_qtmd_c2_is_a_thin_shared_kernel_caller(monkeypatch):
     )
     helper = qtmd_module.proton_TMD({
         "eta": [0], "b_z": 0, "b_T": 0,
-        "pf": [0, 0, 0, 0], "qext": [[0, 0, 0, 0]],
-        "qext_PDF": [[0, 0, 0, 0]], "p_2pt": [[0, 0, 0, 0]],
-        "width": 2.0, "boost_in": [1, 0, 0], "boost_out": [0, 0, 0],
-        "pol": ["PpUnpol"], "t_insert": 2, "save_propagators": False,
+        "p_2pt": [[0, 0, 0, 0]],
+        "width": 2.0, "boost_out": [0, 0, 0],
     })
     info = type("Info", (), {"mpi_rank": 1})()
     helper.contract_2pt_TMD(info, object(), object(), "unused")

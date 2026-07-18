@@ -69,7 +69,7 @@ parameters = {
     "flow_type": os.environ.get("EMT_1PT_FLOW_TYPE", "wilson"),
     "flow_epsilon": float(os.environ.get("EMT_1PT_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_1PT_FLOW_STEPS", "1")),
-    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,4)",
+    "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,dir_ignore=-1)",
     "multigrid": parse_optional_multigrid_blocks(args.mg_block),
 }
 
@@ -78,7 +78,7 @@ c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag
 init(mpi_geometry, enable_mps=True)
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
-gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
+gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)
 gauge.latt_info.t_boundary = -1
 latt_info = gauge.latt_info
 

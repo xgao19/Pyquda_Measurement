@@ -14,7 +14,7 @@ stream="b"
 cfgmin=1
 cfgmax=100
 cfglist="/lus/flare/projects/StructNGB/xgao/ensembles/s8080b7596/gauge_fixed/list_cfg_${stream}"
-main=pyquda_nucleon_TMD_GI.py
+main=Pyquda_nucleon_TMD.py
 
 # switch to the submit directory
 WORKDIR=/lus/flare/projects/StructNGB/xgao/run/l80c80a050/nucleon_TMD_pyquda
@@ -83,7 +83,8 @@ for cfg in $(sed -n "${cfgmin},${cfgmax}p" ${cfglist}); do
   hf=$(printf "hostfile/qTMD_hostfile_stream${stream}_${cfgmin}to${cfgmax}.%02d" $k)
 
   /opt/cray/pals/1.8/bin/mpiexec -n ${n_ranks} -ppn ${NRANKS_PER_NODE} --hostfile ${hf} \
-    python3 ${main} --stream ${stream} --config_num ${cfg} --mpi 1.5.4.5 \
+    python3 ${main} --stream ${stream} --config_num ${cfg} \
+      --mpi_geometry 1.5.4.5 --mg-block 8.8.4.4 \
     >${out} 2>${err} &
 
   k=$((k+1))

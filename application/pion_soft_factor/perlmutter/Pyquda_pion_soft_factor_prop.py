@@ -67,7 +67,7 @@ if getMPIComm().Get_rank() == 0:
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
 if args.do_gauge_fix:
     gauge.fixingOVR(3, 50000, 1000, 1.5, 1e-7, 100, 1)
-gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)
+gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)
 gauge.latt_info.t_boundary = -1
 latt_info = gauge.latt_info
 mpi_print(latt_info, f"DEBUG plaquette U_hyp: {gauge.plaquette()}")

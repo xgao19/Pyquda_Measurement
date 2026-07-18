@@ -2,6 +2,29 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+config_num=""
+mg_block="8.8.4.4"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config_num)
+      config_num="${2:-}"
+      shift 2
+      ;;
+    --mg-block)
+      mg_block="${2:-}"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+if [[ ! "$config_num" =~ ^[0-9]+$ || -z "$mg_block" ]]; then
+  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]|none]" >&2
+  exit 2
+fi
+
 software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
 measurement_root="${MEASUREMENT_ROOT:-$software_root/Pyquda_Measurement}"
 
@@ -20,7 +43,6 @@ export MPICH_GPU_SUPPORT_ENABLED="${MPICH_GPU_SUPPORT_ENABLED:-1}"
 
 export NUCLEON_TMD_DATA_DIR="${NUCLEON_TMD_DATA_DIR:-$script_dir/data}"
 export NUCLEON_TMD_GAUGE_PATH="${NUCLEON_TMD_GAUGE_PATH:-$software_root/Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0}"
-export NUCLEON_TMD_CONFIG_NUM="${NUCLEON_TMD_CONFIG_NUM:-0}"
 export NUCLEON_TMD_MPI_GEOMETRY="${NUCLEON_TMD_MPI_GEOMETRY:-1.1.1.1}"
 export NUCLEON_TMD_NUM_SRC="${NUCLEON_TMD_NUM_SRC:-1}"
 export NUCLEON_TMD_QMAX="${NUCLEON_TMD_QMAX:-0}"
@@ -40,7 +62,8 @@ mkdir -p "$QUDA_RESOURCE_PATH" "$CUPY_CACHE_DIR" "$NUCLEON_TMD_DATA_DIR"
 echo "Running nucleon qTMD"
 echo "  NUCLEON_TMD_GAUGE_PATH=$NUCLEON_TMD_GAUGE_PATH"
 echo "  NUCLEON_TMD_DATA_DIR=$NUCLEON_TMD_DATA_DIR"
-echo "  NUCLEON_TMD_CONFIG_NUM=$NUCLEON_TMD_CONFIG_NUM"
+echo "  config_num=$config_num"
+echo "  mg_block=$mg_block"
 echo "  NUCLEON_TMD_MPI_GEOMETRY=$NUCLEON_TMD_MPI_GEOMETRY"
 echo "  NUCLEON_TMD_NUM_SRC=$NUCLEON_TMD_NUM_SRC"
 echo "  NUCLEON_TMD_QMAX=$NUCLEON_TMD_QMAX"
@@ -53,7 +76,8 @@ echo "  NUCLEON_TMD_RUN_GI_QTMD=$NUCLEON_TMD_RUN_GI_QTMD"
 echo "  NUCLEON_TMD_RUN_PDF=$NUCLEON_TMD_RUN_PDF"
 
 python3 -u "$script_dir/Pyquda_nucleon_TMD.py" \
-  --config_num "$NUCLEON_TMD_CONFIG_NUM" \
+  --config_num "$config_num" \
+  --mg-block "$mg_block" \
   --mpi_geometry "$NUCLEON_TMD_MPI_GEOMETRY" \
   --gauge_path "$NUCLEON_TMD_GAUGE_PATH" \
   --data_dir "$NUCLEON_TMD_DATA_DIR" \

@@ -1577,7 +1577,10 @@ The application scripts follow a common pattern:
 \begin{enumerate}[nosep]
   \item \textbf{Initialize QUDA}: \code{init(mpi\_geometry, enable\_mps=True)}
   \item \textbf{Read gauge field}: \code{io.readNERSCGauge(gauge\_path)}
-  \item \textbf{Apply HYP smearing}: \code{gauge.hypSmear(1, 0.75, 0.6, 0.3, 4)}
+  \item \textbf{Apply four-dimensional HYP smearing}:
+    \code{gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)}.  The final argument is
+    QUDA's \code{dir\_ignore}; the fixed value \(-1\) requests 4D HYP and is
+    not a projection-iteration count.
   \item \textbf{Set boundary condition}: \code{gauge.latt\_info.t\_boundary = -1} (anti-periodic in time)
   \item \textbf{Instantiate measurement class}: \code{quark\_emt = QuarkEMT(parameters)}
   \item \textbf{Run measurement}: \code{quark\_emt.connected\_3pt(...)}

@@ -900,16 +900,9 @@ The measurement is organized into a class \texttt{proton\_TMD} in
     \texttt{eta} & List of $\eta$ values (irrelevant for CG) \\
     \texttt{b\_z} & Maximum longitudinal displacement \\
     \texttt{b\_T} & Maximum transverse displacement \\
-    \texttt{pf} & Final nucleon momentum $p_f$ \\
-    \texttt{qext} & Momentum transfers for TMD \\
-    \texttt{qext\_PDF} & Momentum transfers for PDF \\
-    \texttt{plist} & Momentum list (from \texttt{qext}) \\
     \texttt{pilist} & Initial momenta $p_i$ for 2pt \\
     \texttt{width} & Gaussian smearing width \\
-    \texttt{boost\_in} & Forward propagator boost smearing \\
-    \texttt{boost\_out} & Backward propagator boost smearing \\
-    \texttt{pol\_list} & List of polarization projections \\
-    \texttt{t\_insert} & Time separation $t_{\text{sep}}$ \\
+    \texttt{boost\_out} & C2 sink smearing \\
   \end{tabular}
 \end{center}
 
@@ -1077,13 +1070,11 @@ The current implementation has the following limitations:
 \label{sec:connected_gi_qtmd}
 % ======================================================================
 
-The connected proton qTMD code now has a gauge-invariant staple qTMD path in
-addition to the original Coulomb-gauge coordinate-shift qTMD and the straight
-PDF operators.  The existing \texttt{application/nucleon\_TMD\_CG} workflow is
-kept as the already-tested CG path.  New workflows live in
-\texttt{application/nucleon\_TMD/Aurora} and
-\texttt{application/nucleon\_TMD/perlmutter}; the Perlmutter version is intended
-for CUDA/CuPy smoke tests and production preparation.
+The connected proton qTMD code has a gauge-invariant staple path in addition
+to the Coulomb-gauge coordinate-shift qTMD and straight PDF operators.  Both
+Perlmutter and Aurora call the single production implementation in
+\texttt{application/nucleon\_TMD/shared\_runner.py}; platform entry points only
+select backend and ensemble defaults.
 
 The connected \texttt{GI\_qTMD} operator uses the same Wilson index convention as
 the pion and disconnected qTMD code,
@@ -1187,8 +1178,23 @@ two-point momenta are the negative of the \texttt{p\_2pt} list.
 
 On Perlmutter, the smoke-test entry point is
 \begin{equation}
-  \texttt{application/nucleon\_TMD/perlmutter/run\_nucleon\_TMD.sh}.
+  \texttt{run\_nucleon\_TMD.sh --config\_num CFG
+  --mg-block 8.8.4.4}.
 \end{equation}
+\texttt{--config\_num} is mandatory and is never read from the environment.
+Unknown arguments fail before gauge I/O.  The MG block is an explicit runtime
+choice; multiple levels use semicolon separation and \texttt{none} disables
+MG.  MG, solver tolerance, and maximum iterations are not HDF5 provenance and
+do not enter the sample-log identity.
+
+At startup rank zero reads the sample log using exact-line matching and
+broadcasts the completed-source set.  Completed sources are skipped before
+source construction and inversion.  A source is appended only after C2 and
+all products enabled in that invocation close successfully.  The log is the
+only resume state and is intentionally independent of HDF5 location.  It may
+therefore be reused only when operator switches, momentum/Wilson grids,
+smearing, interpolator, and sink separation are unchanged.
+
 The main environment toggles are
 \texttt{NUCLEON\_TMD\_RUN\_CG\_QTMD},
 \texttt{NUCLEON\_TMD\_RUN\_GI\_QTMD}, and

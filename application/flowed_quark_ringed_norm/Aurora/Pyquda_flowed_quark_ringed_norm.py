@@ -47,11 +47,7 @@ gauge_path = os.environ.get(
 )
 lat_tag = os.environ.get("FLOWED_RINGED_LAT_TAG", "S8T32")
 sm_tag = os.environ.get("FLOWED_RINGED_SM_TAG", "1HYP_RINGED")
-hyp_project = int(os.environ.get("FLOWED_RINGED_HYP_PROJECT", "-1"))
-gauge_preprocessing = os.environ.get(
-    "FLOWED_RINGED_GAUGE_PREPROCESSING",
-    f"HYP(1,0.75,0.6,0.3,{hyp_project})",
-)
+gauge_preprocessing = "HYP(1,0.75,0.6,0.3,dir_ignore=-1)"
 
 parameters = {
     "config_num": conf,
@@ -93,7 +89,7 @@ base_stop = int(os.environ.get("FLOWED_RINGED_BASE_STOP", os.environ.get("FLOWED
 block_interval_solves = int(os.environ.get("FLOWED_RINGED_BLOCK_INTERVAL_SOLVES", "64"))
 
 gauge = io.readNERSCGauge(gauge_path.format(conf=conf))
-gauge.hypSmear(1, 0.75, 0.6, 0.3, hyp_project)
+gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)
 gauge.latt_info.t_boundary = int(os.environ.get("FLOWED_RINGED_T_BOUNDARY", "-1"))
 latt_info = gauge.latt_info
 

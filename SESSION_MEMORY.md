@@ -78,6 +78,9 @@ python tests/run_smoke_tests.py
 
 ## EMT Conventions And Pitfalls
 
+- The fifth `gauge.hypSmear` argument is QUDA `dir_ignore`, not a projection
+  count.  Active production fixes it to `-1` for 4D HYP; do not add a CLI or
+  environment override.
 - Active implementations are
   `pyquda_measurement_utils/pion_EMT_vibe_develop.py` and
   `pyquda_measurement_utils/proton_EMT_vibe_develop.py`.  The removed legacy

@@ -66,6 +66,10 @@ proton_qTMD_pyquda.py           Mature proton qTMD/PDF reference workflow.
 tools.py                        Shared MPI/backend utility helpers.
 ```
 
+Connected proton qTMD/PDF production uses the single backend-independent
+runner in `application/nucleon_TMD/shared_runner.py`; Perlmutter and Aurora
+entrypoints only provide platform defaults.
+
 Naming convention:
 
 - `pion_EMT_vibe_develop.py` is the active renamed version of the previous
@@ -234,6 +238,13 @@ test_gauge/S8T8_wilson_b6.0
 Applications expose environment variables such as `*_GAUGE_PATH`, `*_DATA_DIR`,
 `*_QMAX`, and `*_FLOW_STEPS` so the same scripts can be used for both tiny
 validation runs and larger production-style tests.
+
+All active workflows that apply HYP smearing use
+`gauge.hypSmear(1, 0.75, 0.6, 0.3, -1)`.  In the PyQUDA/QUDA API the final
+argument is `dir_ignore`, not a projection count.  QUDA normalizes both the
+historical value `4` and the canonical value `-1` to four-dimensional HYP;
+the repository fixes the spelling to `-1` and does not expose it through an
+environment variable or CLI option.
 
 ## Output Conventions
 

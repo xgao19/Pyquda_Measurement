@@ -10,6 +10,36 @@
 #PBS -o log/production_TMD.o
 #PBS -e log/production_TMD.e
 
+set -euo pipefail
+
+config_num=""
+mg_block="8.8.4.4"
+stream="b"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config_num)
+      config_num="${2:-}"
+      shift 2
+      ;;
+    --mg-block)
+      mg_block="${2:-}"
+      shift 2
+      ;;
+    --stream)
+      stream="${2:-}"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+if [[ ! "$config_num" =~ ^[0-9]+$ || -z "$mg_block" || -z "$stream" ]]; then
+  echo "Usage: $0 --config_num CFG [--stream STREAM] [--mg-block X.Y.Z.T[;...]|none]" >&2
+  exit 2
+fi
+
 # switch to the submit directory
 WORKDIR=/lus/flare/projects/StructNGB/xgao/run/l80c80a050/nucleon_TMD_pyquda
 cd $WORKDIR
@@ -59,5 +89,9 @@ mkdir .cache
 export QUDA_ENABLE_P2P=0
 export QUDA_ENABLE_MPS=1
 
-/opt/cray/pals/1.8/bin/mpiexec -n 100 -ppn 10 python3 pyquda_nucleon_TMD_GI.py --stream b --config_num 220 --mpi_geometry 1.5.4.5 >log/production_TMD_GI_1x2x5x5_ppn10_220_new.o 2>log/production_TMD_GI_1x2x5x5_ppn10_220_new.e
+/opt/cray/pals/1.8/bin/mpiexec -n 100 -ppn 10 python3 Pyquda_nucleon_TMD.py \
+  --stream "$stream" --config_num "$config_num" --mpi_geometry 1.5.4.5 \
+  --mg-block "$mg_block" \
+  >"log/production_TMD_GI_1x2x5x5_ppn10_${config_num}_new.o" \
+  2>"log/production_TMD_GI_1x2x5x5_ppn10_${config_num}_new.e"
 wait
