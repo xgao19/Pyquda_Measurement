@@ -58,7 +58,7 @@ This confirms the raw-only builder is algebraically equivalent to the original f
 
 Gauge covariance was tested against both a constant global SU(3) transform and a deterministic local SU(3) transform. Gauge-invariant observables compared were `C2`, `C3_chi`, and `C3_Tmunu`.
 
-For `FLOW_STEPS=0`, `QMAX=0`, `T_SEPS=2`:
+For `FLOW_STEPS=0`, `QMAX=0`, and `t_separations=2`:
 
 ```text
 global vs baseline:

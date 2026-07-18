@@ -53,7 +53,7 @@ def test_qtmd_and_emff_read_resume_before_source_inversion():
         "core.invertPropagator(dirac, srcD_pos"
     )
     assert "if not pending_tseps:" in emff
-    assert "if sample_log_tag in completed_by_tsep[t_insert]:" in emff
+    assert "if sample_log_tag in completed_by_tsep[t_sep]:" in emff
     assert emff.index("append_sample_log_entry(sample_log_file, sample_log_tag)") > emff.index(
         "save_pion_EMFF_hdf5_noRoll("
     )

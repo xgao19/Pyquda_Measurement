@@ -811,6 +811,10 @@ only the missing separations are contracted and written.  A completion line is
 durably appended only after every requested fixed-source-Gamma file for that
 source and separation has closed.  The log is the sole resume state and does
 not probe HDF5 files that may already have been transferred.
+The production interface names the requested list
+\texttt{t\_separations}; for example,
+\texttt{--t\_separations 2,3,4}.  Each loop iteration passes one scalar
+\(t_{\rm sep}\) to sequential-source construction.
 The current log name assumes fixed run flags, \(q_{\max}\), momenta, source
 Gamma list, and separation list.  A changed physical grid must use a new
 data/setup identity, and concurrent writers to one log are unsupported.

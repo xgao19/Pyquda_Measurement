@@ -19,12 +19,23 @@ def parse_str_list(text):
     return [v for v in text.split(",") if v]
 
 
+def parse_int_list(text):
+    return [
+        int(value)
+        for value in text.replace(".", ",").split(",")
+        if value
+    ]
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("EMT_1PT_MPI_GEOMETRY", "1.1.1.1"))
 parser.add_argument("--interpolator", type=str, default=os.environ.get("EMT_DISC_INTERPOLATOR", "5"))
 parser.add_argument("--mg-block", default="8.8.4.4", help="X.Y.Z.T[;...] or none")
+parser.add_argument("--t_separations", type=parse_int_list, default=[2])
 args = parser.parse_args()
+if not args.t_separations:
+    parser.error("--t_separations must contain at least one integer")
 
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -49,7 +60,7 @@ width = float(os.environ.get("EMT_DISC_WIDTH", "1.0"))
 boost_in = parse_triplet(os.environ.get("EMT_DISC_BOOST_IN", "0.0.0"))
 boost_out = parse_triplet(os.environ.get("EMT_DISC_BOOST_OUT", "0.0.0"))
 pol_list = parse_str_list(os.environ.get("EMT_DISC_POL", "PpUnpol"))
-t_insert = int(os.environ.get("EMT_DISC_T_INSERT", os.environ.get("EMT_DISC_T_SEPS", "2").split(",")[0]))
+t_separations = args.t_separations
 sm_tag = os.environ.get(
     "EMT_DISC_SM_TAG",
     f"1HYP_GSRC_W{width:g}_k0_{args.interpolator}",
@@ -65,7 +76,7 @@ parameters = {
     "boost_out": boost_out,
     "width": width,
     "pol": pol_list,
-    "t_insert": t_insert,
+    "t_separations": t_separations,
     "flow_type": os.environ.get("EMT_1PT_FLOW_TYPE", "wilson"),
     "flow_epsilon": float(os.environ.get("EMT_1PT_FLOW_EPSILON", "0.207936")),
     "flow_steps": int(os.environ.get("EMT_1PT_FLOW_STEPS", "1")),

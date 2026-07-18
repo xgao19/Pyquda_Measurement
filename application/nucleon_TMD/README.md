@@ -33,6 +33,12 @@ The operator switches are `NUCLEON_TMD_RUN_CG_QTMD`,
 `NUCLEON_TMD_RUN_GI_QTMD`, and `NUCLEON_TMD_RUN_PDF`.  The PDF switch produces
 both CG and GI straight-link measurements.
 
+The sink separation is supplied directly as `--t_separations 2` to either the
+Python entrypoint or run wrapper.  Proton qTMD currently requires exactly one
+separation per invocation; use separate runs for different separations.  The
+former insertion-time option and environment-variable configuration are not
+retained.
+
 ## Resume
 
 The text sample log is the only resume state.  Rank 0 reads exact, non-empty

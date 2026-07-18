@@ -43,7 +43,7 @@ def _defaults(module):
         b_z=1,
         b_T=1,
         eta=1,
-        t_insert=2,
+        t_separations=(2,),
     )
 
 
@@ -54,15 +54,31 @@ def test_proton_qtmd_configuration_and_unknown_arguments_are_strict():
         parser.parse_args([])
     with pytest.raises(SystemExit):
         parser.parse_args(["--config_num", "7", "--unknown"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["--config_num", "7", "--t_" + "insert", "2"]
+        )
     args = parser.parse_args(
-        ["--config_num", "7", "--mg-block", "4.4.4.4;4.4.4.4"]
+        [
+            "--config_num",
+            "7",
+            "--mg-block",
+            "4.4.4.4;4.4.4.4",
+            "--t_separations",
+            "2",
+        ]
     )
     assert args.config_num == 7
+    assert args.t_separations == (2,)
     assert parse_optional_multigrid_blocks(args.mg_block) == [
         [4, 4, 4, 4],
         [4, 4, 4, 4],
     ]
     assert parse_optional_multigrid_blocks("none") is None
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["--config_num", "7", "--t_separations", "2,3"]
+        )
 
 
 def test_proton_qtmd_resume_precedes_source_and_is_hdf5_independent():
@@ -136,7 +152,7 @@ def test_proton_qtmd_measurement_keeps_only_active_state_and_gi_signature():
             "boost_out": [0, 0, 0],
         }
     )
-    for field in ("pf", "plist", "qlist", "pol_list", "t_insert"):
+    for field in ("pf", "plist", "qlist", "pol_list", "t_separations"):
         assert not hasattr(measurement, field)
     assert tuple(
         inspect.signature(measurement.create_fw_prop_TMD_GI).parameters
@@ -149,9 +165,16 @@ def test_proton_emt_requires_explicit_nonempty_t_separations():
         / "pyquda_measurement_utils/proton_EMT_vibe_develop.py"
     ).read_text()
     assert "self.config_num" not in source
-    assert "self.t_insert" not in source
     assert 'parameters["t_separations"]' in source
     assert "t_separations must contain at least one sink time" in source
+
+    c2_wrapper = (
+        REPO_ROOT
+        / "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_proton_2pt.py"
+    ).read_text()
+    assert '"t_separations": t_separations' in c2_wrapper
+    assert 'parser.add_argument("--t_separations"' in c2_wrapper
 
 
 def test_shared_host_conversion_accepts_numpy():

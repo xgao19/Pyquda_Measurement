@@ -45,6 +45,12 @@ Useful runtime switches:
 - `PION_TMD_RUN_GI_QTMD=0/1`
 - `PION_TMD_RUN_PDF=0/1`
 
+The qTMD runner currently accepts exactly one sink separation per invocation.
+It defaults to `--t_separations 2`; pass a different value directly on the
+Python or run-script CLI.  Run separate invocations for different separations.
+Production interfaces use the plural `t_separations` name consistently; the
+former insertion-time option is not accepted.
+
 GI qTMD production always uses the cached transporter path.  The direct
 covariant-shift implementation is test/reference code only.
 

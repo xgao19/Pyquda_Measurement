@@ -947,8 +947,8 @@ EMT_1PT_LAT_TAG=S8T8 \
 EMT_1PT_SETUP_TAG=benchmark_pure \
 EMT_1PT_SRC_POS=0.0.0 \
 EMT_1PT_SRC_T=0 \
-EMT_DISC_T_SEPS=2 \
-bash "$APP/run_build_disconnected_3pt.sh" --configs 0
+bash "$APP/run_build_disconnected_3pt.sh" --configs 0 \
+  --t_separations 2
 ```
 
 EMTc stores loops at absolute lattice time. Before forming the product, the

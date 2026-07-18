@@ -3,6 +3,7 @@ set -euo pipefail
 
 pos_boost="0.0.0"
 neg_boost="0.0.0"
+t_separations="2"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pos-boost)
@@ -13,6 +14,11 @@ while [[ $# -gt 0 ]]; do
     --neg-boost)
       [[ $# -ge 2 ]] || { echo "Missing value for --neg-boost" >&2; exit 2; }
       neg_boost="$2"
+      shift 2
+      ;;
+    --t_separations)
+      [[ $# -ge 2 ]] || { echo "Missing value for --t_separations" >&2; exit 2; }
+      t_separations="$2"
       shift 2
       ;;
     *)
@@ -52,7 +58,6 @@ export PION_TMD_QMAX="${PION_TMD_QMAX:-1}"
 export PION_TMD_BZ="${PION_TMD_BZ:-2}"
 export PION_TMD_BT="${PION_TMD_BT:-1}"
 export PION_TMD_ETA="${PION_TMD_ETA:-1}"
-export PION_TMD_T_INSERT="${PION_TMD_T_INSERT:-2}"
 export PION_TMD_WIDTH="${PION_TMD_WIDTH:-1.0}"
 export PION_TMD_RUN_CG_QTMD="${PION_TMD_RUN_CG_QTMD:-1}"
 export PION_TMD_RUN_GI_QTMD="${PION_TMD_RUN_GI_QTMD:-1}"
@@ -70,7 +75,7 @@ echo "  PION_TMD_QMAX=$PION_TMD_QMAX"
 echo "  PION_TMD_BZ=$PION_TMD_BZ"
 echo "  PION_TMD_BT=$PION_TMD_BT"
 echo "  PION_TMD_ETA=$PION_TMD_ETA"
-echo "  PION_TMD_T_INSERT=$PION_TMD_T_INSERT"
+echo "  t_separations=$t_separations"
 echo "  PION_TMD_RUN_CG_QTMD=$PION_TMD_RUN_CG_QTMD"
 echo "  PION_TMD_RUN_GI_QTMD=$PION_TMD_RUN_GI_QTMD"
 echo "  PION_TMD_RUN_PDF=$PION_TMD_RUN_PDF"
@@ -87,7 +92,7 @@ python3 -u "$script_dir/Pyquda_pion_TMD.py" \
   --b_z "$PION_TMD_BZ" \
   --b_T "$PION_TMD_BT" \
   --eta "$PION_TMD_ETA" \
-  --t_insert "$PION_TMD_T_INSERT" \
+  --t_separations "$t_separations" \
   --width "$PION_TMD_WIDTH" \
   --pos-boost="$pos_boost" \
   --neg-boost="$neg_boost" \

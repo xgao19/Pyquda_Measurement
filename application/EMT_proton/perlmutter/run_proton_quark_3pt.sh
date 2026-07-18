@@ -3,15 +3,17 @@ set -euo pipefail
 
 config_num=""
 mg_block="8.8.4.4"
+t_separations="2"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config_num) config_num="${2:-}"; shift 2 ;;
     --mg-block) mg_block="${2:-}"; shift 2 ;;
+    --t_separations) t_separations="${2:-}"; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 if [[ ! "$config_num" =~ ^[0-9]+$ || -z "$mg_block" ]]; then
-  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]]" >&2
+  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]] [--t_separations TSEP[,TSEP...]]" >&2
   exit 2
 fi
 
@@ -35,7 +37,6 @@ export EMT_PROTON_DATA_DIR="${EMT_PROTON_DATA_DIR:-$script_dir/data}"
 export EMT_PROTON_GAUGE_PATH="${EMT_PROTON_GAUGE_PATH:-$software_root/Pyquda_Measurement/test_gauge/S8T32_wilson_b6.cg.1e-08.0}"
 export EMT_PROTON_MPI_GEOMETRY="${EMT_PROTON_MPI_GEOMETRY:-1.1.1.1}"
 export EMT_PROTON_QMAX="${EMT_PROTON_QMAX:-0}"
-export EMT_PROTON_T_SEPS="${EMT_PROTON_T_SEPS:-2}"
 export EMT_PROTON_FLOW_STEPS="${EMT_PROTON_FLOW_STEPS:-1}"
 
 mkdir -p "$QUDA_RESOURCE_PATH" "$CUPY_CACHE_DIR" "$EMT_PROTON_DATA_DIR"
@@ -49,4 +50,5 @@ echo "  EMT_PROTON_MPI_GEOMETRY=$EMT_PROTON_MPI_GEOMETRY"
 python3 -u "$script_dir/Pyquda_EMT_proton_quark_3pt.py" \
   --config_num "$config_num" \
   --mpi_geometry "$EMT_PROTON_MPI_GEOMETRY" \
-  --mg-block "$mg_block"
+  --mg-block "$mg_block" \
+  --t_separations "$t_separations"

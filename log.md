@@ -4,6 +4,31 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-18: Unify sink-separation interfaces
+
+- Replaced the remaining insertion-time production arguments with the common
+  `t_separations` list interface; low-level sequential contractions now use
+  the scalar name `t_sep`.
+- Kept pion/proton qTMD at one separation per invocation while retaining
+  pion EMFF multi-separation production and partial resume.
+- Removed unused EMFF measurement state and the obsolete disconnected-proton
+  C2 fallback, so that wrapper now supplies the `t_separations` required by
+  `ProtonQuarkEMT`.
+- Removed the old CLI and environment names without a compatibility alias;
+  output tags, HDF5 data, and sample-log entries remain unchanged.
+- Removed sink-separation environment variables altogether.  Production
+  entrypoints and shell wrappers now accept `--t_separations` directly, while
+  platform/example defaults are ordinary hard-coded defaults.
+- S8T8 reference/candidate runs at solver tolerance `1e-15` covered pion
+  qTMD, proton qTMD, pion EMFF, pion/proton EMT, and disconnected-workflow
+  proton C2 with one-rank `1.1.1.1` and four-rank `2.2.1.1` layouts.
+  Same-layout HDF5 datasets were bitwise identical; the largest cross-layout
+  absolute and relative-L2 differences were `7.27e-14` and `6.23e-13`,
+  respectively.  qTMD/EMFF sample-log files were unchanged.
+- The final regression suite passes with 275 tests and 12 skips; Python and
+  shell syntax checks, the two-pass pion EMFF PDF build, and
+  `git diff --check` also pass.
+
 ## 2026-07-18: Fix GI qTMD staple composition order
 
 - Reversed `covDev` traversal of the unchanged fixed-length geometric staple

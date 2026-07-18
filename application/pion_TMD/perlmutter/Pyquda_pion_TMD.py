@@ -22,6 +22,24 @@ def parse_spatial_boost(value):
         ) from exc
 
 
+def parse_single_t_separations(value):
+    try:
+        values = [
+            int(field)
+            for field in value.replace(".", ",").split(",")
+            if field
+        ]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid separations {value!r}; expected comma-separated integers"
+        ) from exc
+    if len(values) != 1:
+        raise argparse.ArgumentTypeError(
+            "pion qTMD requires exactly one sink separation"
+        )
+    return values
+
+
 def boost_tag(boost):
     return "_".join(f"m{abs(value)}" if value < 0 else str(value) for value in boost)
 
@@ -36,7 +54,11 @@ parser.add_argument("--qmax", type=int, default=int(os.environ.get("PION_TMD_QMA
 parser.add_argument("--b_z", type=int, default=int(os.environ.get("PION_TMD_BZ", 2)))
 parser.add_argument("--b_T", type=int, default=int(os.environ.get("PION_TMD_BT", 1)))
 parser.add_argument("--eta", type=int, default=int(os.environ.get("PION_TMD_ETA", 1)))
-parser.add_argument("--t_insert", type=int, default=int(os.environ.get("PION_TMD_T_INSERT", 2)))
+parser.add_argument(
+    "--t_separations",
+    type=parse_single_t_separations,
+    default=parse_single_t_separations("2"),
+)
 parser.add_argument("--width", type=float, default=float(os.environ.get("PION_TMD_WIDTH", 1.0)))
 parser.add_argument("--src_interpolator", type=str, default=os.environ.get("PION_TMD_SRC_INTERPOLATOR", "5"))
 parser.add_argument("--sink_interpolator", type=str, default=os.environ.get("PION_TMD_SINK_INTERPOLATOR", "5"))
@@ -46,6 +68,7 @@ parser.add_argument("--run_cg_qtmd", type=int, default=int(os.environ.get("PION_
 parser.add_argument("--run_gi_qtmd", type=int, default=int(os.environ.get("PION_TMD_RUN_GI_QTMD", 1)))
 parser.add_argument("--run_pdf", type=int, default=int(os.environ.get("PION_TMD_RUN_PDF", 1)))
 args = parser.parse_args()
+t_sep = args.t_separations[0]
 pos_boost = args.pos_boost
 neg_boost = args.neg_boost
 
@@ -149,10 +172,9 @@ parameters = {
     "pos_boost": pos_boost,
     "neg_boost": neg_boost,
     "width": args.width,
-    "t_insert": args.t_insert,
 }
 pf = parameters["pf"]
-pf_tag = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{parameters['t_insert']}"
+pf_tag = f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{t_sep}"
 measurement = pion_TMD(parameters)
 
 if getMPIComm().Get_rank() == 0:
@@ -266,7 +288,7 @@ for pos in src_positions:
         spectator_sink_prop,
         pos,
         parameters["pf"],
-        parameters["t_insert"],
+        t_sep,
         sink_gamma,
         parameters["width"],
         parameters["neg_boost"],
@@ -301,7 +323,7 @@ for pos in src_positions:
 
         if latt_info.mpi_rank == 0:
             pion_TMDs = np.roll(pion_TMDs, -pos[3], axis=-1)
-            pion_TMDs = pion_TMDs[:, :, :, : parameters["t_insert"] + 2]
+            pion_TMDs = pion_TMDs[:, :, :, : t_sep + 2]
             pion_TMDs = np.transpose(pion_TMDs, (0, 2, 1, 3))
         for gidx in tasks if rank == 0 else ():
             gm = my_gammas[gidx]
@@ -320,7 +342,7 @@ for pos in src_positions:
                 [gm],
                 parameters["qext"],
                 W_index_list_CG,
-                parameters["t_insert"],
+                t_sep,
                 latt_info,
                 attrs={
                     "src_interpolator": args.src_interpolator,
@@ -347,7 +369,7 @@ for pos in src_positions:
 
         if latt_info.mpi_rank == 0:
             pion_TMDs = np.roll(pion_TMDs, -pos[3], axis=-1)
-            pion_TMDs = pion_TMDs[:, :, :, : parameters["t_insert"] + 2]
+            pion_TMDs = pion_TMDs[:, :, :, : t_sep + 2]
             pion_TMDs = np.transpose(pion_TMDs, (0, 2, 1, 3))
         for gidx in tasks if rank == 0 else ():
             gm = my_gammas[gidx]
@@ -366,7 +388,7 @@ for pos in src_positions:
                 [gm],
                 parameters["qext"],
                 W_index_list_GI,
-                parameters["t_insert"],
+                t_sep,
                 latt_info,
                 attrs={
                     "src_interpolator": args.src_interpolator,
@@ -394,7 +416,7 @@ for pos in src_positions:
 
             if latt_info.mpi_rank == 0:
                 pion_PDFs = np.roll(pion_PDFs, -pos[3], axis=-1)
-                pion_PDFs = pion_PDFs[:, :, :, : parameters["t_insert"] + 2]
+                pion_PDFs = pion_PDFs[:, :, :, : t_sep + 2]
                 pion_PDFs = np.transpose(pion_PDFs, (0, 2, 1, 3))
             for gidx in tasks if rank == 0 else ():
                 gm = my_gammas[gidx]
@@ -413,7 +435,7 @@ for pos in src_positions:
                     [gm],
                     parameters["qext_PDF"],
                     W_index_list_PDF,
-                    parameters["t_insert"],
+                    t_sep,
                     latt_info,
                     attrs={
                         "src_interpolator": args.src_interpolator,

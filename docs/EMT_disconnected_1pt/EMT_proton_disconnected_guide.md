@@ -251,8 +251,8 @@ momentum = PX0PY0PZ0
 ### Step 3: Build the Disconnected 3pt Diagnostic
 
 ```bash
-EMT_DISC_T_SEPS=2 \
-bash run_build_disconnected_3pt.sh --configs 1000
+bash run_build_disconnected_3pt.sh --configs 1000 \
+  --t_separations 2
 ```
 
 Expected merger output:
@@ -412,7 +412,7 @@ EMT_DISC_INTERPOLATOR
 EMT_DISC_WIDTH
 EMT_DISC_BOOST_IN
 EMT_DISC_BOOST_OUT
-EMT_DISC_T_SEPS
+--t_separations
 EMT_DISC_C2_MOMENTUM
 EMT_DISC_C2_FILES
 EMT_DISC_QUARK_1PT_FILES

@@ -334,7 +334,7 @@ def test_proton_qtmd_parameters_use_only_active_measurement_fields():
     assert "self.pos_boost" not in module
     assert "self.boost_in" not in module
     assert 'self.boost_out = parameters["boost_out"]' in module
-    for field in ("self.pf", "self.plist", "self.qlist", "self.pol_list", "self.t_insert"):
+    for field in ("self.pf", "self.plist", "self.qlist", "self.pol_list", "self.t_separations"):
         assert field not in module
 
     runner = _source("application/nucleon_TMD/shared_runner.py")
@@ -386,7 +386,7 @@ def test_pion_qtmd_keeps_run_configuration_in_application_only():
     measurement = _source(
         "pyquda_measurement_utils/pion_qTMD_vibe_develop.py"
     )
-    for field in ("self.pf", "self.qlist", "self.qlist_PDF", "self.t_insert"):
+    for field in ("self.pf", "self.qlist", "self.qlist_PDF", "self.t_separations"):
         assert field not in measurement
 
     driver = _source(
@@ -395,7 +395,7 @@ def test_pion_qtmd_keeps_run_configuration_in_application_only():
     assert 'parameters["pf"]' in driver
     assert 'parameters["qext"]' in driver
     assert 'parameters["qext_PDF"]' in driver
-    assert 'parameters["t_insert"]' in driver
+    assert "t_sep = args.t_separations[0]" in driver
     assert "phases_TMD" in driver
     assert "phases_PDF" in driver
     assert "create_meson_bw_seq_pyquda(" in driver
@@ -537,10 +537,11 @@ def test_disconnected_shell_wrappers_reject_missing_or_unknown_configuration():
 def test_connected_tmd_parameter_dict_contains_analysis_knobs():
     pion_keys = _dict_keys(_literal_dict_assignment("application/pion_TMD/perlmutter/Pyquda_pion_TMD.py", "parameters"))
     runner = _source("application/nucleon_TMD/shared_runner.py")
-    assert {"eta", "b_z", "b_T", "qext", "qext_PDF", "pf", "p_2pt", "width", "t_insert"} <= pion_keys
+    assert {"eta", "b_z", "b_T", "qext", "qext_PDF", "pf", "p_2pt", "width"} <= pion_keys
     assert {"pos_boost", "neg_boost"} <= pion_keys
-    for key in ("eta", "b_z", "b_T", "qext", "qext_PDF", "pf", "p_2pt", "width", "t_insert", "boost_in", "boost_out", "pol"):
+    for key in ("eta", "b_z", "b_T", "qext", "qext_PDF", "pf", "p_2pt", "width", "boost_in", "boost_out", "pol"):
         assert f'"{key}"' in runner
+    assert "t_sep = args.t_separations[0]" in runner
 
 
 def test_pion_emff_application_env_argument_mapping_and_parameter_keys():
@@ -551,7 +552,6 @@ def test_pion_emff_application_env_argument_mapping_and_parameter_keys():
             "--mpi_geometry": "PION_EMFF_MPI_GEOMETRY",
             "--qmax": "PION_EMFF_QMAX",
             "--pf": "PION_EMFF_PF",
-            "--t_insert": "PION_EMFF_T_INSERT",
             "--pos_boost_src": "PION_EMFF_POS_BOOST_SRC",
             "--pos_boost_sink": "PION_EMFF_POS_BOOST_SINK",
             "--neg_boost_src": "PION_EMFF_NEG_BOOST_SRC",
@@ -561,7 +561,7 @@ def test_pion_emff_application_env_argument_mapping_and_parameter_keys():
         },
     )
     keys = _dict_keys(_literal_dict_assignment("application/EMFF_pion/perlmutter/Pyquda_pion_EMFF.py", "parameters"))
-    assert {"qext", "pf", "p_2pt", "pos_boost_src", "pos_boost_sink", "neg_boost_src", "neg_boost_sink", "t_insert"} <= keys
+    assert {"qext", "pf", "p_2pt", "pos_boost_src", "pos_boost_sink", "neg_boost_src", "neg_boost_sink"} <= keys
 
 
 def test_pion_soft_factor_application_env_argument_mapping_and_wrappers():
@@ -611,3 +611,26 @@ def test_pion_soft_factor_parameters_have_matching_prop_and_contract_core_keys()
     expected = {"quark_mom", "bT_dir", "bT_length", "bz_length", "tsep_list"}
     assert expected <= prop_keys
     assert expected <= contract_keys
+
+
+def test_sink_separations_are_cli_or_hard_coded_not_environment_driven():
+    forbidden = "_T_" + "SEPS"
+    for root_name in ("application", "docs", "systems", "skills"):
+        for path in (REPO_ROOT / root_name).rglob("*"):
+            if path.suffix not in {".py", ".sh", ".md", ".tex"}:
+                continue
+            assert forbidden not in path.read_text(), path
+
+    cli_entrypoints = (
+        "application/pion_TMD/perlmutter/Pyquda_pion_TMD.py",
+        "application/EMFF_pion/perlmutter/Pyquda_pion_EMFF.py",
+        "application/nucleon_TMD/shared_runner.py",
+        "application/EMT_proton/perlmutter/Pyquda_EMT_proton_quark_3pt.py",
+        "application/EMT_proton/Aurora/Pyquda_EMT_proton_quark_3pt.py",
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_proton_2pt.py",
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_build_3pt.py",
+    )
+    for relpath in cli_entrypoints:
+        assert "--t_separations" in _parser_arguments(relpath)

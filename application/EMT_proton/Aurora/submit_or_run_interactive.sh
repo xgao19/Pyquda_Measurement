@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]]" >&2
+  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]] [--t_separations TSEP[,TSEP...]]" >&2
   exit 2
 fi
 

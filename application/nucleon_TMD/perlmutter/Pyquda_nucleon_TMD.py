@@ -38,6 +38,6 @@ run(
         b_z=2,
         b_T=1,
         eta=1,
-        t_insert=2,
+        t_separations=(2,),
     )
 )

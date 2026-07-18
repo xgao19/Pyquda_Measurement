@@ -195,7 +195,7 @@ A successful smoke used:
 nranks=32
 mpi_geometry=2.2.2.4
 EMT_PROTON_MG_BLOCK=none
-EMT_PROTON_T_SEPS=1
+t_separations CLI: --t_separations 1
 EMT_PROTON_WIDTH=1.0
 EMT_PROTON_FLOW_STEPS=0
 EMT_PROTON_TOL=1e-2

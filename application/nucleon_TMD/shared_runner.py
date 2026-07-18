@@ -26,10 +26,32 @@ class PlatformDefaults:
     b_z: int
     b_T: int
     eta: int
-    t_insert: int
+    t_separations: tuple
     stream: str = ""
     source_shift: tuple = (0, 0, 0, 0)
     init_kwargs: dict = field(default_factory=dict)
+
+
+def _parse_t_separations(value):
+    try:
+        return tuple(
+            int(field)
+            for field in str(value).replace(".", ",").split(",")
+            if field
+        )
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid separations {value!r}; expected comma-separated integers"
+        ) from exc
+
+
+def _parse_single_t_separations(value):
+    values = _parse_t_separations(value)
+    if len(values) != 1:
+        raise argparse.ArgumentTypeError(
+            "proton qTMD requires exactly one sink separation"
+        )
+    return values
 
 
 def build_parser(defaults):
@@ -80,10 +102,10 @@ def build_parser(defaults):
         default=int(os.environ.get("NUCLEON_TMD_ETA", defaults.eta)),
     )
     parser.add_argument(
-        "--t_insert",
-        type=int,
-        default=int(
-            os.environ.get("NUCLEON_TMD_T_INSERT", defaults.t_insert)
+        "--t_separations",
+        type=_parse_single_t_separations,
+        default=_parse_single_t_separations(
+            ",".join(str(value) for value in defaults.t_separations)
         ),
     )
     parser.add_argument(
@@ -340,6 +362,7 @@ def _save_pdf(
 
 def run(defaults, argv=None):
     args = build_parser(defaults).parse_args(argv)
+    t_sep = args.t_separations[0]
     mpi_geometry = [int(entry) for entry in args.mpi_geometry.split(".")]
     if len(mpi_geometry) != 4 or any(entry <= 0 for entry in mpi_geometry):
         raise ValueError("--mpi_geometry must contain four positive integers")
@@ -401,12 +424,11 @@ def run(defaults, argv=None):
         "boost_out": [0, 0, 0],
         "width": args.width,
         "pol": pol_list,
-        "t_insert": args.t_insert,
     }
     measurement = proton_TMD(parameters)
     pf = parameters["pf"]
     pf_tag = (
-        f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{parameters['t_insert']}"
+        f"PX{pf[0]}PY{pf[1]}PZ{pf[2]}dt{t_sep}"
     )
     sm_tag = os.environ.get(
         "NUCLEON_TMD_SM_TAG",
@@ -510,7 +532,7 @@ def run(defaults, argv=None):
             parameters["width"],
             parameters["boost_out"],
             parameters["pf"],
-            parameters["t_insert"],
+            t_sep,
             parameters["pol"],
             2,
             args.interpolator,
@@ -522,7 +544,7 @@ def run(defaults, argv=None):
             parameters["width"],
             parameters["boost_out"],
             parameters["pf"],
-            parameters["t_insert"],
+            t_sep,
             parameters["pol"],
             1,
             args.interpolator,
@@ -567,14 +589,14 @@ def run(defaults, argv=None):
                 source_position=source_position,
                 smearing_tag=output_tag,
                 corr_down=_roll_trim_root(
-                    down, source_position[3], args.t_insert
+                    down, source_position[3], t_sep
                 ),
                 corr_up=_roll_trim_root(
-                    up, source_position[3], args.t_insert
+                    up, source_position[3], t_sep
                 ),
                 momentum_list=qext,
                 wilson_indices=cg_indices,
-                t_sep=args.t_insert,
+                t_sep=t_sep,
             )
 
         if run_gi_qtmd:
@@ -599,14 +621,14 @@ def run(defaults, argv=None):
                 source_position=source_position,
                 smearing_tag=output_tag,
                 corr_down=_roll_trim_root(
-                    down, source_position[3], args.t_insert
+                    down, source_position[3], t_sep
                 ),
                 corr_up=_roll_trim_root(
-                    up, source_position[3], args.t_insert
+                    up, source_position[3], t_sep
                 ),
                 momentum_list=qext,
                 wilson_indices=gi_indices,
-                t_sep=args.t_insert,
+                t_sep=t_sep,
             )
 
         if run_pdf:
@@ -632,14 +654,14 @@ def run(defaults, argv=None):
                     source_position=source_position,
                     smearing_tag=output_tag,
                     corr_down=_roll_trim_root(
-                        down, source_position[3], args.t_insert
+                        down, source_position[3], t_sep
                     ),
                     corr_up=_roll_trim_root(
-                        up, source_position[3], args.t_insert
+                        up, source_position[3], t_sep
                     ),
                     momentum_list=qext_pdf,
                     wilson_indices=pdf_indices,
-                    t_sep=args.t_insert,
+                    t_sep=t_sep,
                 )
 
         _sync_backend_array(prop_fw.data)

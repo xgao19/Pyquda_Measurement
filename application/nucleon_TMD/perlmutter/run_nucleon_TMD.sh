@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 config_num=""
 mg_block="8.8.4.4"
+t_separations="2"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config_num)
@@ -14,6 +15,10 @@ while [[ $# -gt 0 ]]; do
       mg_block="${2:-}"
       shift 2
       ;;
+    --t_separations)
+      t_separations="${2:-}"
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1" >&2
       exit 2
@@ -21,7 +26,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ ! "$config_num" =~ ^[0-9]+$ || -z "$mg_block" ]]; then
-  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]|none]" >&2
+  echo "Usage: $0 --config_num CFG [--mg-block X.Y.Z.T[;...]|none] [--t_separations TSEP]" >&2
   exit 2
 fi
 
@@ -49,7 +54,6 @@ export NUCLEON_TMD_QMAX="${NUCLEON_TMD_QMAX:-0}"
 export NUCLEON_TMD_BZ="${NUCLEON_TMD_BZ:-2}"
 export NUCLEON_TMD_BT="${NUCLEON_TMD_BT:-1}"
 export NUCLEON_TMD_ETA="${NUCLEON_TMD_ETA:-1}"
-export NUCLEON_TMD_T_INSERT="${NUCLEON_TMD_T_INSERT:-2}"
 export NUCLEON_TMD_WIDTH="${NUCLEON_TMD_WIDTH:-1.0}"
 export NUCLEON_TMD_INTERPOLATOR="${NUCLEON_TMD_INTERPOLATOR:-5}"
 export NUCLEON_TMD_POL="${NUCLEON_TMD_POL:-PpUnpol}"
@@ -70,7 +74,7 @@ echo "  NUCLEON_TMD_QMAX=$NUCLEON_TMD_QMAX"
 echo "  NUCLEON_TMD_BZ=$NUCLEON_TMD_BZ"
 echo "  NUCLEON_TMD_BT=$NUCLEON_TMD_BT"
 echo "  NUCLEON_TMD_ETA=$NUCLEON_TMD_ETA"
-echo "  NUCLEON_TMD_T_INSERT=$NUCLEON_TMD_T_INSERT"
+echo "  t_separations=$t_separations"
 echo "  NUCLEON_TMD_RUN_CG_QTMD=$NUCLEON_TMD_RUN_CG_QTMD"
 echo "  NUCLEON_TMD_RUN_GI_QTMD=$NUCLEON_TMD_RUN_GI_QTMD"
 echo "  NUCLEON_TMD_RUN_PDF=$NUCLEON_TMD_RUN_PDF"
@@ -86,7 +90,7 @@ python3 -u "$script_dir/Pyquda_nucleon_TMD.py" \
   --b_z "$NUCLEON_TMD_BZ" \
   --b_T "$NUCLEON_TMD_BT" \
   --eta "$NUCLEON_TMD_ETA" \
-  --t_insert "$NUCLEON_TMD_T_INSERT" \
+  --t_separations "$t_separations" \
   --width "$NUCLEON_TMD_WIDTH" \
   --interpolator "$NUCLEON_TMD_INTERPOLATOR" \
   --pol "$NUCLEON_TMD_POL" \

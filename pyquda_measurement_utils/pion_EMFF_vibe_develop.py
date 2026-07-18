@@ -125,8 +125,6 @@ class pion_EMFF:
         self.neg_boost_src = parameters.get("neg_boost_src", parameters.get("neg_boost", [0, 0, 0]))
         self.neg_boost_sink = parameters.get("neg_boost_sink", parameters.get("neg_boost", [0, 0, 0]))
 
-        self.t_insert = parameters["t_insert"]
-
     def contract_2pt_pion(
         self, latt_info, prop_pos, prop_neg, phases, tag,
         src_gamma="5", attrs=None,

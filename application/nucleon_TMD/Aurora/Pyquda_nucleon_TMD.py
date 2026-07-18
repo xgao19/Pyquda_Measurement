@@ -36,7 +36,7 @@ run(
         b_z=24,
         b_T=24,
         eta=12,
-        t_insert=9,
+        t_separations=(9,),
         stream="c",
         source_shift=(7, 11, 13, 23),
         init_kwargs={

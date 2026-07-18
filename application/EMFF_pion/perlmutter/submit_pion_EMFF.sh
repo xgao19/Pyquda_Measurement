@@ -16,4 +16,4 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$script_dir/logs"
 
 export PION_EMFF_MPI_GEOMETRY="${PION_EMFF_MPI_GEOMETRY:-1.1.1.1}"
-srun --cpu-bind=cores "$script_dir/run_pion_EMFF.sh"
+srun --cpu-bind=cores "$script_dir/run_pion_EMFF.sh" "$@"

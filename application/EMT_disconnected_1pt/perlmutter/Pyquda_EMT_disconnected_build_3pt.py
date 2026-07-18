@@ -147,6 +147,7 @@ def write_string_dataset(group, name, values):
 parser = argparse.ArgumentParser()
 parser.add_argument("--configs", type=str, required=True)
 parser.add_argument("--interpolator", type=str, default=os.environ.get("EMT_DISC_INTERPOLATOR", "5"))
+parser.add_argument("--t_separations", type=parse_int_list, default=[2])
 parser.add_argument(
     "--include_gluon",
     action="store_true",
@@ -157,12 +158,14 @@ args = parser.parse_args()
 configs = parse_int_list(args.configs)
 if not configs:
     parser.error("--configs must contain at least one integer configuration")
+if not args.t_separations:
+    parser.error("--t_separations must contain at least one integer")
 data_dir = os.environ.get("EMT_1PT_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 lat_tag = os.environ.get("EMT_1PT_LAT_TAG", "S8T32")
 src_pos = parse_triplet(os.environ.get("EMT_1PT_SRC_POS", "0.0.0")) + [
     int(os.environ.get("EMT_1PT_SRC_T", "0"))
 ]
-t_separations = parse_int_list(os.environ.get("EMT_DISC_T_SEPS", "2"))
+t_separations = args.t_separations
 c2_momentum = os.environ.get("EMT_DISC_C2_MOMENTUM", "PX0PY0PZ0")
 loop_sm_tag = default_loop_sm_tag()
 c2_sm_tag = default_c2_sm_tag(args.interpolator)

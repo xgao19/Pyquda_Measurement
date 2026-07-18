@@ -1,6 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
+t_separations="2"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --t_separations)
+      [[ $# -ge 2 ]] || { echo "Missing value for --t_separations" >&2; exit 2; }
+      t_separations="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m3760/xgao/software}"
 measurement_root="${MEASUREMENT_ROOT:-$software_root/Pyquda_Measurement}"
@@ -25,7 +40,6 @@ export PION_EMFF_MPI_GEOMETRY="${PION_EMFF_MPI_GEOMETRY:-1.1.1.1}"
 export PION_EMFF_NUM_SRC="${PION_EMFF_NUM_SRC:-1}"
 export PION_EMFF_QMAX="${PION_EMFF_QMAX:-1}"
 export PION_EMFF_PF="${PION_EMFF_PF:-0.0.0}"
-export PION_EMFF_T_INSERT="${PION_EMFF_T_INSERT:-2}"
 export PION_EMFF_WIDTH="${PION_EMFF_WIDTH:-1.0}"
 export PION_EMFF_POS_BOOST_SRC="${PION_EMFF_POS_BOOST_SRC:-${PION_EMFF_POS_BOOST:-0.0.0}}"
 export PION_EMFF_POS_BOOST_SINK="${PION_EMFF_POS_BOOST_SINK:-${PION_EMFF_POS_BOOST:-0.0.0}}"
@@ -42,7 +56,7 @@ echo "  PION_EMFF_MPI_GEOMETRY=$PION_EMFF_MPI_GEOMETRY"
 echo "  PION_EMFF_NUM_SRC=$PION_EMFF_NUM_SRC"
 echo "  PION_EMFF_QMAX=$PION_EMFF_QMAX"
 echo "  PION_EMFF_PF=$PION_EMFF_PF"
-echo "  PION_EMFF_T_INSERT=$PION_EMFF_T_INSERT"
+echo "  t_separations=$t_separations"
 
 python3 -u "$script_dir/Pyquda_pion_EMFF.py" \
   --config_num "$PION_EMFF_CONFIG_NUM" \
@@ -52,7 +66,7 @@ python3 -u "$script_dir/Pyquda_pion_EMFF.py" \
   --num_src "$PION_EMFF_NUM_SRC" \
   --qmax "$PION_EMFF_QMAX" \
   --pf "$PION_EMFF_PF" \
-  --t_insert "$PION_EMFF_T_INSERT" \
+  --t_separations "$t_separations" \
   --width "$PION_EMFF_WIDTH" \
   --pos_boost_src "$PION_EMFF_POS_BOOST_SRC" \
   --pos_boost_sink "$PION_EMFF_POS_BOOST_SINK" \

@@ -1,11 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
-if [[ $# -ne 2 || "$1" != "--config_num" || ! "$2" =~ ^[0-9]+$ ]]; then
-  echo "Usage: $0 --config_num CFG" >&2
+config_num=""
+t_separations="2"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config_num) config_num="${2:-}"; shift 2 ;;
+    --t_separations) t_separations="${2:-}"; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+if [[ ! "$config_num" =~ ^[0-9]+$ ]]; then
+  echo "Usage: $0 --config_num CFG [--t_separations TSEP[,TSEP...]]" >&2
   exit 2
 fi
-config_num="$2"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m4559/xgao/software_gradientflow}"
@@ -39,4 +47,5 @@ echo "Running disconnected diagnostic proton 2pt"
 python3 -u "$script_dir/Pyquda_EMT_disconnected_proton_2pt.py" \
   --config_num "$config_num" \
   --mpi_geometry "$EMT_1PT_MPI_GEOMETRY" \
-  --interpolator "$EMT_DISC_INTERPOLATOR"
+  --interpolator "$EMT_DISC_INTERPOLATOR" \
+  --t_separations "$t_separations"

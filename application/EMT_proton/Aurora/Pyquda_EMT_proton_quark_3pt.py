@@ -29,7 +29,10 @@ parser.add_argument("--config_num", type=int, required=True)
 parser.add_argument("--mpi_geometry", type=str, default=os.environ.get("EMT_PROTON_MPI_GEOMETRY", "1.1.1.2"))
 parser.add_argument("--interpolator", type=str, default=os.environ.get("EMT_PROTON_INTERPOLATOR", "5"))
 parser.add_argument("--mg-block", default="8.8.4.4", help="X.Y.Z.T[;...] or none")
+parser.add_argument("--t_separations", type=parse_int_list, default=[2])
 args = parser.parse_args()
+if not args.t_separations:
+    parser.error("--t_separations must contain at least one integer")
 
 conf = args.config_num
 mpi_geometry = [int(i) for i in args.mpi_geometry.split(".")]
@@ -48,7 +51,7 @@ src_pos = parse_triplet(os.environ.get("EMT_PROTON_SRC_POS", "0.0.0")) + [
 qmax = int(os.environ.get("EMT_PROTON_QMAX", "0"))
 qext = [[x, y, z, 0] for x in range(-qmax, qmax + 1) for y in range(-qmax, qmax + 1) for z in range(-qmax, qmax + 1)]
 pf = parse_triplet(os.environ.get("EMT_PROTON_PF", "0.0.0")) + [0]
-t_separations = parse_int_list(os.environ.get("EMT_PROTON_T_SEPS", "2"))
+t_separations = args.t_separations
 pol_list = parse_str_list(os.environ.get("EMT_PROTON_POL", "PpUnpol"))
 width = float(os.environ.get("EMT_PROTON_WIDTH", "1.0"))
 boost_in = parse_triplet(os.environ.get("EMT_PROTON_BOOST_IN", "0.0.0"))

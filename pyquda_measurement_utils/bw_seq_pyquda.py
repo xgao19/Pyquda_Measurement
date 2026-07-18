@@ -36,7 +36,7 @@ PolProjections = {
     "PpUnpol": Pp,  
 }
 
-def _iter_bw_seq_raw(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_insert, pol_list, flavor, interpolator="5"):
+def _iter_bw_seq_raw(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_sep, pol_list, flavor, interpolator="5"):
     if interpolator == "5":
         gamma_insert = Cg5
     elif interpolator == "T5":
@@ -68,7 +68,7 @@ def _iter_bw_seq_raw(dirac, prop: LatticePropagator, origin, sm_width, sm_boost,
             raise ValueError(f"Invalid flavor: {flavor}")
 
         t_source = origin[3]
-        t_sink = (t_source + t_insert) % GLt
+        t_sink = (t_source + t_sep) % GLt
         src_seq_sliced = sequential12(src_seq, t_sink)
         seq_data = _asarray_on_queue(src_seq_sliced.data, xp, prop.data)
 
@@ -92,7 +92,7 @@ def _iter_bw_seq_raw(dirac, prop: LatticePropagator, origin, sm_width, sm_boost,
         yield core.invertPropagator(dirac, src, 1, 0)
 
 
-def create_bw_seq_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_insert, pol_list, flavor, interpolator="5"):
+def create_bw_seq_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_sep, pol_list, flavor, interpolator="5"):
     """
     PyQUDA version: Build backward sequential source (Backend Agnostic).
     """
@@ -106,7 +106,7 @@ def create_bw_seq_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_bo
         sm_width,
         sm_boost,
         momentum,
-        t_insert,
+        t_sep,
         pol_list,
         flavor,
         interpolator,
@@ -119,7 +119,7 @@ def create_bw_seq_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_bo
     return _asarray_on_queue(dst_seq, xp, ref_data)
 
 
-def create_bw_seq_raw_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_insert, pol_list, flavor, interpolator="5"):
+def create_bw_seq_raw_pyquda(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_sep, pol_list, flavor, interpolator="5"):
     """Build proton backward sequential propagators before final gamma5 conjugation."""
     return list(_iter_bw_seq_raw(
         dirac,
@@ -128,7 +128,7 @@ def create_bw_seq_raw_pyquda(dirac, prop: LatticePropagator, origin, sm_width, s
         sm_width,
         sm_boost,
         momentum,
-        t_insert,
+        t_sep,
         pol_list,
         flavor,
         interpolator,
@@ -140,7 +140,7 @@ def create_meson_bw_seq_pyquda(
     prop: LatticePropagator,
     origin,
     momentum,
-    t_insert,
+    t_sep,
     sink_gamma,
     sm_width=None,
     sm_boost=None,
@@ -153,7 +153,7 @@ def create_meson_bw_seq_pyquda(
     """
     xp = _get_xp_from_array(prop.data)
     latt_info = prop.latt_info
-    t_sink = (origin[3] + t_insert) % latt_info.GLt
+    t_sink = (origin[3] + t_sep) % latt_info.GLt
 
     src_seq_sliced = sequential12(prop, t_sink)
     seq_data = _asarray_on_queue(src_seq_sliced.data, xp, prop.data)

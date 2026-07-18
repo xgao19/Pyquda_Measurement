@@ -73,7 +73,6 @@ def test_optional_pion_emff_tiny_gauge_smoke():
             "PION_EMFF_NUM_SRC": "1",
             "PION_EMFF_QMAX": "0",
             "PION_EMFF_PF": "0.0.0",
-            "PION_EMFF_T_INSERT": "2",
             "PION_EMFF_WIDTH": "1.0",
             "PION_EMFF_POS_BOOST_SRC": "0.0.0",
             "PION_EMFF_POS_BOOST_SINK": "0.0.0",
