@@ -53,6 +53,29 @@ enabled products, momentum grids, Wilson-line grids, sink separation,
 interpolator, and smearing setup are unchanged.  Concurrent writers to the
 same log are not supported.
 
+Polarization is part of both the three-point file identity and the sample-log
+identity.  Completing one polarization therefore never skips a run for another
+polarization.  C2 is polarization independent and remains one shared file per
+source; a later polarization run may regenerate that same C2.
+
+Each qTMD/PDF file contains one operator, one flavor, and one polarization with
+the dense layout
+
+```text
+corr[wilson,momentum,gamma,time]
+```
+
+The full canonical 16-Gamma basis, momentum list, and Wilson-index list are
+stored as datasets.  With all four operators enabled, a single-polarization run
+produces one shared C2 file plus eight three-point files.
+
+The `corr` Gamma axis stores the raw PyQUDA matrices used in production.  It is
+not silently converted to a physics-labelled axial or Hermitian tensor basis.
+The HDF5 file includes `gamma_matrices`, `gamma_pyquda_ids` and
+`physical_from_pyquda`; the relationship, including the raw `Y5/T5` signs and
+the optional tensor factor \(i\), is documented in
+[`docs/EMT_gamma_and_raw_bilinears.md`](../../docs/EMT_gamma_and_raw_bilinears.md).
+
 ## Conventions
 
 `boost_in` is source smearing.  `boost_out` is C2 sink smearing and the

@@ -4,6 +4,26 @@ This file records commit-oriented history.  Before each commit, add a short
 entry with the intended commit date, title, and main changes.  Keep reusable
 tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 
+## 2026-07-18: Consolidate connected qTMD/PDF output
+
+- Replaced the per-Gamma connected qTMD/PDF files and their deeply nested
+  HDF5 groups with one dense
+  `corr[wilson,momentum,gamma,time]` dataset per operator.
+- Pion production now writes one file per enabled operator. Proton production
+  writes one file per operator, flavor, and polarization while retaining one
+  polarization-independent C2 file per source.
+- Added polarization to the proton sample-log identity so independently
+  produced polarization channels cannot skip one another.
+- Stored the canonical 16-Gamma basis, momentum list, Wilson-index list, and
+  explicit axis metadata in every connected qTMD/PDF file. Old hierarchical
+  files are not read or migrated.
+- The S8T8 numerical gate used solver tolerance `1e-15`, one/four MPI ranks,
+  nonzero momenta, all CG/GI qTMD/PDF paths, and proton `PpUnpol`/`PpSzp`.
+  Reconstructed legacy arrays and dense output were bitwise identical in both
+  layouts. The one/four-rank maximum absolute and relative-L2 differences were
+  `1.46e-14` and `6.85e-14`; output counts were five pion files and seventeen
+  proton files for two polarizations.
+
 ## 2026-07-18: Decouple connected qTMD operator utilities
 
 - Moved the unchanged CG/GI qTMD and PDF Wilson-index, displacement, staple
@@ -1207,3 +1227,14 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - A one-rank S8T8 field-level comparison found bitwise-identical smeared links
   and plaquettes for `dir_ignore=4` and `dir_ignore=-1`.  The full CPU suite
   passes with 266 tests and 12 skips.
+## 2026-07-18: Document raw and physical Gamma conventions
+
+- Expanded `docs/EMT_gamma_and_raw_bilinears.md` into the central registry for
+  `pyquda_bitmask16_with_physics_transform_v1`.
+- Clarified that qTMD/PDF `corr[...,gamma,...]` stores the raw PyQUDA matrices
+  used in production.  `gamma_basis_schema` is a version key; the exact
+  convention is defined by `gamma_matrices`, `gamma_pyquda_ids`, and
+  `physical_from_pyquda` in each HDF5 file.
+- Corrected the pion/proton qTMD tables to show the raw signs
+  `Y5_raw=-gamma_y gamma5` and `T5_raw=-gamma_t gamma5`, and distinguished raw
+  tensor products from the optional Hermitian factor `1j`.

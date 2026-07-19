@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import subprocess
 
+import h5py
 import numpy as np
 import pytest
 
@@ -89,7 +90,7 @@ def test_proton_qtmd_resume_precedes_source_and_is_hdf5_independent():
         'source.propagator('
     )
     assert source.index("append_sample_log_entry(sample_log_file, entry)") > source.index(
-        "_save_pdf("
+        "_save_operator_by_flavor("
     )
     assert "h5py" not in source
     assert "fingerprint" not in source
@@ -98,6 +99,52 @@ def test_proton_qtmd_resume_precedes_source_and_is_hdf5_independent():
         source.index("for source_position in source_positions:")
     ]
     assert "mg_block" not in sample_log_section
+    assert "args.pol" in sample_log_section
+    entry_section = source[
+        source.index("entry = get_sample_log_tag(") :
+        source.index("if entry in completed:")
+    ]
+    assert "args.pol" in entry_section
+
+
+def test_proton_qtmd_dense_files_are_split_by_flavor_and_polarization(
+    tmp_path,
+):
+    runner = _load_runner()
+
+    class LatticeInfo:
+        mpi_rank = 0
+
+    corr_down = np.arange(2 * 1 * 1 * 16 * 4).reshape(
+        2, 1, 1, 16, 4
+    ).astype(np.complex128)
+    corr_up = corr_down + 1000
+    runner._save_operator_by_flavor(
+        latt_info=LatticeInfo(),
+        data_dir=tmp_path,
+        lat_tag="S8T8",
+        config_num=7,
+        operator_tag="CG",
+        source_position=[0, 0, 0, 0],
+        smearing_tag="setup.PpUnpol",
+        corr_down=corr_down,
+        corr_up=corr_up,
+        momentum_list=[[0, 0, 0, 0]],
+        wilson_indices=[[0, 0, 0, 0], [1, 0, 0, 1]],
+        t_sep=2,
+        polarization="PpUnpol",
+    )
+
+    files = sorted((tmp_path / "qTMD").glob("*.h5"))
+    assert len(files) == 2
+    assert all("PpUnpol" in path.name for path in files)
+    assert any(".CG.D.ex." in path.name for path in files)
+    assert any(".CG.U.ex." in path.name for path in files)
+    for path in files:
+        with h5py.File(path, "r") as h5:
+            assert h5["corr"].shape == (2, 1, 16, 4)
+            assert h5.attrs["polarization"] == "PpUnpol"
+            assert h5.attrs["operator_gamma_basis"] == "all_16"
 
 
 def test_proton_qtmd_shell_requires_configuration_before_environment_setup():

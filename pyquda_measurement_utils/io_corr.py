@@ -3,7 +3,11 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from pyquda_measurement_utils.fermion_bilinear_basis import basis_attrs, basis_metadata
+from pyquda_measurement_utils.fermion_bilinear_basis import (
+    GAMMA_LABELS,
+    basis_attrs,
+    basis_metadata,
+)
 import re
 
 
@@ -323,37 +327,54 @@ def save_proton_c2pt_hdf5(
     f.close()
 
 
-# W_index_list[bT, bz, eta, Tdir]
-# Save proton qTMD/PDF three-point data after the application has already rolled time.
-def save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info, attrs=None):
+# Save one connected qTMD/PDF operator with dense Wilson, momentum, Gamma,
+# and source-relative time axes.  Applications call this writer only on rank 0.
+def save_connected_qtmd_hdf5(
+    corr,
+    tag,
+    momentum_list,
+    wilson_index_list,
+    t_sep,
+    attrs=None,
+):
+    corr = np.asarray(corr)
+    momentum_list = np.asarray(momentum_list, dtype=np.int32)
+    wilson_index_list = np.asarray(wilson_index_list, dtype=np.int32)
+    t_sep = int(t_sep)
+    expected_shape = (
+        len(wilson_index_list),
+        len(momentum_list),
+        len(GAMMA_LABELS),
+        t_sep + 2,
+    )
+    if corr.shape != expected_shape:
+        raise ValueError(
+            "connected qTMD correlation should have axes "
+            f"[wilson,momentum,gamma,time]={expected_shape}, got {corr.shape}"
+        )
+    if momentum_list.ndim != 2 or momentum_list.shape[1] != 4:
+        raise ValueError("momentum_list should have shape [N_momentum,4]")
+    if wilson_index_list.ndim != 2 or wilson_index_list.shape[1] != 4:
+        raise ValueError("wilson_index_list should have shape [N_wilson,4]")
 
-    bT_list = ['b_X', 'b_Y']
+    file_attrs = {
+        **basis_attrs(),
+        "qtmd_hdf5_schema": "connected_qtmd_dense_v1",
+        "corr_axes": "wilson,momentum,gamma,time",
+        "momentum_columns": "px,py,pz,energy",
+        "wilson_index_columns": "bT,bz,eta,transverse_direction",
+        "time_axis": "source_relative",
+        "t_separation": t_sep,
+    }
+    if attrs:
+        file_attrs.update(attrs)
 
-    #g.message("-->>",W_index_list)
-
-    save_h5 = tag + ".h5"
-    f = _prepare_h5_file(save_h5, attrs)
-
-    if latt_info.mpi_rank == 0:
-        print(f"no roll")
-        print(f"corr.shape, {np.shape(corr)}")
-        print(f"plist.shape, {np.shape(plist)}")
-    sm = f.require_group("SS")
-    for ig, gm in enumerate(gammalist):
-        g_gm = sm.require_group(gm)
-        for ip, p in enumerate(plist):
-            p_tag = "PX"+str(p[0])+"PY"+str(p[1])+"PZ"+str(p[2])
-            g_p = g_gm.require_group(p_tag)
-            for i, idx in enumerate(W_index_list):
-                path = bT_list[idx[3]] + '/' + 'eta'+str(idx[2]) + '/' + 'bT'+str(idx[0])
-                g_data = g_p.require_group(path)
-                g_data.create_dataset('bz'+str(idx[1]), data=corr[i][ip][ig][:tsep+2])
-    f.close()
-
-
-# Save pion qTMD/PDF data using the same HDF5 layout as the proton writer.
-def save_qTMD_pion_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info, attrs=None):
-    save_qTMD_proton_hdf5_noRoll(corr, tag, gammalist, plist, W_index_list, tsep, latt_info, attrs=attrs)
+    with _prepare_h5_file(f"{tag}.h5", file_attrs) as f:
+        f.create_dataset("corr", data=corr)
+        f.create_dataset("momentum_list", data=momentum_list)
+        f.create_dataset("wilson_index_list", data=wilson_index_list)
+        for name, values in basis_metadata().items():
+            f.create_dataset(name, data=values)
 
 
 # -----------------------------------------------------------------------------

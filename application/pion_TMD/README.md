@@ -70,12 +70,25 @@ resume identities encode the channel explicitly:
 
 ```text
 C2:        <sm_tag>.src<SRC>
-qTMD/PDF:  <sm_tag>.src<SRC>.sink<SINK>.<operator-gamma>
+qTMD/PDF:  <sm_tag>.src<SRC>.sink<SINK>
 ```
 
-The same source, sink, and operator labels are stored as HDF5 attributes.  C2
-stores `sink_interpolator=all_16_gamma_scan` because all 16 sink gamma channels
-are written into the file.
+The same source and sink labels are stored as HDF5 attributes.  Each enabled
+CG/GI qTMD or CG/GI PDF operator is one HDF5 file with
+`corr[wilson,momentum,gamma,time]`; the complete canonical 16-Gamma basis is
+stored as the `gamma_list` axis metadata.  With every operator enabled, one
+source therefore produces one C2 file and four three-point files.
+C2 stores `sink_interpolator=all_16_gamma_scan` because all 16 sink gamma
+channels are written into the file.
+
+The saved `corr` Gamma axis is the raw PyQUDA bitmask basis actually used by
+the contraction, not an already converted physics basis.  In particular raw
+`Y5` and `T5` have the opposite sign from uniformly labelled
+\(\gamma_Y\gamma_5\) and \(\gamma_T\gamma_5\), and raw tensor channels do not
+contain the extra Hermitian factor \(i\).  The file stores the exact matrices,
+IDs and `physical_from_pyquda` transform.  See
+[`docs/EMT_gamma_and_raw_bilinears.md`](../../docs/EMT_gamma_and_raw_bilinears.md)
+for the schema registry and a conversion example.
 
 The production default is the explicit canonical source label `5`, so the
 standard pseudoscalar source is written as `src5`.  The shared pion C2

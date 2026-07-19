@@ -46,7 +46,7 @@ def test_qtmd_and_emff_read_resume_before_source_inversion():
         "build_pion_source_propagators("
     )
     assert qtmd.index("append_sample_log_entry(sample_log_file, sample_log_tag)") > qtmd.index(
-        "save_qTMD_pion_hdf5_noRoll("
+        "save_connected_qtmd_hdf5("
     )
 
     assert emff.index("read_sample_log_entries(sample_log_file)") < emff.index(

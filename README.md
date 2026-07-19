@@ -74,7 +74,9 @@ converted to host NumPy arrays only through `tools.array_to_numpy`.
 
 Connected proton qTMD/PDF production uses the single backend-independent
 runner in `application/nucleon_TMD/shared_runner.py`; Perlmutter and Aurora
-entrypoints only provide platform defaults.
+entrypoints only provide platform defaults. Connected pion/proton qTMD/PDF
+files use one dense `[wilson,momentum,gamma,time]` dataset per operator
+(and per proton flavor/polarization), rather than one file per Gamma channel.
 
 Naming convention:
 
@@ -270,8 +272,11 @@ environment variable or CLI option.
 
 The EMT development files include detailed English module docstrings with the
 correlation-function definitions and the contraction formulas used by the code.
-The shared numerical Gamma definition, HDF5 basis transform, raw-bilinear
-analysis recipes, and per-file storage weights are documented in
+The shared numerical Gamma definition, the
+`pyquda_bitmask16_with_physics_transform_v1` HDF5 schema, the relation between
+the raw PyQUDA matrices actually used in contractions and physics-labelled
+axial/tensor channels, analysis recipes, and per-file storage weights are
+documented in
 [`docs/EMT_gamma_and_raw_bilinears.md`](docs/EMT_gamma_and_raw_bilinears.md).
 
 For pion/meson EMT:

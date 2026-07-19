@@ -343,8 +343,9 @@ def test_proton_qtmd_parameters_use_only_active_measurement_fields():
     assert runner.count('parameters["boost_out"]') >= 2
     assert "my_pyquda_gammas" not in runner
     assert "gamma_stack" in runner
-    assert runner.count("if latt_info.mpi_rank != 0:\n        return") >= 2
+    assert runner.count("if latt_info.mpi_rank != 0:\n        return") >= 1
     assert 'for flavor, corr in (("D", corr_down), ("U", corr_up))' in runner
+    assert "_save_qtmd_by_gamma" not in runner
     assert not (REPO_ROOT / "application/nucleon_TMD_CG").exists()
 
 
@@ -354,9 +355,15 @@ def test_pion_channel_provenance_is_explicit_and_rank_zero_writes_qtmd():
         assert "get_pion_channel_tag" in source
         assert '"src_interpolator"' in source
         assert '"sink_interpolator"' in source
-        assert '"operator_gamma"' in source
+        assert '"operator_gamma_basis": "all_16"' in source
         assert "source_gamma_provenance" in source
-        assert "tasks if rank == 0 else ()" in source
+        assert "save_connected_qtmd_hdf5" in source
+        assert "for gidx in" not in source
+        assert source.count("save_connected_qtmd_hdf5(") == 3
+        assert '"CG.ex"' in source
+        assert '"GI_qTMD.ex"' in source
+        assert '("GI_PDF", True)' in source
+        assert '("CG_PDF", False)' in source
         assert '"pos_boost"' in source
         assert '"neg_boost"' in source
         assert '"operator_insertion_line": "neg_boost"' in source

@@ -909,11 +909,10 @@ calling the HDF5 writer:
   \texttt{np.transpose(pion\_TMDs, (0, 2, 1, 3))},
 \end{equation}
 yielding shape \texttt{[Wilson\_index,\; momentum,\; gamma,\; time]}.  This
-transpose is critical: \verb|save_qTMD_pion_hdf5_noRoll| (which delegates to
-\verb|save_qTMD_proton_hdf5_noRoll|) expects the momentum dimension to precede
-the gamma dimension.  Without this transpose, a single-gamma HDF5 file could be
-written with a momentum list interpreted as gamma labels, producing
-silently corrupted output.
+transpose is the canonical dense HDF5 order expected by
+\verb|save_connected_qtmd_hdf5|.  The writer checks all four axis lengths
+against the Wilson-index, momentum, complete 16-Gamma, and time metadata before
+publishing the file.
 
 \subsection{Source Time Rolling}
 
@@ -932,7 +931,7 @@ For the three-point function, the application rolls before calling the writer:
 and additionally truncates to $\tau \in [0, t_{\rm sep}]$:
 \begin{equation}
   \texttt{pion\_TMDs} \leftarrow
-  \texttt{pion\_TMDs[:, :, :, :t\_insert+2]}.
+  \texttt{pion\_TMDs[:, :, :, :t\_sep+2]}.
 \end{equation}
 
 \subsection{HDF5 Directory Layout}
@@ -943,8 +942,9 @@ name contains \texttt{.src<SRC>}; its attributes store
 \texttt{src\_interpolator=<SRC>} and
 \texttt{sink\_interpolator=all\_16\_gamma\_scan}.  Connected qTMD and PDF
 three-point file names contain
-\texttt{.src<SRC>.sink<SINK>.<operator-gamma>}.  Their root attributes store
-the same source and sink labels together with \texttt{operator\_gamma}.  The
+\texttt{.src<SRC>.sink<SINK>}.  Each operator file contains the complete
+16-Gamma axis, and its root attributes store the same source and sink labels
+together with \texttt{operator\_gamma\_basis=all\_16}.  The
 source/sink channel identity also enters the sample-log name, so two channels
 cannot share resume state even when a custom smearing tag is reused.
 
@@ -962,27 +962,19 @@ This lightweight identity assumes that the enabled products, momentum range,
 Changing any such choice requires a new data/setup identity.  Concurrent jobs
 must not append to the same pion qTMD sample log.
 
-The HDF5 file hierarchy for the three-point function is:
+The dense HDF5 layout for each three-point operator is:
 \begin{verbatim}
-SS/<gamma>/PX..PY..PZ../<b_X or b_Y>/eta0/bT<bT>/bz<bz>
+corr                  [Wilson, momentum, gamma, time]
+gamma_list            [16]
+momentum_list         [N_momentum, 4]
+wilson_index_list     [N_Wilson, 4]
 \end{verbatim}
 
-where:
-\begin{itemize}[nosep]
-  \item \texttt{SS}: sequential-source group.
-  \item \texttt{<gamma>}: one of the 16 gamma labels
-        (\texttt{5}, \texttt{T}, \texttt{T5}, \dots, \texttt{SZT}).
-  \item \texttt{PX..PY..PZ..}: insertion momentum components.
-  \item \texttt{b\_X} or \texttt{b\_Y}: transverse displacement direction.
-  \item \texttt{eta0}: staple length parameter (currently 0).
-  \item \texttt{bT<bT>}: transverse displacement magnitude.
-  \item \texttt{bz<bz>}: longitudinal displacement (dataset with time-series
-        data).
-\end{itemize}
-
-For the PDF path ($b_T = 0$), the datasets appear under \texttt{b\_X/eta0/bT0/}
-regardless of the lack of transverse displacement, maintaining structural
-compatibility with the qTMD layout.
+The columns of \texttt{wilson\_index\_list} are
+\([b_T,b_z,\eta,d_\perp]\), with \(d_\perp=0,1\) denoting the \(X,Y\)
+directions.  PDF files use the same schema with \(b_T=0\).  When all products
+are enabled, one source produces one C2 file and four dense operator files
+instead of one file per Gamma channel.
 
 %==========================================================================
 \section{Boost Smearing Parameters}
@@ -1160,29 +1152,65 @@ For quick reference, the central contracted expressions are:
 \section{Gamma Matrix Reference}
 \label{app:gamma}
 
+The dense qTMD/PDF dataset
+\texttt{corr[wilson,momentum,gamma,time]} stores the raw PyQUDA bit-mask
+Gamma basis actually used in the contraction.  It is identified by the HDF5
+attribute
+\begin{center}
+\texttt{gamma\_basis\_schema =
+pyquda\_bitmask16\_with\_physics\_transform\_v1}.
+\end{center}
+This identifier is a version key; the complete convention is carried by the
+same file in \texttt{gamma\_list}, \texttt{gamma\_pyquda\_ids},
+\texttt{gamma\_matrices}, and \texttt{physical\_from\_pyquda}.  In
+particular, the table below describes the \emph{raw matrix used in
+production}, not an already converted physics label.
+
 \begin{center}
 \begin{tabular}{c|c|l}
 \hline
-\textbf{Index} & \textbf{Label} & \textbf{Description} \\ \hline
+\textbf{Index} & \textbf{Label} & \textbf{Raw production matrix} \\ \hline
 0  & \texttt{5}   & $\gamma_5$ \\
 1  & \texttt{T}   & $\gamma_T$ (temporal) \\
-2  & \texttt{T5}  & $\gamma_T\gamma_5$ \\
+2  & \texttt{T5}  & $-\gamma_T\gamma_5$ \\
 3  & \texttt{X}   & $\gamma_X$ \\
 4  & \texttt{X5}  & $\gamma_X\gamma_5$ \\
 5  & \texttt{Y}   & $\gamma_Y$ \\
-6  & \texttt{Y5}  & $\gamma_Y\gamma_5$ \\
+6  & \texttt{Y5}  & $-\gamma_Y\gamma_5$ \\
 7  & \texttt{Z}   & $\gamma_Z$ \\
 8  & \texttt{Z5}  & $\gamma_Z\gamma_5$ \\
 9  & \texttt{I}   & Identity \\
-10 & \texttt{SXT} & $\Sigma_{XT} = \frac{i}{2}[\gamma_X,\gamma_T]$ \\
-11 & \texttt{SXY} & $\Sigma_{XY}$ \\
-12 & \texttt{SXZ} & $\Sigma_{XZ}$ \\
-13 & \texttt{SYT} & $\Sigma_{YT}$ \\
-14 & \texttt{SYZ} & $\Sigma_{YZ}$ \\
-15 & \texttt{SZT} & $\Sigma_{ZT}$ \\
+10 & \texttt{SXT} & $\frac{1}{2}[\gamma_X,\gamma_T]=\gamma_X\gamma_T$ \\
+11 & \texttt{SXY} & $\frac{1}{2}[\gamma_X,\gamma_Y]=\gamma_X\gamma_Y$ \\
+12 & \texttt{SXZ} & $\frac{1}{2}[\gamma_X,\gamma_Z]=\gamma_X\gamma_Z$ \\
+13 & \texttt{SYT} & $\frac{1}{2}[\gamma_Y,\gamma_T]=\gamma_Y\gamma_T$ \\
+14 & \texttt{SYZ} & $\frac{1}{2}[\gamma_Y,\gamma_Z]=\gamma_Y\gamma_Z$ \\
+15 & \texttt{SZT} & $\frac{1}{2}[\gamma_Z,\gamma_T]=\gamma_Z\gamma_T$ \\
 \hline
 \end{tabular}
 \end{center}
+
+The physics-labelled basis is defined file-by-file by
+\begin{equation}
+ \Gamma_A^{\rm phys}
+ =\sum_B
+ \bigl(\texttt{physical\_from\_pyquda}\bigr)_{AB}
+ \Gamma_B^{\rm raw}.
+\end{equation}
+For schema v1 this transform is the identity except for
+\begin{equation}
+ \Gamma_{Y5}^{\rm phys}=-\Gamma_{Y5}^{\rm raw}
+ =\gamma_Y\gamma_5,\qquad
+ \Gamma_{T5}^{\rm phys}=-\Gamma_{T5}^{\rm raw}
+ =\gamma_T\gamma_5.
+\end{equation}
+Thus an analysis must apply this transform before treating every axial label
+uniformly as $\gamma_\mu\gamma_5$.  The raw tensor channels contain no factor
+of $i$; the Hermitian convention
+$i[\gamma_\mu,\gamma_\nu]/2$ is obtained by multiplying the corresponding
+stored channel by $i$.  The repository-wide schema registry and an HDF5
+conversion example are given in
+\texttt{docs/EMT\_gamma\_and\_raw\_bilinears.md}.
 
 \section{Wilson Line Index Convention}
 \label{app:wilson}
@@ -1190,9 +1218,7 @@ For quick reference, the central contracted expressions are:
 \subsection*{Connected GI qTMD Update}
 
 The connected pion qTMD code now supports both the older Coulomb-gauge
-coordinate-shift qTMD and a gauge-invariant staple qTMD.  The old
-\texttt{application/pion\_TMD\_CG/perlmutter} workflow is intentionally kept as
-the already-tested CG-only path.  The newer
+coordinate-shift qTMD and a gauge-invariant staple qTMD.  The canonical
 \texttt{application/pion\_TMD/perlmutter} workflow can run
 \texttt{CG\_qTMD}, \texttt{GI\_qTMD}, \texttt{GI\_PDF}, and
 \texttt{CG\_PDF} from the same forward and sequential propagators.

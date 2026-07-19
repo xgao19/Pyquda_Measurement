@@ -1,12 +1,77 @@
-# EMT Gamma basis and raw-bilinear analysis
+# Canonical Gamma-basis schema and raw-bilinear analysis
 
-This is the analysis-facing reference for the Gamma convention shared by the
-connected pion/proton EMT and disconnected quark-loop workflows.  The code
-source of truth is
+This is the analysis-facing registry for the Gamma convention shared by the
+connected pion/proton qTMD, PDF and EMT workflows and by disconnected
+quark-loop workflows.  The code source of truth is
 `pyquda_measurement_utils/fermion_bilinear_basis.py`; HDF5 files also store
 `gamma_list`, `gamma_pyquda_ids`, `gamma_matrices`, and
 `physical_from_pyquda`, so an analysis should verify the file metadata instead
 of assuming an ordering.
+
+## Schema registry
+
+The current HDF5 schema identifier is
+
+```text
+pyquda_bitmask16_with_physics_transform_v1
+```
+
+This string is a version key, not a self-contained mathematical definition.
+It means that the saved Gamma axis contains the **raw matrices returned by
+PyQUDA bitmask IDs**, while the same file carries an explicit transform to the
+uniform physics-labelled basis.  The convention is fully specified by the
+following HDF5 fields:
+
+```text
+attribute gamma_basis_schema
+attribute gamma_basis_order
+attribute physical_transform_definition
+attribute gamma5_definition
+attribute axial_definition
+attribute raw_tensor_definition
+attribute hermitian_tensor_from_raw_factor
+
+dataset   gamma_list                  [16]
+dataset   gamma_pyquda_ids            [16]
+dataset   gamma_matrices              [16,4,4]
+dataset   physical_gamma_list         [16]
+dataset   physical_from_pyquda        [16,16]
+dataset   gamma5_hermiticity_partner  [16]
+dataset   gamma5_hermiticity_sign     [16]
+```
+
+For qTMD/PDF files,
+`corr[wilson,momentum,gamma,time]` is contracted with
+`gamma_matrices[gamma]`.  It has **not** been transformed to the physical
+basis.  Likewise, EMT primitive local and derivative Gamma axes are raw until
+`physical_from_pyquda` is applied.  The matrix dataset, rather than the
+human-readable label alone, is the definitive record of what production used.
+
+An analysis can make this convention check explicit:
+
+```python
+import h5py
+import numpy as np
+
+with h5py.File(path, "r") as h5:
+    if h5.attrs["gamma_basis_schema"] != (
+        "pyquda_bitmask16_with_physics_transform_v1"
+    ):
+        raise ValueError("unsupported Gamma convention")
+    labels = h5["gamma_list"].asstr()[...]
+    gamma_raw = h5["gamma_matrices"][...]
+    raw_to_physical = h5["physical_from_pyquda"][...]
+
+    # Example for corr[wilson,momentum,gamma,time].
+    corr_raw = h5["corr"][...]
+    corr_physical = np.einsum(
+        "ab,wmbt->wmat", raw_to_physical, corr_raw
+    )
+```
+
+Here `corr_physical[..., A, :]` corresponds to
+\(\Gamma_A^{\rm phys}\), whereas `corr_raw[..., B, :]` is the actual
+PyQUDA matrix used in the contraction.
 
 ## Euclidean representation used by PyQUDA
 
@@ -72,6 +137,19 @@ The stored physical transform is defined by
 
 It is the identity except for `Y5` and `T5`, whose diagonal entries are `-1`.
 Thus every physical axial label consistently means \(\gamma_\mu\gamma_5\).
+Concretely,
+
+| label | matrix used in production | physics-labelled matrix |
+|---|---|---|
+| `X5` | \(\gamma_1\gamma_5\) | \(\gamma_1\gamma_5\) |
+| `Y5` | \(-\gamma_2\gamma_5\) | \(\gamma_2\gamma_5\) |
+| `Z5` | \(\gamma_3\gamma_5\) | \(\gamma_3\gamma_5\) |
+| `T5` | \(-\gamma_4\gamma_5\) | \(\gamma_4\gamma_5\) |
+
+The tensor labels require a separate convention choice.  Production stores
+\(\gamma_\mu\gamma_\nu=[\gamma_\mu,\gamma_\nu]/2\).  The common Hermitian
+physics convention \(i[\gamma_\mu,\gamma_\nu]/2\) is therefore `1j` times the
+stored raw channel; this factor is not part of `physical_from_pyquda`.
 
 ## Reconstructing the disconnected EMT
 

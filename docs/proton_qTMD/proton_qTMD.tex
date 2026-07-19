@@ -479,28 +479,37 @@ at the source.
 
 \subsection{Sink Bilinears}
 
-Sixteen bilinear gamma insertions are scanned at the sink, ordered as:
+The dense qTMD/PDF dataset
+\texttt{corr[wilson,momentum,gamma,time]} stores the raw PyQUDA bit-mask
+Gamma matrices actually used in the contraction.  The HDF5 attribute
+\texttt{gamma\_basis\_schema} has value
+\begin{center}
+\texttt{pyquda\_bitmask16\_with\_physics\_transform\_v1}.
+\end{center}
+The exact IDs, matrices, and raw-to-physical transform are stored in
+\texttt{gamma\_pyquda\_ids}, \texttt{gamma\_matrices}, and
+\texttt{physical\_from\_pyquda}.  The sixteen raw channels are ordered as:
 
 \begin{center}
-  \begin{tabular}{c|l}
-    Index & Gamma \\
+  \begin{tabular}{c|c|l}
+    Index & Label & Raw production matrix \\
     \hline
-    0  & 5   ($\gamma_5$) \\
-    1  & T   ($\gamma_t$) \\
-    2  & T5  ($\gamma_t\gamma_5$) \\
-    3  & X   ($\gamma_x$) \\
-    4  & X5  ($\gamma_x\gamma_5$) \\
-    5  & Y   ($\gamma_y$) \\
-    6  & Y5  ($\gamma_y\gamma_5$) \\
-    7  & Z   ($\gamma_z$) \\
-    8  & Z5  ($\gamma_z\gamma_5$) \\
-    9  & I   (identity) \\
-    10 & SXT ($\sigma_{xt}$) \\
-    11 & SXY ($\sigma_{xy}$) \\
-    12 & SXZ ($\sigma_{xz}$) \\
-    13 & SYT ($\sigma_{yt}$) \\
-    14 & SYZ ($\sigma_{yz}$) \\
-    15 & SZT ($\sigma_{zt}$)
+    0  & 5   & $\gamma_5$ \\
+    1  & T   & $\gamma_t$ \\
+    2  & T5  & $-\gamma_t\gamma_5$ \\
+    3  & X   & $\gamma_x$ \\
+    4  & X5  & $\gamma_x\gamma_5$ \\
+    5  & Y   & $\gamma_y$ \\
+    6  & Y5  & $-\gamma_y\gamma_5$ \\
+    7  & Z   & $\gamma_z$ \\
+    8  & Z5  & $\gamma_z\gamma_5$ \\
+    9  & I   & identity \\
+    10 & SXT & $[\gamma_x,\gamma_t]/2=\gamma_x\gamma_t$ \\
+    11 & SXY & $[\gamma_x,\gamma_y]/2=\gamma_x\gamma_y$ \\
+    12 & SXZ & $[\gamma_x,\gamma_z]/2=\gamma_x\gamma_z$ \\
+    13 & SYT & $[\gamma_y,\gamma_t]/2=\gamma_y\gamma_t$ \\
+    14 & SYZ & $[\gamma_y,\gamma_z]/2=\gamma_y\gamma_z$ \\
+    15 & SZT & $[\gamma_z,\gamma_t]/2=\gamma_z\gamma_t$
   \end{tabular}
 \end{center}
 
@@ -509,6 +518,21 @@ In the QUDA bitmask gamma basis, these correspond to the gamma matrix ID array:
   \texttt{pyquda\_gammas\_order} =
     [15, 8, 7, 1, 14, 2, 13, 4, 11, 0, 9, 3, 5, 10, 6, 12].
 \end{equation}
+
+The stored physics transform is
+\begin{equation}
+ \Gamma_A^{\rm phys}
+ =\sum_B
+ \bigl(\texttt{physical\_from\_pyquda}\bigr)_{AB}
+ \Gamma_B^{\rm raw}.
+\end{equation}
+For schema v1 only the \texttt{Y5} and \texttt{T5} diagonal entries are
+$-1$, so the transformed axial labels uniformly mean
+$\gamma_\mu\gamma_5$.  Raw tensor channels do not contain an additional
+factor of $i$; multiply them by $i$ only when using the Hermitian convention
+$i[\gamma_\mu,\gamma_\nu]/2$.  The complete schema registry and a portable
+HDF5 conversion example are in
+\texttt{docs/EMT\_gamma\_and\_raw\_bilinears.md}.
 
 \subsection{Interpolator Matrices}
 
@@ -988,24 +1012,23 @@ so that $t=0$ corresponds to the source position.
 
 \begin{verbatim}
   <tag>.h5
-    /SS/<gamma>/PX..PY..PZ../
-      <b_X or b_Y>/eta0/bT<bT>/bz<bz>  ->  dataset of shape [tsep+2]
+    corr                  [Wilson, momentum, gamma, time]
+    gamma_list            [16]
+    momentum_list         [N_momentum, 4]
+    wilson_index_list     [N_Wilson, 4]
 \end{verbatim}
 
-The Wilson-line index $[b_T, b_z, \eta, \text{dir}]$ maps to the HDF5 group path:
-\begin{itemize}
-  \item \texttt{dir} = 0 $\to$ \texttt{b\_X}, \texttt{dir} = 1 $\to$ \texttt{b\_Y},
-  \item \texttt{eta} = 0 $\to$ \texttt{eta0},
-  \item $b_T \to$ \texttt{bT}$\langle b_T\rangle$,
-  \item $b_z \to$ \texttt{bz}$\langle b_z\rangle$.
-\end{itemize}
-
-For PDF data, only \texttt{b\_X} appears (since $b_T = 0$ always, and the transverse
-direction is dummy).
+The Wilson-index columns are $[b_T,b_z,\eta,\text{dir}]$, where
+\texttt{dir}=0,1 denotes the \(X,Y\) transverse direction.  PDF data uses the
+same schema with \(b_T=0\).  Each file contains one operator, one flavor, and
+one polarization, while the complete 16-Gamma scan remains a dataset axis.
+The polarization is encoded in both the file tag and HDF5 attributes; it is not
+an additional \texttt{corr} axis.
 
 The flavor-specific tags encode the flavor as part of the AMA field:
 \texttt{"CG.D.ex"} for down-quark CG insertion, \texttt{"CG.U.ex"} for up-quark
-CG insertion.
+CG insertion.  The C2 is polarization independent and remains one shared file
+per source.
 
 % ======================================================================
 \section{Key Differences from Pion qTMD}
@@ -1130,8 +1153,8 @@ Output files use the tags
   \texttt{GI\_qTMD.U.ex}, \qquad \texttt{GI\_qTMD.D.ex},
 \end{equation}
 while the original CG files keep the tags \texttt{CG.U.ex} and
-\texttt{CG.D.ex}.  The HDF5 internal path still follows the common qTMD writer
-layout based on $[b_T,b_z,\eta,d_\perp]$.
+\texttt{CG.D.ex}.  Every operator/flavor/polarization file uses the common
+dense layout based on $[b_T,b_z,\eta,d_\perp]$.
 
 % ======================================================================
 \section{Application Workflow Summary}
@@ -1158,7 +1181,7 @@ The production applications follow this workflow for each source position:
   \item \textbf{TMD contractions (CG)}: Loop over Wilson-line indices for
     directions $+x$ and $+y$, incrementally shifting the forward propagator
     and contracting with both sequential propagators and the 16 gammas.
-    Save results per polarization, gamma, and flavor.
+    Save one dense 16-Gamma file per polarization and flavor.
   \item \textbf{TMD contractions (GI)}: In the new
     \texttt{application/nucleon\_TMD} workflows, build cached fixed-length
     staple transporters, apply them to the forward propagator, and contract
@@ -1194,6 +1217,9 @@ all products enabled in that invocation close successfully.  The log is the
 only resume state and is intentionally independent of HDF5 location.  It may
 therefore be reused only when operator switches, momentum/Wilson grids,
 smearing, interpolator, and sink separation are unchanged.
+Polarization is included in the sample-log identity, so completing one
+polarization does not suppress another.  With all four operators enabled, one
+polarization produces one shared C2 file and eight three-point files.
 
 The main environment toggles are
 \texttt{NUCLEON\_TMD\_RUN\_CG\_QTMD},

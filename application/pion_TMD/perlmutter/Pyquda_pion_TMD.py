@@ -85,9 +85,9 @@ from pyquda_measurement_utils.io_corr import (
     get_pion_channel_tag,
     get_qTMD_file_tag,
     get_sample_log_tag,
-    save_qTMD_pion_hdf5_noRoll,
+    save_connected_qtmd_hdf5,
 )
-from pyquda_measurement_utils.pion_qTMD_vibe_develop import my_gammas, pion_TMD
+from pyquda_measurement_utils.pion_qTMD_vibe_develop import pion_TMD
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
     build_pion_source_propagators,
     source_gamma_provenance,
@@ -318,9 +318,6 @@ for pos in src_positions:
     W_index_list_GI = W_index_list_GI_dir0 + W_index_list_GI_dir1
     W_index_list_PDF = create_pdf_wilsonline_index_list(parameters["b_z"])
 
-    tasks = list(range(len(my_gammas)))
-    rank = latt_info.mpi_rank
-
     if run_cg_qtmd:
         t0 = time.time()
         pion_TMDs = measurement.contract_qTMD_CG(
@@ -338,29 +335,26 @@ for pos in src_positions:
             pion_TMDs = np.roll(pion_TMDs, -pos[3], axis=-1)
             pion_TMDs = pion_TMDs[:, :, :, : t_sep + 2]
             pion_TMDs = np.transpose(pion_TMDs, (0, 2, 1, 3))
-        for gidx in tasks if rank == 0 else ():
-            gm = my_gammas[gidx]
             tag = get_qTMD_file_tag(
                 str(data_dir),
                 lat_tag,
                 conf,
                 "CG.ex",
                 pos,
-                f"{channel_tag}.{pf_tag}.{gm}",
+                f"{channel_tag}.{pf_tag}",
             )
-            mpi_print(latt_info, f"Saving pion qTMD gamma {gm}: {tag}")
-            save_qTMD_pion_hdf5_noRoll(
-                pion_TMDs[:, :, gidx : gidx + 1, :],
+            mpi_print(latt_info, f"Saving pion qTMD: {tag}")
+            save_connected_qtmd_hdf5(
+                pion_TMDs,
                 tag,
-                [gm],
                 parameters["qext"],
                 W_index_list_CG,
                 t_sep,
-                latt_info,
                 attrs={
                     "src_interpolator": args.src_interpolator,
                     "sink_interpolator": args.sink_interpolator,
-                    "operator_gamma": gm,
+                    "operator_kind": "CG_qTMD",
+                    "operator_gamma_basis": "all_16",
                     **line_attrs,
                     **source_gamma_provenance(args.src_interpolator),
                 },
@@ -384,29 +378,26 @@ for pos in src_positions:
             pion_TMDs = np.roll(pion_TMDs, -pos[3], axis=-1)
             pion_TMDs = pion_TMDs[:, :, :, : t_sep + 2]
             pion_TMDs = np.transpose(pion_TMDs, (0, 2, 1, 3))
-        for gidx in tasks if rank == 0 else ():
-            gm = my_gammas[gidx]
             tag = get_qTMD_file_tag(
                 str(data_dir),
                 lat_tag,
                 conf,
                 "GI_qTMD.ex",
                 pos,
-                f"{channel_tag}.{pf_tag}.{gm}",
+                f"{channel_tag}.{pf_tag}",
             )
-            mpi_print(latt_info, f"Saving pion GI_qTMD gamma {gm}: {tag}")
-            save_qTMD_pion_hdf5_noRoll(
-                pion_TMDs[:, :, gidx : gidx + 1, :],
+            mpi_print(latt_info, f"Saving pion GI_qTMD: {tag}")
+            save_connected_qtmd_hdf5(
+                pion_TMDs,
                 tag,
-                [gm],
                 parameters["qext"],
                 W_index_list_GI,
                 t_sep,
-                latt_info,
                 attrs={
                     "src_interpolator": args.src_interpolator,
                     "sink_interpolator": args.sink_interpolator,
-                    "operator_gamma": gm,
+                    "operator_kind": "GI_qTMD",
+                    "operator_gamma_basis": "all_16",
                     **line_attrs,
                     **source_gamma_provenance(args.src_interpolator),
                 },
@@ -431,29 +422,26 @@ for pos in src_positions:
                 pion_PDFs = np.roll(pion_PDFs, -pos[3], axis=-1)
                 pion_PDFs = pion_PDFs[:, :, :, : t_sep + 2]
                 pion_PDFs = np.transpose(pion_PDFs, (0, 2, 1, 3))
-            for gidx in tasks if rank == 0 else ():
-                gm = my_gammas[gidx]
                 tag = get_qTMD_file_tag(
                     str(data_dir),
                     lat_tag,
                     conf,
                     f"{pdf_kind}.ex",
                     pos,
-                    f"{channel_tag}.{pf_tag}.{gm}",
+                    f"{channel_tag}.{pf_tag}",
                 )
-                mpi_print(latt_info, f"Saving pion {pdf_kind} gamma {gm}: {tag}")
-                save_qTMD_pion_hdf5_noRoll(
-                    pion_PDFs[:, :, gidx : gidx + 1, :],
+                mpi_print(latt_info, f"Saving pion {pdf_kind}: {tag}")
+                save_connected_qtmd_hdf5(
+                    pion_PDFs,
                     tag,
-                    [gm],
                     parameters["qext_PDF"],
                     W_index_list_PDF,
                     t_sep,
-                    latt_info,
                     attrs={
                         "src_interpolator": args.src_interpolator,
                         "sink_interpolator": args.sink_interpolator,
-                        "operator_gamma": gm,
+                        "operator_kind": pdf_kind,
+                        "operator_gamma_basis": "all_16",
                         **line_attrs,
                         **source_gamma_provenance(args.src_interpolator),
                     },

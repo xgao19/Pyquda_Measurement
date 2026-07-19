@@ -18,7 +18,7 @@ from pyquda.field import LatticeGauge
 from utils.boosted_smearing_pyquda import boosted_smearing
 #from utils.bw_seq_pyquda import create_bw_seq_pyquda
 #from utils.proton_qTMD_pyquda import proton_TMD, my_pyquda_gammas
-from utils.io_corr import get_sample_log_tag, get_c2pt_file_tag, get_qTMD_file_tag, save_qTMD_proton_hdf5_noRoll
+from utils.io_corr import get_sample_log_tag, get_c2pt_file_tag, get_qTMD_file_tag
 from utils.tools import srcLoc_distri_eq, mpi_print
 
 # --------------------------

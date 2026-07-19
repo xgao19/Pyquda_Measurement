@@ -275,7 +275,7 @@ def _roll_trim_root(corr, source_time, t_sep):
     return np.roll(corr, -int(source_time), axis=-1)[..., : int(t_sep) + 2]
 
 
-def _save_qtmd_by_gamma(
+def _save_operator_by_flavor(
     *,
     latt_info,
     data_dir,
@@ -289,57 +289,13 @@ def _save_qtmd_by_gamma(
     momentum_list,
     wilson_indices,
     t_sep,
+    polarization,
 ):
     if latt_info.mpi_rank != 0:
         return
-    from pyquda_measurement_utils.fermion_bilinear_basis import GAMMA_LABELS
     from pyquda_measurement_utils.io_corr import (
         get_qTMD_file_tag,
-        save_qTMD_proton_hdf5_noRoll,
-    )
-
-    for gamma_index, gamma_label in enumerate(GAMMA_LABELS):
-        for flavor, corr in (("D", corr_down), ("U", corr_up)):
-            tag = get_qTMD_file_tag(
-                str(data_dir),
-                lat_tag,
-                config_num,
-                f"{operator_tag}.{flavor}.ex",
-                source_position,
-                f"{smearing_tag}.{gamma_label}",
-            )
-            save_qTMD_proton_hdf5_noRoll(
-                corr[:, 0, :, gamma_index : gamma_index + 1, :],
-                tag,
-                [gamma_label],
-                momentum_list,
-                wilson_indices,
-                t_sep,
-                latt_info,
-            )
-
-
-def _save_pdf(
-    *,
-    latt_info,
-    data_dir,
-    lat_tag,
-    config_num,
-    operator_tag,
-    source_position,
-    smearing_tag,
-    corr_down,
-    corr_up,
-    momentum_list,
-    wilson_indices,
-    t_sep,
-):
-    if latt_info.mpi_rank != 0:
-        return
-    from pyquda_measurement_utils.fermion_bilinear_basis import GAMMA_LABELS
-    from pyquda_measurement_utils.io_corr import (
-        get_qTMD_file_tag,
-        save_qTMD_proton_hdf5_noRoll,
+        save_connected_qtmd_hdf5,
     )
 
     for flavor, corr in (("D", corr_down), ("U", corr_up)):
@@ -351,14 +307,20 @@ def _save_pdf(
             source_position,
             smearing_tag,
         )
-        save_qTMD_proton_hdf5_noRoll(
+        save_connected_qtmd_hdf5(
             corr[:, 0, :, :, :],
             tag,
-            list(GAMMA_LABELS),
             momentum_list,
             wilson_indices,
             t_sep,
-            latt_info,
+            attrs={
+                "operator_kind": (
+                    "CG_qTMD" if operator_tag == "CG" else operator_tag
+                ),
+                "flavor": flavor,
+                "polarization": polarization,
+                "operator_gamma_basis": "all_16",
+            },
         )
 
 
@@ -484,7 +446,9 @@ def run(defaults, argv=None):
     )[: args.num_src]
 
     sample_log_file = (
-        data_dir / "sample_log_qtmd" / f"{config_num}_{sm_tag}_{pf_tag}"
+        data_dir
+        / "sample_log_qtmd"
+        / f"{config_num}_{sm_tag}_{pf_tag}_{args.pol}"
     )
     if latt_info.mpi_rank == 0:
         completed = read_sample_log_entries(sample_log_file)
@@ -494,7 +458,9 @@ def run(defaults, argv=None):
 
     for source_position in source_positions:
         entry = get_sample_log_tag(
-            str(config_num), source_position, f"{sm_tag}_{pf_tag}"
+            str(config_num),
+            source_position,
+            f"{sm_tag}_{pf_tag}_{args.pol}",
         )
         if entry in completed:
             mpi_print(latt_info, f"SKIP: {entry}")
@@ -588,7 +554,7 @@ def run(defaults, argv=None):
                 wilson_indices=cg_indices,
                 operator_kind="CG_qTMD",
             )
-            _save_qtmd_by_gamma(
+            _save_operator_by_flavor(
                 latt_info=latt_info,
                 data_dir=data_dir,
                 lat_tag=args.lat_tag,
@@ -605,6 +571,7 @@ def run(defaults, argv=None):
                 momentum_list=qext,
                 wilson_indices=cg_indices,
                 t_sep=t_sep,
+                polarization=args.pol,
             )
 
         if run_gi_qtmd:
@@ -619,7 +586,7 @@ def run(defaults, argv=None):
                 wilson_indices=gi_indices,
                 operator_kind="GI_qTMD",
             )
-            _save_qtmd_by_gamma(
+            _save_operator_by_flavor(
                 latt_info=latt_info,
                 data_dir=data_dir,
                 lat_tag=args.lat_tag,
@@ -636,6 +603,7 @@ def run(defaults, argv=None):
                 momentum_list=qext,
                 wilson_indices=gi_indices,
                 t_sep=t_sep,
+                polarization=args.pol,
             )
 
         if run_pdf:
@@ -651,7 +619,7 @@ def run(defaults, argv=None):
                     wilson_indices=pdf_indices,
                     operator_kind=operator_kind,
                 )
-                _save_pdf(
+                _save_operator_by_flavor(
                     latt_info=latt_info,
                     data_dir=data_dir,
                     lat_tag=args.lat_tag,
@@ -668,6 +636,7 @@ def run(defaults, argv=None):
                     momentum_list=qext_pdf,
                     wilson_indices=pdf_indices,
                     t_sep=t_sep,
+                    polarization=args.pol,
                 )
 
         _sync_backend_array(prop_fw.data)
