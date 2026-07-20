@@ -20,7 +20,7 @@ With these labels, the connected three-point function is
 
     C3_g(q, tau; pf, tsep) =
         sum_x sum_y
-        exp(-i q . (x - x0)) exp(-i pf . (y - x0))
+        exp(+i q . (x - x0)) exp(-i pf . (y - x0))
         Tr[
             S_anti(y, x0) Gamma_sink
             S_q(y, x) Gamma_g S_q(x, x0) Gamma_src
@@ -54,8 +54,8 @@ The sink sum is absorbed into the meson backward sequential propagator built by
 
     Gamma_seq = gamma5 Gamma_sink^dagger gamma5,
 
-where ``phase_pf`` is produced by ``MomentumPhase`` with the same sign
-convention used by the application.  The sequential propagator solves
+where ``phase_pf = exp(+i pf . (y - x0))`` is produced by
+``MomentumPhase`` from the argument ``+pf``.  The sequential propagator solves
 
     D S_seq = eta_seq.
 
@@ -64,10 +64,13 @@ with gamma5 hermiticity,
 
     S_seq_anti(x, x0; pf, tsep) = gamma5 S_seq(x, x0)^dagger gamma5.
 
+The complex conjugation changes the source phase into the effective fixed-sink
+projector ``exp(-i pf . (y - x0))`` in the full three-point function.
+
 The contraction evaluated by ``contract_EMFF`` is then
 
     C3_g(q, tau; pf, tsep) =
-        sum_x exp(-i q . (x - x0))
+        sum_x exp(+i q . (x - x0))
         Tr[
             S_seq_anti(x, x0; pf, tsep)
             Gamma_g

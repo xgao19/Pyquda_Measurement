@@ -562,7 +562,7 @@ The connected three-point qTMD function for a flavor insertion $f \in \{U, D\}$ 
 
 \begin{align}
   C_3^{\Gamma, f}(q, b, \tau; p_f, t_{\text{sep}}) =
-    \sum_{\xvec} e^{-i q\cdot (\xvec - \xzerovec)} \;
+    \sum_{\xvec} e^{+i q\cdot (\xvec - \xzerovec)} \;
     \operatorname{Tr}_{\text{spin,color}}\Bigl[
       &\mathrm{Seq}_f\bigl(\xvec; p_f, t_{\text{sep}}, \mathcal{P}\bigr) \notag \\
       &\times\; \Gamma \;
@@ -641,6 +641,9 @@ follows these steps for each polarization $\mathcal{P}$ and flavor:
     \begin{equation}
       \texttt{final} = \texttt{prop\_inv}^\dagger \cdot \gamma_5.
     \end{equation}
+    Thus complex conjugation converts the source phase
+    $e^{+i p_f\cdot(\xvec-\xzerovec)}$ into the effective fixed-sink
+    projector $e^{-i p_f\cdot(\xvec-\xzerovec)}$.
 \end{enumerate}
 
 \subsection{Up-Quark Insertion (Flavor 1)}
@@ -1138,7 +1141,7 @@ sequential propagators,
   C_{3,g}^{f}(q,W,\tau)
   =
   \sum_{\mathbf{x}}
-  e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
+  e^{+i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
   \mathrm{Tr}\!\left[
     \mathrm{Seq}_{f}(\mathbf{x},\tau;p_f,t_{\rm sep},\mathcal{P})\,
     \Gamma_g\,

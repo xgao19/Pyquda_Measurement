@@ -201,7 +201,7 @@ The explicit three-point correlator is
   \Cthree^\Gamma(\mathbf q,\tau;\mathbf p_f,t_{\mathrm{sep}})
   &=
   \sum_{\mathbf x}
-  e^{-i\mathbf q\cdot(\mathbf x-\mathbf x_0)}
+  e^{+i\mathbf q\cdot(\mathbf x-\mathbf x_0)}
   \tr\left[
     S_{\mathrm{seq,anti}}(\mathbf x,\tau;\mathbf p_f,t_{\mathrm{sep}})
     \Gamma
@@ -212,7 +212,12 @@ The explicit three-point correlator is
 \end{align}
 where the fixed-sink sequential propagator has already absorbed the sink
 momentum \(\mathbf p_f\), the sink time \(t_{\mathrm{sep}}\), and the sink
-interpolator \(\gsink\).  The standard EMFF choice is the temporal vector
+interpolator \(\gsink\).  Here \texttt{MomentumPhase} receives
+\(+\mathbf q\) directly, so that
+\(\Phi_{\mathbf q}(\mathbf x;\mathbf x_0)
+=e^{+i\mathbf q\cdot(\mathbf x-\mathbf x_0)}\); consequently
+\(\mathbf q=\mathbf p_f-\mathbf p_i\) and
+\(\mathbf p_i=\mathbf p_f-\mathbf q\).  The standard EMFF choice is the temporal vector
 current,
 \begin{equation}
   \Gamma = \gamma_T,

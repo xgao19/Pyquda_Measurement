@@ -54,7 +54,8 @@ For a charged pion \(\pi^+\), the matrix element is
 \begin{equation}
 \braket{\pi^+(p_f) | J_\mu^{\text{em}}(0) | \pi^+(p_i)}
   = (p_i + p_f)_\mu \, F_\pi(Q^2) ,
-\qquad Q^2 = -q^2 = -(p_f - p_i)^2 \ge 0 .
+\qquad q=p_f-p_i,\qquad
+Q^2 = -q^2 = -(p_f - p_i)^2 \ge 0 .
 \label{eq:emff_def}
 \end{equation}
 
@@ -65,7 +66,7 @@ lattice this is accessed through the Euclidean three-point correlation function
 \begin{equation}
 C_3^\Gamma(\mathbf{q}, \tau; \mathbf{p}_f, t_{\text{sep}})
   = \sum_{\mathbf{x}} \sum_{\mathbf{y}}
-    e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
+    e^{+i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
     e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \,
     \big\langle
       O_\pi(\mathbf{y}, t_{\text{sep}}) \,
@@ -92,7 +93,7 @@ After Wick contraction, the connected three-point function takes the trace form
 \begin{equation}
 C_3^\Gamma(\mathbf{q}, \tau; \mathbf{p}_f, t_{\text{sep}})
   = \sum_{\mathbf{x}} \sum_{\mathbf{y}}
-    e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
+    e^{+i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
     e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \,
     \tr\Big[
       \Santi(\mathbf{y}, t_{\text{sep}}; \mathbf{x}_0, 0) \,
@@ -153,7 +154,7 @@ indices, is
 \begin{aligned}
 C_3^\Gamma(\mathbf{q}, \tau; \mathbf{p}_f, t_{\text{sep}})
   = \sum_{\mathbf{x},\mathbf{y}} &
-    e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
+    e^{+i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}
     e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \\
   &\times \Santi\big|_{\mathbf{y},t_{\text{sep}}}^{\alpha\beta;ab}
     \; (\gsink)^{\beta\gamma} \;
@@ -230,7 +231,7 @@ appropriate sink smearing applied, the source is
 \begin{equation}
 \etaseq(\mathbf{y}; \mathbf{p}_f, t_{\text{sep}})
   = \delta_{t_y,\,t_{\text{sep}}} \;
-    e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \;
+    e^{+i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \;
     \gseq \;
     \Sq^{\text{neg}}(\mathbf{y}, t_{\text{sep}}; \mathbf{x}_0, 0) ,
 \label{eq:etaseq}
@@ -258,7 +259,7 @@ used by the current production workflow is
   \mathcal{S}_{w,\mathbf{k}_{\rm pos,sink}}
   \left[
     \delta_{t_y,\,t_{\text{sep}}} \;
-    e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \;
+    e^{+i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \;
     \gseq \;
     \Sq^{\text{neg},\,S\to S}
       (\mathbf{y}, t_{\text{sep}}; \mathbf{x}_0, 0)
@@ -309,7 +310,7 @@ function reduces to a single spatial sum over the current insertion point
 \boxed{
 C_3^\Gamma(\mathbf{q}, \tau; \mathbf{p}_f, t_{\text{sep}})
   = \sum_{\mathbf{x}}
-    e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)} \,
+    e^{+i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)} \,
     \tr\Big[
       \Sseq^{\text{anti}}(\mathbf{x}, \mathbf{x}_0; \mathbf{p}_f, t_{\text{sep}}) \,
       \gcur \;
@@ -655,8 +656,13 @@ In physics notation this is precisely:
   corr = xp.einsum("qwtzyx, gwtzyx -> gqt", phases, corr_local)
 \end{verbatim}
 
-where \(\texttt{phases}_{q, w, t, z, y, x} = e^{-i\mathbf{p}_q\cdot(\mathbf{x}-\mathbf{x}_0)}\)
-for each momentum mode \(q\) in \texttt{p\_2pt}.  The sum over spatial indices
+Here \texttt{MomentumPhase} returns
+\(e^{+i\mathbf{p}_{\rm arg}\cdot(\mathbf{x}-\mathbf{x}_0)}\).  For the
+two-point function the caller supplies
+\(\mathbf{p}_{\rm arg}=-\mathbf{p}_q\), producing the effective projector
+\(\texttt{phases}_{q,w,t,z,y,x}
+=e^{-i\mathbf{p}_q\cdot(\mathbf{x}-\mathbf{x}_0)}\) for each momentum mode
+\(q\) in \texttt{p\_2pt}.  The sum over spatial indices
 \((z, y, x)\) and the checkerboard parity \(w\) is implicit in the \einsum{}
 contraction of the spacetime axes.
 
@@ -693,7 +699,7 @@ Eq.~\eqref{eq:C3_seq} is:
   \item The second \einsum{} performs the full spin-color trace
         \(\tr[\Sseq^{\text{anti}} \cdot \gcur \cdot \Sq \cdot \gsrc]\).
   \item The final \einsum{} projects onto momentum transfer \(\mathbf{q}\) via
-        Fourier phase \(e^{-i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}\).
+        Fourier phase \(e^{+i\mathbf{q}\cdot(\mathbf{x}-\mathbf{x}_0)}\).
 \end{itemize}
 
 \textbf{Result layout:} After gathering across MPI ranks, the output array has
@@ -713,8 +719,9 @@ The sequential source is built by \texttt{create\_meson\_bw\_seq\_pyquda} in
         is restricted to time slice \(t_{\text{sink}}\) using
         \(\texttt{sequential12}(\texttt{prop}, t_{\text{sink}})\).
   \item \textbf{Momentum phase:} Multiply by
-        \(e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)}\) on the
-        spatial lattice sites at the sink time slice.
+        \(e^{+i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)}\) on the
+        spatial lattice sites at the sink time slice.  This is the direct
+        output of \texttt{MomentumPhase} for the argument \(+\mathbf p_f\).
         \begin{verbatim}
   seq_data = xp.einsum("wtzyx, wtzyxilab -> wtzyxilab",
                         mom_phase, seq_data)
@@ -739,6 +746,9 @@ The sequential source is built by \texttt{create\_meson\_bw\_seq\_pyquda} in
   final_term = xp.einsum("wtzyxijfc, ik -> wtzyxjkcf",
                           prop_smeared.data.conj(), G5)
         \end{verbatim}
+        The complex conjugation converts the \(+\mathbf p_f\) source phase
+        into the effective sink projector
+        \(e^{-i\mathbf p_f\cdot(\mathbf y-\mathbf x_0)}\).
 \end{enumerate}
 
 The complete sequential source is thus:
@@ -746,7 +756,7 @@ The complete sequential source is thus:
 \begin{equation}
 \etaseq(y; \mathbf{p}_f, t_{\text{sep}})
   = \delta_{t_y,\,t_{\text{sep}}} \;
-    e^{-i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \;
+    e^{+i\mathbf{p}_f\cdot(\mathbf{y}-\mathbf{x}_0)} \;
     \big(\gfive \, \gsink^\dagger \, \gfive\big) \;
     S^{\text{neg}}(y, x_0) .
 \label{eq:etaseq_full}

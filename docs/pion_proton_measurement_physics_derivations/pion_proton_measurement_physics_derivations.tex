@@ -1,0 +1,1901 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{booktabs,longtable,tabularx,array}
+\usepackage[margin=2.35cm]{geometry}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  citecolor=blue!55!black,
+  urlcolor=blue!65!black,
+  pdftitle={First-Principles Wick-Contraction Derivations for Pion and Proton Measurements},
+  pdfauthor={PyQUDA Measurement physics audit},
+}
+
+\allowdisplaybreaks
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlength{\emergencystretch}{3em}
+\setlist[itemize]{topsep=0.3em,itemsep=0.15em}
+\setlist[enumerate]{topsep=0.3em,itemsep=0.15em}
+\numberwithin{equation}{section}
+
+\definecolor{codegray}{RGB}{245,246,248}
+\definecolor{auditred}{RGB}{150,25,25}
+\definecolor{auditgreen}{RGB}{20,105,55}
+\definecolor{auditamber}{RGB}{145,90,0}
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codegray},
+  frame=single,
+  rulecolor=\color{black!15},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+}
+
+\newcommand{\ii}{\mathrm{i}}
+\newcommand{\ee}{\mathrm{e}}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\Tr}{\operatorname{Tr}}
+\newcommand{\Trsc}{\operatorname{Tr}_{s,c}}
+\newcommand{\Trc}{\operatorname{Tr}_{c}}
+\newcommand{\avg}[1]{\left\langle #1\right\rangle}
+\newcommand{\abs}[1]{\left|#1\right|}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newcommand{\cO}{\mathcal{O}}
+\newcommand{\cW}{\mathcal{W}}
+\newcommand{\cD}{\mathcal{D}}
+\newcommand{\cX}{\mathcal{X}}
+\newcommand{\Dlr}{\overleftrightarrow D}
+\newcommand{\slDlr}{\overleftrightarrow{\not\!D}}
+\newcommand{\Gsrc}{\Gamma_{\mathrm{src}}}
+\newcommand{\Gsink}{\Gamma_{\mathrm{sink}}}
+\newcommand{\Gins}{\Gamma_{\mathrm{ins}}}
+\newcommand{\Pf}{\boldsymbol p_f}
+\newcommand{\PiMom}{\boldsymbol p_i}
+\newcommand{\qv}{\boldsymbol q}
+\newcommand{\Dv}{\boldsymbol\Delta}
+\newcommand{\Pv}{\boldsymbol P}
+\newcommand{\code}[1]{%
+  \ifmmode\text{\texttt{\detokenize{#1}}}\else\nolinkurl{#1}\fi}
+\newcommand{\good}[1]{\textcolor{auditgreen}{\textbf{#1}}}
+\newcommand{\warn}[1]{\textcolor{auditamber}{\textbf{#1}}}
+\newcommand{\bad}[1]{\textcolor{auditred}{\textbf{#1}}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{\textbf{First-Principles Wick-Contraction Derivations}\\
+  \Large Pion and Proton Measurements in \texttt{pyquda\_measurement\_utils}}
+\author{Physics-audit technical note}
+\date{Audit baseline:
+  \texttt{52927d03f30c8149088f933748e49085ce920b5c}\\
+  July 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This note derives the pion and proton measurement kernels in
+\code{pyquda_measurement_utils} from the target continuum matrix elements,
+through Euclidean spectral decompositions, flavor-labelled Grassmann
+integrals, propagator and sequential-source construction, and finally the
+spin--color contractions implemented by the production \code{einsum}
+expressions.  It covers two-point functions, electromagnetic form factors
+(EMFF), quark and gluon energy--momentum tensor (EMT) building blocks,
+qTMD/qGTMD, qPDF/qGPD, pion qTMD wave functions and qDA, stochastic
+disconnected loops, the legacy pion soft-factor four-point function, and
+background-response measurements.
+
+The central Wick results are that the pion backward line and trace are
+correct, the proton direct--exchange determinant and both flavor-specific
+sequential kernels are correct, and the qTMDWF/qDA endpoint orientation is
+correct.  A physical sign is missing when the saved positive stochastic trace
+in the disconnected qTMD/PDF workflow is interpreted as
+\(\bar q\Gamma\cW q\).  Most remaining limitations separate a raw Euclidean
+correlator from a renormalized and matched physical observable; they are not
+additional Wick-contraction failures.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Scope, baseline, and meaning of ``measurement''}
+
+\subsection{Audited source and document purpose}
+
+All formula-to-code statements in this document refer to repository commit
+\code{52927d03f30c} (the full hash appears on the title page).  The principal production
+files are:
+\begin{itemize}
+  \item \code{pion_utils_vibe_develop.py},
+        \code{proton_utils_vibe_develop.py}, and \code{bw_seq_pyquda.py};
+  \item \code{pion_EMFF_vibe_develop.py},
+        \code{pion_EMT_vibe_develop.py}, and
+        \code{proton_EMT_vibe_develop.py};
+  \item \code{pion_qTMD_vibe_develop.py},
+        \code{proton_qTMD_pyquda.py},
+        \code{pion_qTMDWF_pyquda.py}, and
+        \code{qtmd_operator_utils.py};
+  \item \code{Disconnected_1pt_qTMD_vibe_develop.py},
+        \code{Disconnected_1pt_EMT_vibe_develop.py}, and
+        \code{flowed_quark_ringed_norm.py};
+  \item \code{pion_soft_factor_vibe_develop.py} and
+        \code{pion_current_background_response_vibe_develop.py}.
+\end{itemize}
+
+This is a derivation and audit note, not an analysis prescription with a
+single universal ratio.  The source and sink interpolators, polarization
+projectors, temporal boundary effects, excited states, and the renormalization
+scheme must be retained in an ensemble analysis.
+
+\subsection{Three distinct output levels}
+
+The word observable is often used for three different objects:
+\begin{enumerate}
+  \item a \emph{raw Euclidean correlator}, such as \(C_2\), \(C_3\), or a
+        stochastic one-point trace;
+  \item a \emph{bare lattice matrix element}, obtained after a spectral fit or
+        ratio removes overlaps and Euclidean exponentials;
+  \item a \emph{physical observable}, after charge/flavor combination,
+        improvement, renormalization, soft subtraction, continuum matching,
+        scale evolution, and, for the flowed EMT, the small-flow-time
+        expansion.
+\end{enumerate}
+The audited measurement code predominantly produces level 1.  In correctly
+chosen kinematics its output can be used to obtain level 2.  None of EMFF,
+EMT, qTMD/qGTMD, qPDF/qGPD, qTMDWF, or qDA is automatically a level-3
+observable in the current producer.
+
+\begin{longtable}{L{0.16\textwidth}L{0.31\textwidth}L{0.43\textwidth}}
+\toprule
+Measurement & Continuum target & Object directly produced \\
+\midrule
+\endfirsthead
+\toprule
+Measurement & Continuum target & Object directly produced \\
+\midrule
+\endhead
+Pion EMFF &
+\(\avg{\pi(p_f)|J_\mu^{\rm em}|\pi(p_i)}\) and \(F_\pi(Q^2)\) &
+One-flavor connected local-current \(C_3\), without the full charge/flavor
+combination, \(Z_V\), improvement, disconnected term, or ratio.\\
+Proton EMFF &
+\(F_1(Q^2)\) and \(F_2(Q^2)\) &
+No dedicated producer/extraction; the local limit of the common proton
+insertion kernel is only the raw connected building block.\\
+Quark EMT &
+\(\avg{H(p_f)|T_{\mu\nu}^q|H(p_i)}\) and gravitational form factors &
+Connected and disconnected flowed local/one-derivative primitives.\\
+Gluon EMT &
+\(\avg{H(p_f)|T_{\mu\nu}^g|H(p_i)}\) &
+Flowed \(2\Tr_c\sum_\rho F_{\mu\rho}F_{\nu\rho}\), not a complete matched EMT.\\
+qTMD/\allowbreak qGTMD &
+Staple-bilocal hadron matrix element and its factorized light-cone quantity &
+Bare coordinate-space connected or stochastic trace correlator.\\
+qPDF/qGPD &
+Straight-bilocal quasi distribution/generalized distribution &
+Bare coordinate-space connected or stochastic trace correlator.\\
+qTMDWF/\allowbreak qDA &
+Vacuum-to-pion bilocal wave-function/distribution-amplitude matrix element &
+Bare vacuum-to-pion correlator; qTMDWF is currently CG/fixed-gauge.\\
+Soft factor &
+Soft subtraction compatible with the chosen TMD factorization scheme &
+A legacy pion wall-source four-propagator \(C_4\), whose universality for the
+GI staple scheme is not established by the contraction alone.\\
+Response &
+Derivatives of correlators with respect to external operator couplings &
+Ordered \(SOS\) and \(SO_2SO_1S\) response propagators for diagnostics.\\
+\bottomrule
+\end{longtable}
+
+\section{Euclidean, array, Fourier, and spectral conventions}
+
+\subsection{Gamma matrices and propagator orientation}
+
+The code uses the PyQUDA/DeGrand--Rossi Euclidean basis,
+\begin{equation}
+ \{\gamma_\mu,\gamma_\nu\}=2\delta_{\mu\nu},\qquad
+ \gamma_\mu^\dagger=\gamma_\mu,\qquad
+ \gamma_5=\gamma_1\gamma_2\gamma_3\gamma_4,
+\end{equation}
+and the Wilson--clover operator satisfies
+\begin{equation}
+ D^\dagger=\gamma_5D\gamma_5,\qquad
+ S(y,x)=D^{-1}(y,x)=\gamma_5S(x,y)^\dagger\gamma_5.
+ \label{eq:g5-hermiticity}
+\end{equation}
+For one flavor,
+\begin{equation}
+ S_{\alpha\beta}^{ab}(x,y)
+ =\avg{q_\alpha^a(x)\bar q_\beta^b(y)}.
+\end{equation}
+The production propagator layout is
+\begin{lstlisting}
+prop.data[w,t,z,y,x_cb, spin_sink, spin_source,
+          color_sink, color_source]
+\end{lstlisting}
+so the final four indices are ordered as
+\(S_{\alpha\beta}^{ab}\).  A Hermitian conjugate must exchange \emph{both}
+spin and color endpoints.
+
+The common pion backward-line expression is
+\begin{lstlisting}
+einsum("ij,wtzyxilab,kl->wtzyxkjba",
+       gamma5, prop.data.conj(), gamma5)
+\end{lstlisting}
+and therefore returns
+\begin{align}
+ B_{\delta\gamma}^{ba}(x)
+ &=(\gamma_5)_{\delta\ell}
+   \bigl[S_{\rho\ell}^{ab}(x,x_0)\bigr]^*
+   (\gamma_5)_{\rho\gamma}
+ \nonumber\\
+ &=S_{\delta\gamma}^{ba}(x_0,x).
+ \label{eq:backward-line-indices}
+\end{align}
+This is a full compound spin--color dagger, not a color-only transpose.
+
+\subsection{Propagator construction and smearing}
+
+For flavor \(f\),
+\begin{equation}
+ D_f S_f(\,\cdot\,,x_0)=\eta_{x_0},\qquad
+ S_f=D_f^{-1}.
+\end{equation}
+Writing a spatial smearing operator as \(\mathcal S_{\boldsymbol k}\), the
+source- and sink-smeared line has the schematic form
+\begin{equation}
+ S_f^{XY}(x,x_0)
+ =\mathcal S_X(x)\,D_f^{-1}(x,x_0)\,
+  \mathcal S_Y^\dagger(x_0).
+ \label{eq:smeared-prop}
+\end{equation}
+Momentum-boosted smearing modifies overlap with a moving state.  It does not
+replace the Fourier momentum projection and by itself does not set the
+physical hadron momentum.  The positive- and negative-boost pion lines may be
+chosen as active or spectator lines, but flavor labels must be assigned before
+the isospin-degenerate equality \(S_u=S_d\) is used.
+
+\subsection{Fourier phases and the actual external kinematics}
+
+\code{MomentumPhase} constructs
+\begin{equation}
+ \Phi_{\boldsymbol n}(x;x_0)
+ =\exp\left[
+ +2\pi\ii\sum_{j=1}^{3}
+ \frac{n_j(x_j-x_{0j})}{L_j}
+ \right].
+ \label{eq:momentum-phase}
+\end{equation}
+Two-point applications pass \(-\boldsymbol p\), which gives the standard
+\(\exp[-\ii\boldsymbol p\cdot(\boldsymbol x-\boldsymbol x_0)]\) projector.
+The meson or baryon fixed-sink sequential source contains
+\(\Phi_{\boldsymbol p_f}(y)\).  The subsequent complex conjugation used to
+form the backward sequential line turns it into the effective sink projector
+\(\exp[-\ii\boldsymbol p_f\cdot(\boldsymbol y-\boldsymbol x_0)]\).
+The insertion is multiplied by \(\Phi_{\boldsymbol q}(x)\).
+
+Before projection, translation covariance gives
+\begin{equation}
+ C_3(y,x;x_0)\sim
+ \ee^{+\ii\boldsymbol p_f\cdot(\boldsymbol y-\boldsymbol x)}
+ \ee^{+\ii\boldsymbol p_i\cdot(\boldsymbol x-\boldsymbol x_0)}.
+\end{equation}
+Multiplication by the two code phases leaves a spatial sum only if
+\begin{equation}
+ \boxed{\boldsymbol q=\boldsymbol p_f-\boldsymbol p_i,\qquad
+        \boldsymbol p_i=\boldsymbol p_f-\boldsymbol q.}
+ \label{eq:kinematics}
+\end{equation}
+The module docstrings and dedicated measurement notes use the executed
+plus-sign insertion convention in Eq.~\eqref{eq:momentum-phase}.  A sequential
+source is built with \(+\boldsymbol p_f\); complex conjugation in the backward
+line produces the effective sink projector with \(-\boldsymbol p_f\).  The
+numerical kinematics is Eq.~\eqref{eq:kinematics}.
+
+For off-forward bilocals,
+\begin{equation}
+ \Delta=p_f-p_i=q,\qquad
+ P=\frac{p_f+p_i}{2}=p_f-\frac q2,
+ \label{eq:P-Delta}
+\end{equation}
+\begin{equation}
+ t=\Delta^2=(E_f-E_i)^2-\abs{\boldsymbol\Delta}^{2},
+ \qquad \xi=-\frac{\Delta^+}{2P^+}.
+ \label{eq:t-xi}
+\end{equation}
+Thus a nonzero \(\boldsymbol q\) is qGTMD/qGPD kinematics, not a forward
+qTMD/qPDF measurement.
+
+\subsection{Spectral decompositions}
+
+With relativistically normalized finite-volume states,
+\begin{equation}
+ C_2^H(t,\boldsymbol p)
+ =\sum_n\frac{Z_n(\boldsymbol p)Z_n^\dagger(\boldsymbol p)}{2E_n}
+ \ee^{-E_nt}
+ \text{backward/wrap contributions}.
+ \label{eq:C2-spectral}
+\end{equation}
+For \(0<\tau<t_{\rm sep}\),
+\begin{align}
+ C_3^H(\tau,t_{\rm sep};p_f,p_i)
+ &\longrightarrow
+ \frac{Z_f(\boldsymbol p_f)Z_i^\dagger(\boldsymbol p_i)}
+      {4E_fE_i}
+ \ee^{-E_f(t_{\rm sep}-\tau)}
+ \ee^{-E_i\tau}
+ \nonumber\\
+ &\hspace{2.5cm}\times
+ \avg{H(p_f)|\cO|H(p_i)}.
+ \label{eq:C3-spectral}
+\end{align}
+The producer does not perform the spectral fit or construct a complete
+form-factor/distribution ratio.  An antiperiodic quark temporal boundary does
+not remove hadron wrap-around terms.
+
+For a vacuum-to-pion bilocal,
+\begin{align}
+ C_\Gamma(t,\boldsymbol P,b)
+ &=\sum_{\boldsymbol x}
+   \ee^{-\ii\boldsymbol P\cdot(\boldsymbol x-\boldsymbol x_0)}
+   \avg{\cO_\Gamma(\boldsymbol x,t;b)
+        \cO_\pi^\dagger(x_0)}
+ \nonumber\\
+ &\longrightarrow
+ \frac{\avg{0|\cO_\Gamma(b)|\pi(P)}
+       Z_\pi^\dagger(\boldsymbol P)}
+      {2E_\pi}
+ \ee^{-E_\pi t}.
+ \label{eq:vac-pion-spectral}
+\end{align}
+
+\section{Grassmann integration and universal loop signs}
+
+\subsection{Generating functional}
+
+For one flavor and sources \(\eta,\bar\eta\),
+\begin{align}
+ Z[\eta,\bar\eta]
+ &=\int DqD\bar q\,
+   \exp\left[-\bar qDq+\bar\eta q+\bar q\eta\right]
+ \nonumber\\
+ &=\det D\,\exp\left[\bar\eta D^{-1}\eta\right].
+\end{align}
+Differentiating in a fixed source order gives
+\begin{equation}
+ \avg{q_i\bar q_j}=S_{ij},\qquad
+ \avg{q_iq_k\bar q_j\bar q_l}
+ =S_{ij}S_{kl}-S_{il}S_{kj}.
+ \label{eq:two-identical-wick}
+\end{equation}
+Equation~\eqref{eq:two-identical-wick} is a determinant over complete endpoint
+labels.  If \(i=(\alpha,a)\) is a spin--color compound index, exchange means
+exchanging the full pair \((\alpha,a)\).
+
+\subsection{Closed-fermion-loop minus sign}
+
+Introduce a bilinear perturbation:
+\begin{equation}
+ Z[\lambda]
+ =\int DqD\bar q\,
+   \ee^{-\bar q(D+\lambda M)q}
+ =\det(D+\lambda M).
+\end{equation}
+Then
+\begin{equation}
+ \left.\frac{\partial\ln Z}{\partial\lambda}\right|_0
+ =\Tr(D^{-1}M)
+ =-\avg{\bar qMq},
+\end{equation}
+and hence
+\begin{equation}
+ \boxed{\avg{\bar qMq}=-\Tr[MS].}
+ \label{eq:closed-loop-sign}
+\end{equation}
+For noise satisfying
+\(\mathbb E[\xi_i\xi_j^*]=\delta_{ij}\), let
+\(\eta=D^{-1}\xi\).  The stochastic identity is
+\begin{equation}
+ \mathbb E_\xi[\xi^\dagger M\eta]
+ =\Tr[MD^{-1}].
+ \label{eq:stochastic-trace}
+\end{equation}
+Equation~\eqref{eq:stochastic-trace} estimates a positive matrix trace; it
+does not generate the physical closed-loop minus in
+Eq.~\eqref{eq:closed-loop-sign}.
+
+\section{Pion two- and three-point Wick contractions}
+
+\subsection{Pion interpolators and complete C2 derivation}
+
+Use a charged-pion sink
+\begin{equation}
+ \cO_s(x)=\bar d_\gamma^c(x)
+ (\Gamma_s)_{\gamma\alpha}u_\alpha^c(x)
+\end{equation}
+and source
+\begin{equation}
+ \cO_0^\dagger(x_0)
+ =\bar u_\beta^b(x_0)
+ (\Gamma_0)_{\beta\delta}d_\delta^b(x_0).
+\end{equation}
+The field order is
+\begin{equation}
+ \bar d(x),\ u(x),\ \bar u(x_0),\ d(x_0).
+\end{equation}
+Flavor conservation permits only
+\begin{equation}
+ u_\alpha^c(x)\bar u_\beta^b(x_0)
+ \longrightarrow
+ (S_u)_{\alpha\beta}^{cb}(x,x_0),
+\end{equation}
+\begin{equation}
+ d_\delta^b(x_0)\bar d_\gamma^c(x)
+ \longrightarrow
+ (S_d)_{\delta\gamma}^{bc}(x_0,x).
+\end{equation}
+Even if \(m_u=m_d\), pairings such as \(u\bar d\) vanish because the Dirac
+operator is flavor diagonal.  Moving the Grassmann variables into paired
+order gives the connected-meson sign,
+\begin{equation}
+ C_{2,\mathrm{formal}}^\pi(x)
+ =-\Trsc\left[
+ S_d(x_0,x)\Gamma_sS_u(x,x_0)\Gamma_0
+ \right].
+ \label{eq:pion-C2-formal}
+\end{equation}
+
+For the Euclidean pseudoscalar,
+\begin{align}
+ (\bar d\gamma_5u)^\dagger
+ &=\bar u\,\gamma_4\gamma_5^\dagger\gamma_4d
+ =-\bar u\gamma_5d.
+\end{align}
+This adjoint minus cancels the Grassmann minus.  With the production source
+convention \(\Gamma_{\rm src}=+\gamma_5\), the implemented correlator is
+\begin{equation}
+ C_2^\pi(x)
+ =\Trsc\left[
+ S_d(x_0,x)\gamma_5S_u(x,x_0)\gamma_5
+ \right].
+ \label{eq:pion-C2-production}
+\end{equation}
+Using Eq.~\eqref{eq:g5-hermiticity}, equal degenerate lines give
+\begin{equation}
+ C_2^\pi(x)
+ =\Trsc[S(x,x_0)^\dagger S(x,x_0)]\geq0.
+ \label{eq:pion-positive-norm}
+\end{equation}
+
+\subsection{Index map to the pion production contraction}
+
+Let the backward line returned by Eq.~\eqref{eq:backward-line-indices} be
+\(B_{ji}^{cf}\).  The production operations are
+\begin{align}
+ X_{jm}^{cf}
+ &=B_{ji}^{cf}(\Gamma_s)_{im},\\
+ C_{\rm site}
+ &=X_{ji}^{ab}
+   (S_u)_{il}^{ba}
+   (\Gamma_{\rm src})_{lj}.
+\end{align}
+The actual expressions are:
+\begin{lstlisting}
+sink_inserted =
+  einsum("wtzyxjicf,im->wtzyxjmcf",
+         backward_line, sink_gamma)
+corr_site =
+  einsum("wtzyxjiab,wtzyxilba,lj->wtzyx",
+         sink_inserted, forward_prop, source_gamma)
+\end{lstlisting}
+Every spin and color index appears exactly twice, in the Wick order of
+Eq.~\eqref{eq:pion-C2-production}.  The final contraction with
+\code{"qwtzyx,wtzyx->qt"} applies the Fourier projector and sums the spatial
+sites.
+
+\subsection{Connected pion C3 with a bilocal insertion}
+
+For an active-\(u\) operator based at \(x\),
+\begin{equation}
+ J_\Gamma^u(x;b)
+ =\bar u(x)\Gamma\cW[x,x+b]u(x+b),
+ \label{eq:pion-bilocal}
+\end{equation}
+the flavor-preserving connected Wick path is
+\begin{align}
+ C_{3,u}^\pi
+ &=\sum_{\boldsymbol x,\boldsymbol y}
+ \ee^{-\ii\boldsymbol p_f\cdot(\boldsymbol y-\boldsymbol x_0)}
+ \ee^{+\ii\boldsymbol q\cdot(\boldsymbol x-\boldsymbol x_0)}
+ \nonumber\\
+ &\quad\times\Trsc\left[
+ S_d(x_0,y)\Gsink
+ S_u(y,x)\Gamma
+ \cW[x,x+b]S_u(x+b,x_0)\Gsrc
+ \right].
+ \label{eq:pion-C3-master}
+\end{align}
+The antiquark \(d\) line is the spectator.  An insertion on the \(d\) line
+has a separately flavor-labelled path; isospin symmetry may relate the two
+only after both paths have been defined.
+
+\subsection{Meson fixed-sink sequential source}
+
+The sink sum in Eq.~\eqref{eq:pion-C3-master} is absorbed into a sequential
+solve.  With the spectator source-to-sink propagator, the source placed on
+\(y_4=t_0+t_{\rm sep}\) is
+\begin{equation}
+ \eta_{\rm seq}(y)
+ =\delta_{y_4,t_0+t_{\rm sep}}\,
+ \Phi_{\boldsymbol p_f}(y;x_0)\,
+ \left[\gamma_5\Gsink^\dagger\gamma_5\right]
+ S_{\rm spectator}(y,x_0).
+ \label{eq:meson-seq-source}
+\end{equation}
+The code constructs
+\begin{equation}
+ \Gamma_{\rm seq}
+ =\gamma_5\Gsink^\dagger\gamma_5
+\end{equation}
+with
+\begin{lstlisting}
+gamma_seq = einsum("ab,cb,cd->ad",
+                   gamma5, sink_gamma.conj(), gamma5)
+\end{lstlisting}
+and solves
+\begin{equation}
+ D S_{\rm seq}=\eta_{\rm seq}.
+\end{equation}
+The backward sequential line
+\begin{equation}
+ B_{\rm seq}(x)=\gamma_5S_{\rm seq}(x)^\dagger\gamma_5
+\end{equation}
+contains the conjugated sink phase and the summed line
+\(S_d(x_0,y)\Gsink S_u(y,x)\).  The remaining local trace is
+\begin{equation}
+ \Trsc\left[
+ B_{\rm seq}(x)\Gamma\cW[x,x+b]
+ S_{\rm active}(x+b,x_0)\Gsrc
+ \right],
+ \label{eq:pion-C3-after-seq}
+\end{equation}
+which is precisely Eq.~\eqref{eq:pion-C3-master}.
+
+\section{Proton Wick determinant and sequential cuts}
+
+\subsection{Interpolating field}
+
+Write the proton sink as
+\begin{equation}
+ \chi_m(x)
+ =\epsilon_{abc}G_{ij}
+ u_i^a(x)d_j^b(x)u_m^c(x),
+ \qquad G=C\Gamma_{\rm interp},
+ \label{eq:proton-interpolator}
+\end{equation}
+with \(C=\ii\gamma_2\gamma_4\).  Production supports
+\(C\gamma_5\), \(C\gamma_4\gamma_5\), and
+\(C\gamma_3\gamma_5\), labelled \code{5}, \code{T5}, and \code{Z5}.
+All supported \(G\) matrices are antisymmetric in the adopted basis,
+\begin{equation}
+ G^T=-G.
+\end{equation}
+The projected source contains
+\begin{equation}
+ \bar\chi_n(x_0)\ \propto\
+ \epsilon_{def}G_{kl}
+ \bar u_k^d(x_0)\bar d_l^e(x_0)\bar u_n^f(x_0),
+\end{equation}
+where the fixed Euclidean-conjugation convention is absorbed in \(G\) and the
+external spin projector \(P_{mn}\).  For positive-parity unpolarized
+projection, \(P_+=(1+\gamma_4)/4\).
+
+\subsection{Flavor-labelled Wick expansion}
+
+The \(d\) flavor has the unique pairing
+\begin{equation}
+ d_j^b(x)\bar d_l^e(x_0)
+ \longrightarrow
+ (S_d)_{jl}^{be}.
+\end{equation}
+The two identical \(u\) fields give the determinant
+\begin{equation}
+ \det\begin{pmatrix}
+ (S_u)_{ik}^{ad} & (S_u)_{in}^{af}\\
+ (S_u)_{mk}^{cd} & (S_u)_{mn}^{cf}
+ \end{pmatrix}
+ =
+ (S_u)_{ik}^{ad}(S_u)_{mn}^{cf}
+ -(S_u)_{in}^{af}(S_u)_{mk}^{cd}.
+ \label{eq:proton-u-determinant}
+\end{equation}
+The exchange in the second product swaps complete spin--color source
+endpoints.  Including the common field-order convention used by production,
+\begin{equation}
+ \boxed{\mathcal C_p[S_u,S_d]=-\mathcal D+\mathcal X,}
+ \label{eq:proton-C2-master}
+\end{equation}
+where
+\begin{align}
+ \mathcal D
+ &=\epsilon_{abc}\epsilon_{def}
+   G_{ij}G_{kl}P_{mn}
+   (S_u)_{ik}^{ad}(S_d)_{jl}^{be}(S_u)_{mn}^{cf},
+ \label{eq:proton-direct}\\
+ \mathcal X
+ &=\epsilon_{abc}\epsilon_{def}
+   G_{ij}G_{kl}P_{mn}
+   (S_u)_{in}^{af}(S_d)_{jl}^{be}(S_u)_{mk}^{cd}.
+ \label{eq:proton-exchange}
+\end{align}
+The equality \(S_u=S_d\) may be imposed for degenerate masses after
+Eqs.~\eqref{eq:proton-direct}--\eqref{eq:proton-exchange} are derived.  It
+does not create an \(u\)-to-\(\bar d\) contraction.
+
+\subsection{Why the printed second term is the complete exchange}
+
+The scalar represented by the second production \code{einsum} is
+\begin{equation}
+ T_2^{\rm code}
+ =\epsilon_{abc}\epsilon_{def}
+ G_{ij}G_{kl}P_{mn}
+ S_{ik}^{ad}S_{jn}^{be}S_{ml}^{cf}.
+ \label{eq:proton-printed-term2}
+\end{equation}
+The middle propagator in Eq.~\eqref{eq:proton-printed-term2} can look like a
+partial \(u/d\) exchange if the dummy labels are interpreted as persistent
+flavor labels.  They are not.  For a single degenerate propagator tensor,
+simultaneous relabelling of source spin and color dummy indices through both
+epsilon tensors, followed by \(G^T=-G\), yields
+\begin{equation}
+ T_2^{\rm code}=-\mathcal X\qquad(S_u=S_d=S).
+ \label{eq:term2-exchange-equivalence}
+\end{equation}
+Consequently the production combination
+\begin{lstlisting}
+corr = -term1 - term2
+\end{lstlisting}
+is
+\begin{equation}
+ -\mathcal D-(-\mathcal X)=-\mathcal D+\mathcal X.
+\end{equation}
+An independent explicit compound-index sum found
+\begin{align}
+ \abs{T_2^{\rm code}+\mathcal X}
+ &=5.66\times10^{-14},\\
+ \abs{C_{\rm code}-(-\mathcal D+\mathcal X)}
+ &=5.55\times10^{-14}
+\end{align}
+for random complex propagators.  A spin-only or
+color-only swap does not satisfy this identity.
+
+\subsection{Flavor-specific sequential kernels as derivatives}
+
+The mathematically unambiguous definition of a cut baryon line is the
+holomorphic derivative of the same flavor-labelled polynomial:
+\begin{equation}
+ (K_d)_{\alpha\beta}^{ab}
+ =\frac{\partial\mathcal C_p[S_u,S_d]}
+        {\partial(S_d)_{\alpha\beta}^{ab}},
+ \qquad
+ (K_u)_{\alpha\beta}^{ab}
+ =\frac{\partial\mathcal C_p[S_u,S_d]}
+        {\partial(S_u)_{\alpha\beta}^{ab}}.
+ \label{eq:sequential-kernel-derivative}
+\end{equation}
+Because \(\mathcal C_p\) is linear in \(S_d\), \(K_d\) has two terms: the
+derivative of the direct and exchange products.  Because it is quadratic in
+\(S_u\), \(K_u\) has four terms: both \(u\) factors can be cut in each of the
+direct and exchange products.  This explains the two terms in
+\code{down_quark_insertion_pyquda} and the four terms in
+\code{up_quark_insertion_pyquda}; the latter already includes the
+multiplicity of the two identical \(u\) lines.
+
+The line converted into a Dirac source has reversed compound endpoints:
+\begin{equation}
+ K_{\rm source}[\beta,\alpha,b,a]
+ =\frac{\partial\mathcal C_p}
+        {\partial S[\alpha,\beta,a,b]}.
+ \label{eq:kernel-source-transpose}
+\end{equation}
+Both the spin and color pairs are transposed.  Exact polynomial
+differentiation gives maximum discrepancies
+\begin{equation}
+ \norm{K_d^{\rm code}-K_d^{\rm exact}}_\infty
+ =1.99\times10^{-15},\qquad
+ \norm{K_u^{\rm code}-K_u^{\rm exact}}_\infty
+ =2.08\times10^{-14}.
+\end{equation}
+The production-adapter comparison gives approximately
+\(3.6\times10^{-15}\) for each flavor.
+
+\subsection{Proton C3 after the sequential solve}
+
+After inverting the flavor-specific sequential source, a local or displaced
+insertion has the common form
+\begin{equation}
+ C_{3,f}
+ =\sum_{\boldsymbol x}
+ \ee^{+\ii\boldsymbol q\cdot(\boldsymbol x-\boldsymbol x_0)}
+ \Trsc\left[
+ B_{{\rm seq},f}(x)\Gamma
+ \cW[x,x+b]S_f(x+b,x_0)
+ \right].
+ \label{eq:proton-C3-after-seq}
+\end{equation}
+The connected nucleon runner uses
+\begin{lstlisting}
+einsum("pwtzyxjicf,gim,wtzyxmjfc->pgwtzyx",
+       sequential, gamma_ls, current_prop)
+\end{lstlisting}
+which maps exactly to
+\begin{equation}
+ (B_{{\rm seq},f})_{ji}^{cf}\,
+ \Gamma_{im}\,
+ (\cW S_f)_{mj}^{fc}.
+\end{equation}
+The same cut flavor closes both spin and color.  No additional factor two
+may be applied to the up channel in downstream analysis.
+
+\section{Electromagnetic form factors}
+
+\subsection{Continuum matrix elements}
+
+The electromagnetic current is
+\begin{equation}
+ J_\mu^{\rm em}
+ =\sum_f e_f\,\bar q_f\gamma_\mu q_f.
+ \label{eq:em-current}
+\end{equation}
+For a charged pion,
+\begin{equation}
+ \avg{\pi(p_f)|J_\mu^{\rm em}|\pi(p_i)}
+ =(p_f+p_i)_\mu F_\pi(Q^2),\qquad
+ Q^2=-q^2.
+ \label{eq:pion-EMFF}
+\end{equation}
+For the proton,
+\begin{equation}
+ \avg{p(p_f,s_f)|J_\mu^{\rm em}|p(p_i,s_i)}
+ =
+ \bar u(p_f,s_f)
+ \left[
+ \gamma_\mu F_1(Q^2)
+ +\frac{\ii\sigma_{\mu\nu}q_\nu}{2M_N}F_2(Q^2)
+ \right]
+ u(p_i,s_i).
+ \label{eq:proton-EMFF}
+\end{equation}
+Solving Eq.~\eqref{eq:proton-EMFF} for \(F_1,F_2\) requires several current
+directions, external momenta, and spin projectors.  The Sachs form factors are
+\begin{equation}
+ G_E=F_1-\frac{Q^2}{4M_N^2}F_2,\qquad
+ G_M=F_1+F_2.
+\end{equation}
+
+For Wilson--clover fermions, a local current generally enters as
+\begin{equation}
+ J_{\mu,R}^f
+ =Z_V^f(1+b_Vam_f)
+ \left[
+ \bar q_f\gamma_\mu q_f
+ +ac_V\partial_\nu(\bar q_f\sigma_{\mu\nu}q_f)
+ \right],
+ \label{eq:improved-vector-current}
+\end{equation}
+with scheme/action-dependent coefficients.  Neither the flavor charges in
+Eq.~\eqref{eq:em-current} nor the factors in
+Eq.~\eqref{eq:improved-vector-current} can be inferred from a gamma insertion.
+
+\subsection{Pion local-current contraction}
+
+Setting \(b=0\), \(\cW=1\), and \(\Gamma=\gamma_\mu\) in
+Eq.~\eqref{eq:pion-C3-master} gives
+\begin{align}
+ C_{3,u}^{\pi,\mu}
+ &=\sum_{\boldsymbol x,\boldsymbol y}
+ \ee^{-\ii\boldsymbol p_f\cdot(\boldsymbol y-\boldsymbol x_0)}
+ \ee^{+\ii\boldsymbol q\cdot(\boldsymbol x-\boldsymbol x_0)}
+ \nonumber\\
+ &\quad\times
+ \Trsc\left[
+ S_d(x_0,y)\Gsink
+ S_u(y,x)\gamma_\mu S_u(x,x_0)\Gsrc
+ \right].
+ \label{eq:pion-emff-C3}
+\end{align}
+\code{pion_EMFF_vibe_develop.py} computes
+Eq.~\eqref{eq:pion-emff-C3} through the common 16-gamma scan and the meson
+sequential line.  The phase relation is
+\(\boldsymbol p_i=\boldsymbol p_f-\boldsymbol q\).
+
+This quantity is a one-active-line raw connected \(C_3\), not
+\(F_\pi(Q^2)\).  A complete analysis must:
+\begin{enumerate}
+  \item include \(C_2(\boldsymbol p_f)\) and
+        \(C_2(\boldsymbol p_i)\) with matching interpolators/smearing;
+  \item cancel overlap factors and exponentials or perform a simultaneous
+        spectral fit;
+  \item combine the active-\(u\) and active-\(d\) contractions with \(e_u\)
+        and \(e_d\), and add any required disconnected contribution;
+  \item apply current improvement and \(Z_V\);
+  \item divide by the kinematic factor in Eq.~\eqref{eq:pion-EMFF}.
+\end{enumerate}
+The production application sets its two-point momentum list from
+\code{qext}.  For nonzero \(\boldsymbol p_f\), that list need not contain both
+\(\boldsymbol p_f\) and
+\(\boldsymbol p_f-\boldsymbol q\).  Existing \(C_3\) can remain usable, but
+the missing matching \(C_2\) must then be calculated separately.
+
+\subsection{Proton local-current status}
+
+The proton local-current connected building block is obtained from
+Eq.~\eqref{eq:proton-C3-after-seq} at \(b=0\) with
+\(\Gamma=\gamma_\mu\), separately for \(f=u,d\):
+\begin{equation}
+ C_{3,\mu}^{p,\rm conn}
+ =e_u C_{3,u}^{\mu}+e_d C_{3,d}^{\mu}.
+\end{equation}
+The common direct--exchange and sequential kernels are suitable for this
+construction.  At the audited commit there is, however, no dedicated proton
+EMFF producer that defines the complete local-current charge combination,
+projector set, kinematic linear system, and \(F_1/F_2\) extraction.  A proton
+qTMD file at \(b=0\) must not automatically be labelled \(F_1\) or \(F_2\).
+
+\section{Quark and gluon energy--momentum tensor measurements}
+
+\subsection{Continuum operators and hadron decompositions}
+
+The symmetric quark one-derivative operator used as the lattice target is
+\begin{equation}
+ \cO_{\mu\nu}^q
+ =\frac14\bar q
+ \left[
+ \gamma_\mu\Dlr_\nu+\gamma_\nu\Dlr_\mu
+ \right]q,
+ \qquad
+ \Dlr_\nu=\overrightarrow D_\nu-\overleftarrow D_\nu.
+ \label{eq:quark-EMT}
+\end{equation}
+Flavor singlet quark operators mix with gluon operators under
+renormalization.
+
+For a spin-zero pion, one common decomposition is
+\begin{align}
+ \avg{\pi(p_f)|T_{\mu\nu}|\pi(p_i)}
+ &=
+ 2P_\mu P_\nu A_\pi(t)
+ +\frac12\left(
+ \Delta_\mu\Delta_\nu-\delta_{\mu\nu}\Delta^2
+ \right)D_\pi(t)
+ \nonumber\\
+ &\quad
+ +2m_\pi^2\delta_{\mu\nu}\bar C_\pi(t),
+ \label{eq:pion-EMT-decomposition}
+\end{align}
+subject to Euclidean continuation and operator-basis conventions.  For a
+spin-\(\tfrac12\) proton, a standard form is
+\begin{align}
+ \avg{p_f|T_{\mu\nu}|p_i}
+ &=\bar u(p_f)
+ \Bigg[
+ A(t)\gamma_{\{\mu}P_{\nu\}}
+ +B(t)\frac{\ii P_{\{\mu}\sigma_{\nu\}\rho}\Delta_\rho}{2M_N}
+ \nonumber\\
+ &\qquad
+ +D(t)\frac{\Delta_\mu\Delta_\nu-\delta_{\mu\nu}\Delta^2}{4M_N}
+ +\bar C(t)M_N\delta_{\mu\nu}
+ \Bigg]u(p_i).
+ \label{eq:proton-EMT-decomposition}
+\end{align}
+Braces denote symmetrization with the convention chosen in the analysis.
+The measurement code does not solve either gravitational-form-factor system.
+
+\subsection{Central gauge-covariant derivative}
+
+The lattice shift convention is
+\begin{equation}
+ (\mathcal T_{+\mu}q)(x)=U_\mu(x)q(x+\hat\mu),\qquad
+ (\mathcal T_{-\mu}q)(x)
+ =U_\mu^\dagger(x-\hat\mu)q(x-\hat\mu).
+ \label{eq:covariant-shifts}
+\end{equation}
+The dimensionless central derivative implemented by
+\code{_covdev_sym_prop} is
+\begin{equation}
+ aD_\mu q(x)
+ =\frac12\left[
+ U_\mu(x)q(x+\hat\mu)
+ -U_\mu^\dagger(x-\hat\mu)q(x-\hat\mu)
+ \right].
+ \label{eq:central-covdev}
+\end{equation}
+Let \(B\) denote the sequential/backward line and \(S\) the active line.  For
+a nonsymmetrized gamma--derivative pair, production evaluates
+\begin{align}
+ \mathcal B_{\mu\nu}
+ &=
+ \frac12 B\gamma_\mu(D_\nu S)
+ -\frac12 (B\overleftarrow D_\nu)\gamma_\mu S.
+ \label{eq:emt-right-left}
+\end{align}
+It then forms
+\begin{equation}
+ \mathcal O_{\mu\nu}^{\rm code}
+ =\frac12\left(\mathcal B_{\mu\nu}
+                    +\mathcal B_{\nu\mu}\right).
+ \label{eq:emt-symmetrize}
+\end{equation}
+The two halves in Eq.~\eqref{eq:emt-right-left} and the final half in
+Eq.~\eqref{eq:emt-symmetrize} reproduce the \(1/4\) in
+Eq.~\eqref{eq:quark-EMT}, in lattice units.  No \(1/a\) is inserted.  There
+is no automatic spacetime trace subtraction.
+
+\subsection{Connected pion EMT contraction}
+
+At flow time \(t_f\), denote the flowed active and sequential lines by
+\(S(t_f)\) and \(B(t_f)\).  The primitive local field is
+\begin{equation}
+ L_\Gamma(x;t_f)
+ =\Trsc\left[B(x;t_f)\Gamma S(x;t_f)\Gsrc\right].
+ \label{eq:pion-emt-local}
+\end{equation}
+The derivative primitive is
+\begin{align}
+ L_{\Gamma,\nu}(x;t_f)
+ &=\frac12\Trsc\left[
+ B\Gamma(D_\nu S)\Gsrc\right]
+ -\frac12\Trsc\left[
+ (B\overleftarrow D_\nu)\Gamma S\Gsrc\right].
+ \label{eq:pion-emt-derivative}
+\end{align}
+The \code{opt_einsum} expression for the local part,
+\begin{lstlisting}
+"wtzyxabij,gbn,wtzyxncji,ca->gwtzyx"
+\end{lstlisting}
+closes backward color/spin \((a,b,i,j)\), gamma \((b,n)\), forward line
+\((n,c,j,i)\), and source gamma \((c,a)\) in the order of
+Eq.~\eqref{eq:pion-emt-local}.  Fourier projection then supplies the
+\(+\boldsymbol q\) insertion phase.  The same contraction with \(D_\nu S\)
+and \(B\overleftarrow D_\nu\) gives
+Eq.~\eqref{eq:pion-emt-derivative}.
+
+\subsection{Connected proton EMT contraction}
+
+For the proton, the raw flavor-specific sequential propagator already
+contains \(K_u\) or \(K_d\).  The local primitive can be written
+\begin{equation}
+ L_{\Gamma,f}^p(x;t_f)
+ =\Trsc\left[B_{{\rm seq},f}(x;t_f)
+ \Gamma S_f(x;t_f)\right],
+\end{equation}
+with the identical right/left derivative construction of
+Eq.~\eqref{eq:pion-emt-derivative}.  In
+\code{proton_EMT_vibe_develop.py}, \code{_raw_seq_gamma_scalar_fields}
+contracts the complex-conjugated raw sequential line with the active
+propagator and then with \(\gamma_5\Gamma\).  This is the raw-sequential
+representation of the same
+\(\gamma_5S_{\rm seq}^\dagger\gamma_5\Gamma S\) trace.  The up/down Wick
+multiplicities remain those of Eq.~\eqref{eq:sequential-kernel-derivative}.
+
+\subsection{Stochastic disconnected quark EMT}
+
+The local stochastic primitive is
+\begin{equation}
+ T_\Gamma(x)
+ =\xi^\dagger(x)\Gamma\eta(x),
+ \qquad \eta=D^{-1}\xi,
+\end{equation}
+which estimates \(+\Tr[\Gamma S]\).  For the derivative operator, production
+computes a right-acting central difference and reconstructs the left-acting
+piece with gamma-five Hermiticity and momentum reversal.  If
+\(\Gamma^\sharp=\gamma_5\Gamma^\dagger\gamma_5
+=s_\Gamma\Gamma_{\rm partner}\), the stored derivative is
+\begin{equation}
+ L_{\Gamma,\nu}^{\rm disc}(q)
+ =-\frac14\left[
+ A_R(\Gamma,\nu;q)
+ -s_\Gamma A_R(\Gamma_{\rm partner},\nu;-q)^*
+ \right].
+ \label{eq:disc-emt-derivative}
+\end{equation}
+The factor in Eq.~\eqref{eq:disc-emt-derivative} combines the central
+derivative, the two-sided \(\Dlr\) normalization, and the physical
+closed-fermion-loop minus.  Thus the derived disconnected EMT derivative has
+the loop sign included.  By contrast, the separately stored primitive local
+bilinear remains the positive trace estimator and must not be interpreted as
+\(\avg{\bar q\Gamma q}\) without Eq.~\eqref{eq:closed-loop-sign}.
+
+\subsection{Gradient flow and ringed normalization}
+
+At positive flow time, gauge and fermion fields obey schematically
+\begin{equation}
+ \partial_t B_\mu=D_\nu G_{\nu\mu},\qquad
+ \partial_t\chi=\Delta\chi,\qquad
+ \partial_t\bar\chi=\bar\chi\overleftarrow\Delta,
+ \label{eq:gradient-flow}
+\end{equation}
+with \(B_\mu(0)=A_\mu\), \(\chi(0)=q\), and \(\bar\chi(0)=\bar q\).  Flowed
+local products are finite building blocks, but flowed fermions require the
+appropriate ringed-field normalization, and a physical EMT is obtained by a
+small-flow-time expansion.  Schematically,
+\begin{equation}
+ T_{\mu\nu}^{R}(x)
+ =\lim_{t\to0}\left[
+ c_g(t)\,\widetilde{\cO}_{\mu\nu}^g(t,x)
+ +\sum_f c_f(t)\,\widetilde{\cO}_{\mu\nu}^{q_f}(t,x)
+ +\text{trace and mixing operators}
+ \right].
+ \label{eq:small-flow-time}
+\end{equation}
+The standalone ringed helper estimates the kinetic normalization input
+\begin{equation}
+ K(t)
+ =\avg{\bar\chi(t,x)\slDlr\chi(t,x)}
+ \end{equation}
+through the zero-momentum diagonal derivative sum.  In the production
+normalization convention,
+\begin{equation}
+ K_{\rm pervec}(t,\tau)
+ =-\frac{2}{V_3}
+ \sum_{\mu=1}^{4}
+ L_D[\gamma_\mu,\mu,q=0;t,\tau].
+ \label{eq:ringed-kinetic}
+\end{equation}
+This is an input to a ringed factor, not the factor itself, and is not
+automatically multiplied into connected or disconnected EMT output.
+
+\subsection{Flowed gluon primitive}
+
+The clover field strength is constructed from four oriented plaquettes:
+\begin{equation}
+ F_{\mu\nu}^{\rm clover}
+ \propto -\ii\left[
+ Q_{\mu\nu}-Q_{\mu\nu}^\dagger
+ -\frac1{N_c}\Tr_c(Q_{\mu\nu}-Q_{\mu\nu}^\dagger)\mathbf1
+ \right].
+\end{equation}
+The code then measures
+\begin{equation}
+ G_{\mu\nu}^{\rm code}(t,x)
+ =2\Tr_c\sum_{\rho}F_{\mu\rho}(t,x)F_{\nu\rho}(t,x).
+ \label{eq:gluon-primitive}
+\end{equation}
+Equation~\eqref{eq:gluon-primitive} is a useful flowed primitive.  It lacks
+the \(\delta_{\mu\nu}F_{\rho\sigma}F_{\rho\sigma}\) trace structure, the
+physical Euclidean sign/coefficient convention, and the matching/mixing
+coefficients required for a complete gluon EMT.
+
+\subsection{EMT audit interpretation}
+
+The right/left derivative, symmetrization, and lattice \(1/4\) normalization
+are implemented consistently for the connected pion/proton and derived
+disconnected quark EMT.  The output is nevertheless
+\emph{unringed/unrenormalized flowed data}.  Trace combinations, the ringed
+factor, small-flow matching, quark--gluon mixing, and a controlled window
+\begin{equation}
+ a^2\ll 8t\ll\Lambda_{\rm QCD}^{-2}
+\end{equation}
+belong to the subsequent analysis.
+
+\section{qTMD/qGTMD and qPDF/qGPD}
+
+\subsection{Hadron bilocal matrix element}
+
+A convenient translation-covariant definition of the bare coordinate-space
+matrix element is
+\begin{equation}
+ \widetilde W_\Gamma^f(b;P,\Delta,\eta)
+ =
+ \avg{H(p_f)|
+ \bar q_f(-b/2)\Gamma
+ \cW_\eta[-b/2,b/2]q_f(b/2)
+ |H(p_i)}.
+ \label{eq:generic-bilocal}
+\end{equation}
+The code uses an equivalent basepoint/end-point form,
+\begin{equation}
+ \cO_\Gamma^f(x;b)
+ =\bar q_f(x)\Gamma\cW[x,x+b]q_f(x+b).
+ \label{eq:basepoint-bilocal}
+\end{equation}
+Translation between Eqs.~\eqref{eq:generic-bilocal} and
+\eqref{eq:basepoint-bilocal} only changes the known phase associated with the
+operator center; it does not change the Wilson path.
+
+For \(b=b_z\hat z+b_T\hat e_T\) and a staple of extent \(\eta\), the forward
+case \(\Delta=0\) is a qTMD coordinate-space matrix element.  When
+\(\Delta\neq0\), it is a qGTMD matrix element.  The straight-link limit
+\(b_T=0\) is the qPDF matrix element for \(\Delta=0\), and the qGPD matrix
+element for \(\Delta\neq0\).
+
+\subsection{Straight Wilson line and covariant transport}
+
+For positive \(b_z\),
+\begin{equation}
+ W[x,x+b_z\hat z]
+ =U_z(x)U_z(x+\hat z)\cdots
+ U_z(x+(b_z-1)\hat z).
+ \label{eq:straight-positive}
+\end{equation}
+For negative displacement, the reversed conjugate link product is required:
+\begin{equation}
+ W[x,x-b\hat z]
+ =U_z^\dagger(x-\hat z)
+ U_z^\dagger(x-2\hat z)\cdots
+ U_z^\dagger(x-b\hat z),\qquad b>0.
+ \label{eq:straight-negative}
+\end{equation}
+Repeated application of Eq.~\eqref{eq:covariant-shifts} produces
+\begin{equation}
+ (\mathcal T_{+z}^{\,b_z}q)(x)
+ =W[x,x+b_z\hat z]q(x+b_z\hat z)
+\end{equation}
+for positive \(b_z\), and Eq.~\eqref{eq:straight-negative} for negative
+\(b_z\).  The qPDF implementation restarts the negative branch from the
+undisplaced field at \(b_z=-1\), so every incremental step is nearest
+neighbor.
+
+\subsection{Fixed-length GI staple}
+
+The GI qTMD index is
+\begin{equation}
+ [b_T,b_z,\eta,\mathrm{dir}_T].
+\end{equation}
+For even \(b_z\), nonnegative \(b_T\), and
+\(\eta\geq\abs{b_z}/2\), production decomposes the path into signed segments
+\begin{equation}
+ \left[
+ (z,\eta+b_z/2),\
+ (e_T,b_T),\
+ (z,b_z/2-\eta)
+ \right].
+ \label{eq:staple-segments}
+\end{equation}
+The net endpoint displacement is
+\begin{equation}
+ (\eta+b_z/2)\hat z+b_T\hat e_T
+ +(b_z/2-\eta)\hat z
+ =b_z\hat z+b_T\hat e_T,
+\end{equation}
+and, for the allowed range,
+\begin{equation}
+ L_{\rm path}
+ =\abs{\eta+b_z/2}+b_T+\abs{b_z/2-\eta}
+ =2\eta+b_T.
+\end{equation}
+The implementation applies the segment list in reverse order.  This follows
+operator composition:
+\begin{equation}
+ \mathcal T_{s_1}\mathcal T_{s_2}\mathcal T_{s_3}q
+ \quad\hbox{is evaluated by applying }\mathcal T_{s_3}
+ \hbox{ first}.
+\end{equation}
+Because every \(\mathcal T\) pulls an endpoint field back to the base point,
+the reverse execution order is the correct physical staple, not a reversed
+Wilson line.
+
+At \(b_T=0\) and \(\eta=\abs{b_z}/2\),
+Eq.~\eqref{eq:staple-segments} collapses to the positive or negative straight
+link.  Odd \(b_z\) is excluded by this half-integer-free fixed-length
+parameterization, not by a fundamental restriction on Wilson lines.
+
+\subsection{Gauge covariance and CG versus GI}
+
+Under a local gauge transformation,
+\begin{equation}
+ q(x)\to\Omega(x)q(x),\quad
+ \bar q(x)\to\bar q(x)\Omega^\dagger(x),\quad
+ U_\mu(x)\to\Omega(x)U_\mu(x)\Omega^\dagger(x+\hat\mu).
+\end{equation}
+Every internal \(\Omega^\dagger\Omega\) cancels in a link product:
+\begin{equation}
+ W[x,y]\to\Omega(x)W[x,y]\Omega^\dagger(y).
+\end{equation}
+Therefore
+\begin{equation}
+ \bar q(x)\Gamma W[x,y]q(y)
+\to
+\bar q(x)\Omega^\dagger(x)\Gamma\Omega(x)
+W[x,y]\Omega^\dagger(y)\Omega(y)q(y),
+\end{equation}
+which is invariant because color transformations commute with spin
+\(\Gamma\).  Random-SU(3) tests of the production straight and staple
+transporters agree with this proof to \(3.38\times10^{-15}\).
+
+The \code{GI_*} paths use these covariant transports.  The \code{CG_*} paths
+use ordinary coordinate shifts and omit \(W\).  They are meaningful only
+after a specified gauge fixing, such as Coulomb gauge.  A filename containing
+\code{cg} is not a mathematical enforcement of gauge fixing; the method,
+tolerance, and convention must be provenance metadata.
+
+\subsection{Connected pion qTMD/qGTMD and qPDF/qGPD}
+
+The pion connected nonlocal correlator is the master expression
+Eq.~\eqref{eq:pion-C3-master}.  The shifted active propagator is
+\begin{equation}
+ S_u^{(b)}(x,x_0)
+ =W[x,x+b]S_u(x+b,x_0).
+ \label{eq:shifted-active-prop}
+\end{equation}
+Substitution into Eq.~\eqref{eq:pion-C3-after-seq} yields
+\begin{equation}
+ C_{3,u}^{\pi,\Gamma}(b)
+ =\sum_x\Phi_{\boldsymbol q}(x)
+ \Trsc\left[
+ B_{\rm seq}(x)\Gamma S_u^{(b)}(x,x_0)\Gsrc
+ \right].
+ \label{eq:pion-qtmd-code-form}
+\end{equation}
+\code{contract_qTMD_GI} builds a cached transporter for every staple and
+applies Eq.~\eqref{eq:shifted-active-prop}; \code{contract_PDF} incrementally
+applies the straight shifts.  Both then call the common pion gamma scan, so
+the spin--color Wick closure is identical to the verified pion \(C_2/C_3\)
+kernel.
+
+\subsection{Connected proton qTMD/qGTMD and qPDF/qGPD}
+
+For each active flavor, the proton connected expression is
+Eq.~\eqref{eq:proton-C3-after-seq} with the same shifted line
+Eq.~\eqref{eq:shifted-active-prop}.  The down and up sequential sources are
+respectively the exact two-term and four-term cuts of
+Eq.~\eqref{eq:proton-C2-master}.  The production contraction
+\begin{equation}
+ (B_{{\rm seq},f})_{ji}^{cf}
+ \Gamma_{im}
+ (S_f^{(b)})_{mj}^{fc}
+\end{equation}
+closes the correct active flavor.  The Wilson geometry and the baryon Wick
+determinant are logically separate: correctness of one does not compensate
+for an error in the other.  Both pass independent checks here.
+
+\subsection{Forward versus off-forward production kinematics}
+
+From Eqs.~\eqref{eq:kinematics}--\eqref{eq:t-xi}:
+\begin{equation}
+ \boldsymbol q=0
+ \Rightarrow p_i=p_f,\ \Delta=0
+ \quad\hbox{(qTMD or qPDF)},
+\end{equation}
+\begin{equation}
+ \boldsymbol q\neq0
+ \Rightarrow p_i=p_f-q,\ \Delta=q
+ \quad\hbox{(qGTMD or qGPD)}.
+\end{equation}
+At the audited commit, the pion and proton TMD production runners hard-code
+\(\boldsymbol p_f=0\).  Consequently:
+\begin{equation}
+ p_i=-q,\qquad P=-q/2.
+\end{equation}
+For the forward list, \(q=0\) also gives \(P_z=0\).  It is a valid raw
+zero-momentum bilocal correlator but not the large-\(P_z\) quasi-distribution
+regime required for LaMET matching.  Momentum-boosted smearing cannot change
+this Fourier-projected external momentum.  Nonzero-\(q\) output is a low- or
+zero-average-momentum off-forward matrix element and should be labelled
+qGTMD/qGPD with \(P,\Delta,\xi,t\) recorded.
+
+\subsection{From a bare bilocal to a distribution}
+
+The measured coordinate-space object requires, schematically,
+\begin{equation}
+ \widetilde W_\Gamma^{R}
+ =Z_\Gamma^{-1}(b,\eta,a,\mu,\text{scheme})
+ \widetilde W_\Gamma^{\rm bare},
+\end{equation}
+followed by the relevant Fourier transform and quasi-to-light-cone matching.
+For qTMD/qGTMD, a compatible soft subtraction and rapidity prescription are
+also required:
+\begin{equation}
+ \widetilde F^{\rm sub}
+ \sim
+ \frac{\widetilde W^{R}}
+      {\sqrt{S^{R}(b_T,\eta)}} ,
+\qquad
+ \frac{\partial\ln\widetilde F}{\partial\ln\sqrt\zeta}
+ =K(b_T,\mu).
+\end{equation}
+The soft function, rapidity scale \(\zeta\), Collins--Soper kernel \(K\), and
+LaMET matching kernel are not harmless overall constants.  The current HDF5
+correlators are bare inputs to such an analysis, not physical TMDs, GTMDs,
+PDFs, or GPDs.
+
+\section{Disconnected qTMD/PDF loop and vacuum subtraction}
+
+\subsection{Operator trace produced by the code}
+
+For the same straight or staple operator, production solves
+\(\eta=D^{-1}\xi\), transports \(\eta\) to
+\(\cW\eta\), and contracts
+\begin{equation}
+ T_\Gamma(b,q)
+ =\sum_x\Phi_{\boldsymbol q}(x)\,
+ \xi^\dagger(x)\Gamma\cW[x,x+b]\eta(x+b).
+ \label{eq:disc-positive-trace}
+\end{equation}
+Its noise expectation is
+\begin{equation}
+ \mathbb E_\xi[T_\Gamma]
+ =+\Tr\left[
+ \Phi_{\boldsymbol q}\Gamma\cW_bD^{-1}
+ \right].
+ \label{eq:disc-trace-target}
+\end{equation}
+This agrees with the stored metadata:
+\begin{lstlisting}
+loop_convention = xi_dagger_Gamma_O_b_eta
+trace_target    = Tr[P_qtau Gamma O_b Dinv]
+\end{lstlisting}
+
+\subsection{Physical Wick loop}
+
+The physical bilinear loop follows from
+Eq.~\eqref{eq:closed-loop-sign}:
+\begin{equation}
+ L_{\rm phys}(b,q)
+ =-\Tr\left[
+ \Phi_{\boldsymbol q}\Gamma\cW_bD^{-1}
+ \right]
+ =-\mathbb E_\xi[T_\Gamma].
+ \label{eq:disc-physical-loop}
+\end{equation}
+For a hadron two-point measurement \(C_2^H\), the disconnected three-point
+contribution is the vacuum-subtracted covariance
+\begin{align}
+ C_{3,\rm disc}^{\rm phys}
+ &=
+ \avg{C_2^H L_{\rm phys}}
+ -\avg{C_2^H}\avg{L_{\rm phys}}
+ \nonumber\\
+ &=-\left[
+ \avg{C_2^H T_\Gamma}
+ -\avg{C_2^H}\avg{T_\Gamma}
+ \right].
+ \label{eq:disc-covariance}
+\end{align}
+Vacuum subtraction does not remove or alter the global minus.
+
+\subsection{Confirmed sign issue and data consequence}
+
+The qTMD/PDF loop producer correctly stores the positive trace estimator in
+Eq.~\eqref{eq:disc-trace-target}.  The accompanying physical-combination
+description at the audited commit uses the positive covariance without the
+outer minus in Eq.~\eqref{eq:disc-covariance}.  No Wilson-path or gamma
+convention supplies a compensating sign.  This is a \bad{confirmed P0
+physical-sign issue}.
+
+For current-schema raw data with explicit convention metadata, the correction
+is exact:
+\begin{equation}
+ \code{physical_loop}=-\code{loop_pervec}.
+\end{equation}
+Inversions need not be repeated; any already constructed positive-trace
+covariance must be multiplied by \(-1\) and recomputed with the desired
+vacuum subtraction.  Legacy files without sufficient provenance cannot be
+automatically classified by their gamma channel alone.
+
+The disconnected EMT derivative is not affected by this particular omission:
+its derived quantity explicitly includes the minus in
+Eq.~\eqref{eq:disc-emt-derivative}.  Its primitive local trace still follows
+the positive-trace warning.
+
+\section{Pion qTMD wave function and quasi-distribution amplitude}
+
+\subsection{Vacuum-to-pion bilocal}
+
+The sink bilocal realized by the qTMDWF/qDA contraction is
+\begin{equation}
+ \cO_\Gamma(x;b)
+ =\bar d(x+b)W[x+b,x]\Gamma u(x).
+ \label{eq:qTMDWF-operator}
+\end{equation}
+With a local pion source
+\(\bar u(x_0)\Gsrc d(x_0)\), flavor-preserving Wick pairing gives
+\begin{equation}
+ C_\Gamma(x;b)
+ \propto
+ \Trsc\left[
+ S_d(x_0,x+b)W[x+b,x]\Gamma
+ S_u(x,x_0)\Gsrc
+ \right],
+ \label{eq:qTMDWF-wick}
+\end{equation}
+with the same pseudoscalar source-adjoint convention as
+Eq.~\eqref{eq:pion-C2-production}.  Its spectral limit is
+Eq.~\eqref{eq:vac-pion-spectral}.
+
+\subsection{Why shift before dagger gives the correct endpoint}
+
+Production first shifts or transports the source-to-sink backward-flavor
+propagator:
+\begin{equation}
+ \widetilde S_d(x,x_0)
+ =W[x,x+b]S_d(x+b,x_0).
+ \label{eq:qTMDWF-pre-dagger}
+\end{equation}
+It then forms the backward line:
+\begin{align}
+ \gamma_5\widetilde S_d(x,x_0)^\dagger\gamma_5
+ &=
+ \gamma_5S_d(x+b,x_0)^\dagger
+ W[x,x+b]^\dagger\gamma_5
+ \nonumber\\
+ &=S_d(x_0,x+b)W[x+b,x].
+ \label{eq:qTMDWF-post-dagger}
+\end{align}
+The Wilson line is color-only and commutes with \(\gamma_5\).  Substitution
+of Eq.~\eqref{eq:qTMDWF-post-dagger} into the common pion trace produces
+Eq.~\eqref{eq:qTMDWF-wick}.  Thus the shift--dagger order does not reverse the
+physical operator; it creates the required antiquark endpoint and conjugate
+link.
+
+\subsection{qDA as the straight bT=0 limit}
+
+The gauge-invariant qDA restricts \(b_T=0\) and uses the straight transporter
+of Eqs.~\eqref{eq:straight-positive}--\eqref{eq:straight-negative}.  A common
+leading-twist continuum definition is
+\begin{align}
+ \avg{0|\bar d(z/2)\gamma_z\gamma_5
+ W[z/2,-z/2]u(-z/2)|\pi(P)}
+ &=
+ \ii f_\pi P_z
+ \int_0^1\dd x\,
+ \ee^{\ii(x-\frac12)zP_z}
+ \phi_\pi(x,\mu)
+ \nonumber\\
+ &\quad+\text{higher twist},
+ \label{eq:pion-DA}
+\end{align}
+up to Euclidean continuation and normalization conventions.  Therefore the
+axial channels, such as \code{Z5} or \code{T5} for a specified quasi-DA
+choice, carry the leading-twist DA interpretation.  A scan of all 16 gamma
+matrices is useful operator data but is not sixteen independent
+leading-twist DAs.
+
+The GI qDA endpoint and straight path are correct.  The CG qDA and the current
+qTMDWF implementation use ordinary shifts and require fixed-gauge input.
+Both remain bare vacuum-to-pion matrix elements until nonlocal
+renormalization and matching are performed.  A gauge-invariant qTMDWF would
+also require a staple and soft/rapidity scheme compatible with the target
+factorization theorem.
+
+\section{Legacy pion soft-factor four-point measurement}
+
+\subsection{Wall-source propagators}
+
+For a Coulomb-gauge wall source at \(t_0\) and quark momentum
+\(\boldsymbol k\),
+\begin{equation}
+ \eta_{\boldsymbol k}(\boldsymbol x,t)
+ =\delta_{t,t_0}\ee^{+\ii\boldsymbol k\cdot\boldsymbol x},
+\qquad
+ G_{\boldsymbol k}(x;t_0)=D^{-1}\eta_{\boldsymbol k}.
+ \label{eq:wall-propagator}
+\end{equation}
+The legacy contraction uses both \(+\boldsymbol k\) and
+\(-\boldsymbol k\) wall propagators and constructs backward antiquark lines
+with gamma-five Hermiticity.
+
+\subsection{Four-propagator Wick blocks}
+
+For source time \(t_0\) and sink separation \(t_{\rm sep}\), define
+\begin{align}
+ G_w&=G_{k_{\rm fw}}(t_0),&
+ G_{w,b^\dagger}&=G_{-k_{\rm bw}}(t_0),\\
+ G_{w,\dagger}&=G_{-k_{\rm fw}}(t_0+t_{\rm sep}),&
+ G_{w,b}&=G_{k_{\rm bw}}(t_0+t_{\rm sep}).
+\end{align}
+After the legacy momentum-transfer phase on the sink-side backward
+propagator and an ordinary transverse shift by \(b\), the two closed
+spin--color blocks are
+\begin{align}
+ A_b(x)
+ &=G_w(x)\Gamma_{\rm src}\gamma_5
+   G_{w,b^\dagger}(x+b)^\dagger\gamma_5,
+ \label{eq:soft-A}\\
+ B_b(x)
+ &=G_{w,b}(x+b)\Gamma_{\rm sink}\gamma_5
+   G_{w,\dagger}(x)^\dagger\gamma_5.
+ \label{eq:soft-B}
+\end{align}
+The measured four-point correlator is
+\begin{equation}
+ C_4(t;t_{\rm sep},b,\Gamma_1,\Gamma_2)
+ =\sum_{\boldsymbol x}
+ \Trsc\left[
+ A_b(x)\Gamma_2B_b(x)\Gamma_1
+ \right].
+ \label{eq:soft-C4}
+\end{equation}
+The production \code{tmp_1}, \code{tmp_2}, and final
+\code{einsum} implement Eqs.~\eqref{eq:soft-A}--\eqref{eq:soft-C4} in this
+order.  The legacy pion four-propagator Wick algebra is therefore
+internally consistent.
+
+\subsection{What the four-point contraction does not prove}
+
+Equation~\eqref{eq:soft-C4} is a pion wall-source four-point function with
+ordinary fixed-gauge transverse shifts.  A universal TMD soft function is
+normally a vacuum expectation value of Wilson-line geometry defined in the
+same rapidity regulator and renormalization scheme as the unsubtracted TMD.
+Correct contraction of Eq.~\eqref{eq:soft-C4} alone does not prove
+\begin{equation}
+ C_4\equiv S_{\rm vacuum}^{\rm scheme}
+\end{equation}
+or prove that dividing the production GI staple matrix element by a ratio
+built from \(C_4\) performs the desired soft subtraction.  That identification
+requires an explicit factorization derivation matching staple length,
+directions, rapidity regulator, gauge convention, and renormalization scheme.
+
+\section{Background-current and current--current response}
+
+\subsection{First derivative of a propagator}
+
+Let
+\begin{equation}
+ D(\lambda)=D+\lambda O,\qquad S(\lambda)=D(\lambda)^{-1}.
+\end{equation}
+Differentiating \(D(\lambda)S(\lambda)=1\) gives
+\begin{equation}
+ \left.\frac{\dd S}{\dd\lambda}\right|_0
+ =-SOS.
+ \label{eq:first-response}
+\end{equation}
+For a local current with momentum transfer,
+\begin{equation}
+ O_q(x)=\Gamma_{\rm current}\Phi_{\boldsymbol q}(x;x_0),
+\end{equation}
+the inserted source is
+\begin{equation}
+ \eta_O(x)=O_q(x)S(x,x_0),
+\end{equation}
+and its inversion yields
+\begin{equation}
+ D^{-1}\eta_O=SOS.
+ \label{eq:SOS-positive}
+\end{equation}
+\code{invert_local_current_response_propagator} constructs the positive
+quantity in Eq.~\eqref{eq:SOS-positive} by default.  It is appropriate for a
+direct comparison to an explicitly summed insertion.  Interpreting it as the
+derivative of \(D+\lambda O\) requires the minus in
+Eq.~\eqref{eq:first-response}; the helper exposes this as
+\code{response_sign}.
+
+If only a source-relative time window \(\mathcal T\) is selected, the source
+is
+\begin{equation}
+ \eta_O^{\mathcal T}
+ =\sum_{\tau\in\mathcal T}
+ \delta_{x_4,t_0+\tau}\,O_q(x)S(x,x_0).
+\end{equation}
+The one inversion then produces the insertion summed over that window.  It is
+not an unsummed \(C_3(\tau)\).
+
+\subsection{Ordered second response}
+
+For
+\(D(\lambda_1,\lambda_2)=D+\lambda_1O_1+\lambda_2O_2\),
+\begin{equation}
+ \left.
+ \frac{\partial^2S}{\partial\lambda_2\partial\lambda_1}
+ \right|_0
+ =SO_2SO_1S+SO_1SO_2S.
+ \label{eq:mixed-second-response}
+\end{equation}
+The nested helper constructs the single ordered term
+\begin{equation}
+ SO_2SO_1S.
+ \label{eq:ordered-response}
+\end{equation}
+It is a current--current response diagnostic or one time ordering, not by
+itself the full mixed derivative in
+Eq.~\eqref{eq:mixed-second-response}.  A physical second-order analysis must
+define the second ordering, time windows, coincident-current contact terms,
+and the spectral decomposition independently of a direct three-point
+formula.
+
+\section{Audit evidence and formula-to-code verdicts}
+
+\subsection{Independent CPU oracles}
+
+The numerical oracles use explicit NumPy sums and do not import the production
+contraction functions.  Their double-precision algebraic tolerance was
+\(10^{-11}\).
+
+\begin{longtable}{L{0.24\textwidth}L{0.48\textwidth}L{0.20\textwidth}}
+\toprule
+Oracle & Formula tested & Maximum discrepancy/result\\
+\midrule
+\endfirsthead
+\toprule
+Oracle & Formula tested & Maximum discrepancy/result\\
+\midrule
+\endhead
+Pion Wick oracle &
+Full gamma-five backward line and
+\(C_2^\pi=\Tr(S^\dagger S)\) &
+\(5.68\times10^{-14}\)\\
+Proton Wick oracle &
+Complete flavor-labelled direct--exchange determinant and
+\(T_2^{\rm code}=-\mathcal X\) &
+\(5.55\times10^{-14}\) for full \(C_2\)\\
+Sequential oracle &
+\(K_d=\partial C_2/\partial S_d\) and
+\(K_u=\partial C_2/\partial S_u\) &
+\(1.99\times10^{-15}\), \(2.08\times10^{-14}\)\\
+Production adapter &
+Actual production down/up kernels and pion backward line versus independent
+reference &
+\(3.55\times10^{-15}\), \(3.56\times10^{-15}\); pion exact\\
+Disconnected oracle &
+Complete-basis trace estimator, determinant loop sign, and covariance &
+Trace error \(4.48\times10^{-16}\); physical covariance exactly opposite\\
+Geometry oracle &
+Positive/negative straight link, staple chain, plane-wave derivative,
+Fourier phase, and SU(3) covariance &
+\(3.38\times10^{-15}\)\\
+\bottomrule
+\end{longtable}
+
+\subsection{Single-A100 S8T8 evidence}
+
+On a single A100 with \code{mpi_geometry=1.1.1.1}, the audit collected 63
+relevant tests: 61 passed and two were skipped only because optional
+pre-generated comparison directories were absent.  A real HYP-smeared
+\(S8T8\) gauge field confirmed the cached GI staple against stepwise
+\code{covDev}, including positive and negative \(b_z\), transverse staples,
+and the PDF limit, at \(10^{-12}\) tolerance.
+
+The source and pion-sequential solves reached true residuals
+\(4.77\times10^{-13}\) and \(7.47\times10^{-13}\), respectively.  Pion and
+proton \(C_2\), pion EMFF at \(q=0,1\), GI qGTMD, GI qGPD, CG qTMDWF, GI qDA,
+and the symmetric derivative all produced finite arrays.
+
+A four-rank run was not required to resolve any remaining formula conflict:
+the compound-index, phase, and Wilson-path questions were already decided by
+explicit oracles and real-gauge single-rank tests.  This is not a claim of
+single-/multi-rank bitwise equivalence; a future MPI boundary regression
+should compare \code{1.1.1.1}, \code{1.1.2.2}, and \code{2.2.1.1} when that
+parallel property is the target.
+
+\subsection{Source-level map}
+
+\begin{longtable}{L{0.30\textwidth}L{0.38\textwidth}L{0.24\textwidth}}
+\toprule
+Production location & Formula represented & Verdict\\
+\midrule
+\endfirsthead
+\toprule
+Production location & Formula represented & Verdict\\
+\midrule
+\endhead
+\code{pion_utils_vibe_develop.py:154--157} &
+\(S(x_0,x)=\gamma_5S(x,x_0)^\dagger\gamma_5\) with full endpoint reversal &
+\good{Correct}\\
+\code{pion_utils_vibe_develop.py:236--246} &
+\(B\Gsink S\Gsrc\) spin--color trace and Fourier sum &
+\good{Correct}\\
+\code{proton_utils_vibe_develop.py:87--176} &
+Proton direct--exchange determinant &
+\good{Correct}; printed term 2 is \(-\mathcal X\)\\
+\code{bw_seq_pyquda.py:143--176} &
+Meson fixed-sink source
+\(\Phi_{p_f}\gamma_5\Gsink^\dagger\gamma_5S\) &
+\good{Correct}\\
+\code{bw_seq_pyquda.py:181--300} &
+Down/up proton sequential cuts &
+\good{Correct}; two/four terms\\
+\code{pion_EMFF_vibe_develop.py:172--190} &
+One-active-line local-current pion \(C_3\) &
+\warn{Correct raw correlator}, not \(F_\pi\)\\
+\code{qtmd_operator_utils.py:102--222} &
+Straight and fixed-length staple transport &
+\good{Correct geometry}\\
+\code{application/nucleon_TMD/shared_runner.py:230--260} &
+Proton nonlocal insertion trace &
+\good{Correct raw connected trace}\\
+\code{pion_qTMDWF_pyquda.py:130--240} &
+Shifted backward line for qDA/qTMDWF &
+\good{Correct endpoint}; CG needs gauge fixing\\
+\code{flowed_fermion_bilinear_vibe_develop.py:148--181} &
+Central derivative and left-line reconstruction &
+\good{Correct lattice derivative}\\
+\code{Disconnected_1pt_EMT_vibe_develop.py:302--329} &
+Two-sided derivative loop &
+\good{Closed-loop sign included}\\
+\code{Disconnected_1pt_qTMD_vibe_develop.py:85--160} &
+Positive stochastic qTMD/PDF trace &
+\bad{Physical loop needs an outer minus}\\
+\code{Disconnected_1pt_EMT_vibe_develop.py:1025--1110} &
+Clover \(F\) and \(2\Tr FF\) &
+\warn{Correct primitive}, not complete EMT\\
+\code{pion_soft_factor_vibe_develop.py:208--280} &
+Legacy two-block pion \(C_4\) &
+\warn{Correct specified \(C_4\)}; universal soft identification unproved\\
+\code{pion_current_background_response_vibe_develop.py:49--175} &
+\(SOS\) and ordered \(SO_2SO_1S\) &
+\good{Correct diagnostics}; derivative sign must follow definition\\
+\bottomrule
+\end{longtable}
+
+\section{Measurement-by-measurement conclusions and data impact}
+
+\begin{longtable}{@{}L{0.17\textwidth}L{0.19\textwidth}L{0.34\textwidth}L{0.22\textwidth}@{}}
+\toprule
+Measurement & Verdict & Physics qualification & Existing-data consequence\\
+\midrule
+\endfirsthead
+\toprule
+Measurement & Verdict & Physics qualification & Existing-data consequence\\
+\midrule
+\endhead
+Pion common \(C_2/C_3\) &
+\good{Correct} &
+Flavor path, gamma-five backward line, and spin--color trace agree. &
+No Wick-based recomputation required.\\
+Proton common \(C_2\) &
+\good{Correct} &
+Full \(u\)-line direct--exchange determinant; no \(u/d\) cross contraction. &
+No recomputation from the exchange concern.\\
+Proton up/down sequential &
+\good{Correct} &
+Exact flavor derivatives of the same \(C_2\); up multiplicity already included. &
+Do not multiply the up channel by two again.\\
+Pion EMFF &
+\warn{Conditionally correct} &
+Raw one-line local-current \(C_3\); missing complete physical extraction. &
+Retain \(C_3\); add missing \(C_2\), charges, \(Z_V\), improvement, and ratio.\\
+Proton EMFF &
+\warn{Not a dedicated target} &
+Common local insertion exists, but no full \(F_1/F_2\) workflow. &
+Do not relabel generic local-limit output as \(F_1,F_2\).\\
+Connected quark EMT &
+\warn{Conditionally correct} &
+Derivative and Wick primitives correct; flowed and unrenormalized. &
+Retain primitives; perform trace basis, ringed normalization, matching, mixing.\\
+Disconnected quark EMT &
+\warn{Conditionally correct} &
+Derived derivative includes the loop sign; primitive local trace does not. &
+Use dataset-level convention metadata.\\
+Gluon EMT &
+\warn{Conditionally correct} &
+\(2\Tr FF\) primitive only. &
+Retain primitive; construct trace/matching basis in analysis.\\
+Connected GI qTMD/qPDF &
+\warn{Correct raw kernel} &
+Wick and path correct; current forward runner has \(P_z=0\), with no soft/matching. &
+Raw data valid, but not a LaMET distribution; large-\(P_z\) target requires new data.\\
+Connected qGTMD/qGPD &
+\warn{Correct raw kernel} &
+\(q\ne0\) is off-forward with
+\(P=p_f-q/2\), \(\Delta=q\). &
+Retain raw data and label/store \(P,\Delta,\xi,t\).\\
+Disconnected qTMD/PDF &
+\bad{P0 sign issue} &
+Saved trace is positive; physical Wick loop is negative. &
+Current-schema raw loops can be exactly sign-corrected without new inversions.\\
+qTMDWF &
+\warn{Conditionally correct} &
+Endpoint Wick path correct; current implementation is CG/fixed-gauge. &
+Usable only with gauge-fixing provenance and later renormalization/matching.\\
+qDA &
+\warn{Conditionally correct} &
+GI \(b_T=0\) straight endpoint correct; leading twist needs axial channel. &
+Bare GI correlator can be retained for later analysis.\\
+Pion soft \(C_4\) &
+\warn{Specified algebra correct} &
+No demonstrated equality to the GI quasi-TMD vacuum soft function. &
+Retain as a legacy \(C_4\); do not divide into GI qTMD without factorization proof.\\
+Background response &
+\good{Correct diagnostic} &
+Positive \(SOS\) versus derivative \(-SOS\) is explicit; nested helper is one ordering. &
+Interpret using response-sign and time-window metadata.\\
+\bottomrule
+\end{longtable}
+
+\section{Compact derivation checklist for new analyses}
+
+For every output channel, the following checks should be completed in order:
+\begin{enumerate}
+  \item Write the continuum operator and hadron matrix-element decomposition.
+        State flavor charges and external-state normalization.
+  \item Decide whether the file contains a raw correlator, fitted bare matrix
+        element, or renormalized/matched observable.
+  \item Use the actual plus-sign \code{MomentumPhase} convention to derive
+        \(p_i=p_f-q\).  Store \(P,\Delta,\xi,t\) for off-forward data.
+  \item Preserve flavor labels in the Wick derivation.  Apply
+        \(S_u=S_d\) only after forbidden cross-flavor contractions have been
+        excluded.
+  \item For a proton, verify the complete direct--exchange determinant and
+        use a flavor derivative to define every sequential source.
+  \item For a disconnected bilinear, distinguish the positive stochastic
+        trace from the negative physical closed loop before vacuum
+        subtraction.
+  \item For a bilocal, prove the endpoint and Wilson-link orientation after
+        every dagger; distinguish fixed-gauge CG from gauge-invariant GI.
+  \item For flowed EMT data, keep trace subtraction, ringed normalization,
+        small-flow matching, and quark--gluon mixing explicit.
+  \item Only after these steps construct ratios, fits, renormalization,
+        matching, soft subtraction, and continuum/flow-time limits.
+\end{enumerate}
+
+\section{Final physics statement}
+
+Starting from physical interpolators and preserving field order and flavor,
+the connected pion and proton production kernels implement the intended Wick
+paths.  In particular:
+\begin{equation}
+ C_2^\pi=\Trsc(S^\dagger S)
+\end{equation}
+in the equal-line pseudoscalar limit,
+\begin{equation}
+ C_2^p=-\mathcal D+\mathcal X
+\end{equation}
+contains the full same-flavor \(u\) determinant, and
+\begin{equation}
+ K_f=\frac{\partial C_2^p}{\partial S_f}
+\end{equation}
+generates the correct proton sequential sources.  Straight and staple
+transporters have the intended endpoints, and shifting the qTMDWF/qDA
+backward-flavor line before gamma-five Hermitian conjugation yields the
+correct conjugate Wilson line.
+
+The one confirmed contraction-level physical problem is
+\begin{equation}
+ \avg{\bar q\Gamma\cW q}
+ =-\Tr(\Gamma\cW D^{-1}),
+\end{equation}
+whereas the disconnected qTMD/PDF producer saves the positive stochastic
+trace and its documented physical covariance omits the outer minus.  This is
+an exact convention error, not a statistical or solver effect.
+
+All other major qualifications in this note concern the distinction between
+a correct raw lattice building block and a final observable: EMFF requires
+charge/current normalization and a ratio or spectral fit; EMT requires the
+full flowed matching and mixing program; and nonlocal parton observables
+require suitable external momentum, renormalization, matching, and, for TMDs,
+a compatible soft and rapidity treatment.
+
+\begin{thebibliography}{99}
+
+\bibitem{DetmoldOrginos}
+W.~Detmold and K.~Orginos,
+``Nuclear correlation functions in lattice QCD,''
+\href{https://arxiv.org/abs/1207.1452}{arXiv:1207.1452}.
+
+\bibitem{Suzuki}
+H.~Suzuki,
+``Energy--momentum tensor from the Yang--Mills gradient flow,''
+\href{https://arxiv.org/abs/1304.0533}{arXiv:1304.0533}.
+
+\bibitem{MakinoSuzuki}
+H.~Makino and H.~Suzuki,
+``Lattice energy--momentum tensor from the Yang--Mills gradient flow:
+inclusion of fermion fields,''
+\href{https://arxiv.org/abs/1403.4772}{arXiv:1403.4772}.
+
+\bibitem{QuasiGPD}
+S.~Bhattacharya et al.,
+``Generalized parton distributions from lattice QCD with asymmetric
+momentum transfer,''
+\href{https://arxiv.org/abs/2209.05373}{arXiv:2209.05373}.
+
+\bibitem{QuasiTMD}
+P.~Shanahan, M.~Wagman, and Y.~Zhao,
+``Collins--Soper kernel for TMD evolution from lattice QCD,''
+\href{https://arxiv.org/abs/2107.11930}{arXiv:2107.11930}.
+
+\end{thebibliography}
+
+\end{document}
