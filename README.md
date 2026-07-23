@@ -262,11 +262,10 @@ environment variable or CLI option.
 - EMT HDF5 helpers live in `io_corr.py`.
 - qTMD-like HDF5 file names are built with tag helpers such as
   `get_qTMD_file_tag(...)`.
-- Hadron correlator EMT file names include the standard `lat / cfg / ama / src / sm` tags.
+- Hadron correlator EMT file names include standard `lat / cfg / ama / src` fields followed by an explicit setup and channel tag.
 - Hadron-independent quark-loop files omit `src` and use `lat / cfg / ama / sm`.
-- Proton connected 3pt names additionally encode the sink kinematics as
-  `PX<px>PY<py>PZ<pz>dt<tsep>`, matching the nucleon TMD convention.
-  Multiple separations are written as separate files.
+- Proton connected C2 channels use `<setup>.src<SRC>`, while C3 channels use `<setup>.src<SRC>.sink<SINK>.<polarizations>`. The setup identifies smearing and boost parameters, for example `1HYP_GSRC_W9_binx0y0z0_boutx0y0z0`.
+- Proton connected 3pt names additionally encode the sink kinematics as `PX<px>PY<py>PZ<pz>dt<tsep>`. Multiple separations are written as separate files, and `source_jobs[*]["tags"]` may select any nonempty subset declared by the measurement.
 
 ## EMT Notes
 

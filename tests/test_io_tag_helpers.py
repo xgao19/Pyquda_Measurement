@@ -8,6 +8,7 @@ from pyquda_measurement_utils.io_corr import (
     get_emt_quark_3pt_file_tag,
     get_emt_quark_loop_file_tag,
     get_emt_proton_quark_3pt_file_tag,
+    get_interpolator_channel_tag,
     get_flowed_quark_ringed_norm_file_tag,
     get_pion_EMFF_file_tag,
     get_pion_channel_tag,
@@ -16,7 +17,23 @@ from pyquda_measurement_utils.io_corr import (
     get_qTMD_file_tag,
     get_qTMDWF_file_tag,
     get_sample_log_tag,
+    get_spatial_vector_tag,
 )
+
+
+def test_shared_channel_and_spatial_vector_tags_are_explicit():
+    setup = "1HYP_GSRC_W9_binx0y0z0_boutx0y0z0"
+
+    assert get_spatial_vector_tag([0, 0, 0]) == "x0y0z0"
+    assert get_spatial_vector_tag([-1, 0, 2]) == "x-1y0z2"
+    with pytest.raises(ValueError):
+        get_spatial_vector_tag([0, 0])
+    assert get_interpolator_channel_tag(setup, "5") == (
+        f"{setup}.src5"
+    )
+    assert get_interpolator_channel_tag(setup, "5", "5") == (
+        f"{setup}.src5.sink5"
+    )
 
 
 def test_pion_channel_tag_keeps_interpolators_outside_setup_identity():

@@ -215,6 +215,7 @@ class ProtonQuarkEMT(FlowedFermionBilinearKernel):
         gauge,
         source_job,
         interpolator="5",
+        on_separation_done=None,
     ):
         """Compute and write connected proton U/D quark EMT 3pt functions for one source."""
         U = gauge
@@ -226,7 +227,7 @@ class ProtonQuarkEMT(FlowedFermionBilinearKernel):
         tags = source_job["tags"]
         c2_tag = source_job.get("c2_tag")
         t0 = src_pos[3]
-        t_separations = self.t_separations
+        t_separations = source_job["_t_separations"]
 
         prop_fw = None
         C3_chi = None
@@ -467,6 +468,8 @@ class ProtonQuarkEMT(FlowedFermionBilinearKernel):
                         momentum_transfer_list=self.qlist,
                         attrs=attrs,
                     )
+                if on_separation_done is not None:
+                    on_separation_done(source_job, t_sep, tags[t_sep])
                 C3_chi = None
                 C3_Tmunu = None
                 C3_local_bilinear = None
@@ -484,10 +487,47 @@ class ProtonQuarkEMT(FlowedFermionBilinearKernel):
             )
             del C3_chi, C3_Tmunu, C3_local_bilinear, C3_derivative_bilinear
 
-    def connected_3pt(self, gauge, invPara, source_jobs, interpolator="5", on_source_done=None):
-        """Compute connected proton U/D quark EMT 3pt functions for source jobs."""
+    def _normalize_source_job(self, source_job):
+        source_job = dict(source_job)
+        raw_tags = source_job.get("tags")
+        if not isinstance(raw_tags, dict) or not raw_tags:
+            raise ValueError("source job tags must be a nonempty mapping")
+
+        tags = {}
+        for raw_t_sep, tag in raw_tags.items():
+            t_sep = int(raw_t_sep)
+            if t_sep in tags:
+                raise ValueError(
+                    f"duplicate source job t_sep after normalization: {t_sep}"
+                )
+            if t_sep not in self.t_separations:
+                raise ValueError(
+                    f"source job t_sep {t_sep} is not declared by the measurement"
+                )
+            tags[t_sep] = tag
+
+        source_job["tags"] = tags
+        source_job["_t_separations"] = [
+            t_sep for t_sep in self.t_separations if t_sep in tags
+        ]
+        return source_job
+
+    def connected_3pt(
+        self,
+        gauge,
+        invPara,
+        source_jobs,
+        interpolator="5",
+        on_source_done=None,
+        on_separation_done=None,
+    ):
+        """Compute only the separations named by each source job's tags."""
         U = gauge
         latt_info = U.latt_info
+        source_jobs = [
+            self._normalize_source_job(source_job)
+            for source_job in source_jobs
+        ]
         mass, csw, tol, maxiter = invPara
         self._connected_invPara = tuple(invPara)
         mpi_print(latt_info, f"Proton EMT multigrid block: {self.multigrid_blocks}")
@@ -500,13 +540,18 @@ class ProtonQuarkEMT(FlowedFermionBilinearKernel):
 
         results = []
         for source_job in source_jobs:
-            source_job = dict(source_job)
             source_job["restore_source_gauge"] = bool(results)
             src_idx = source_job.get("src_idx", len(results))
             src_pos = source_job["src_pos"]
             source_t0 = perf_counter()
             mpi_print(latt_info, f"--source_start index={src_idx} src_pos={src_pos}")
-            result = self._connected_3pt_one_source(dirac, U, source_job, interpolator=interpolator)
+            result = self._connected_3pt_one_source(
+                dirac,
+                U,
+                source_job,
+                interpolator=interpolator,
+                on_separation_done=on_separation_done,
+            )
             results.append(result)
             if on_source_done is not None:
                 on_source_done(source_job, result)

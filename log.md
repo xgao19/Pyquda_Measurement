@@ -1259,3 +1259,12 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Python compileall, shell syntax, diff hygiene, and a standalone HDF5 schema
   smoke passed. Full PyQUDA pytest/GPU regression still requires an Aurora
   compute allocation because MPICH cannot initialize in the login shell.
+
+
+## 2026-07-23: Modernize proton EMT tags and separation resume
+
+- Split proton EMT output identity into setup, source/sink interpolator, polarization, and kinematic fields. Gaussian setup tags now encode both boost vectors as `binx..._boutx...`; point-source tags omit invalid boost provenance.
+- Updated connected Aurora/Perlmutter applications and disconnected proton C2 producer/builder to use the same explicit channel convention. Existing files and logs are not migrated or renamed.
+- Made each connected source job's `tags` mapping select the actual separation subset. Added `on_separation_done` after successful HDF5 closure so production resumes can record and recompute individual missing separations.
+- Updated the l64 connected runner to use dynamic EMT schema identity, construct pending separation maps, and log each completed source-separation immediately.
+- Python compilation, shell syntax, exact-tag/partial-resume assertions, and 29 application bookkeeping tests passed. MPI-importing pytest modules still require an Aurora compute allocation.

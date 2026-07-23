@@ -319,6 +319,38 @@ def test_emt_backend_transfers_do_not_call_cupy_get_directly():
     assert "array_to_numpy" in gluon
 
 
+def test_proton_emt_applications_use_explicit_channel_tags():
+    for relpath in (
+        "application/EMT_proton/Aurora/Pyquda_EMT_proton_quark_3pt.py",
+        "application/EMT_proton/perlmutter/Pyquda_EMT_proton_quark_3pt.py",
+    ):
+        source = _source(relpath)
+        assert "get_spatial_vector_tag" in source
+        assert "get_interpolator_channel_tag" in source
+        assert "c2_channel_tag" in source
+        assert "c3_channel_tag" in source
+        assert "1HYP_POINT" in source
+        assert "_k0_" not in source
+
+
+def test_disconnected_proton_c2_uses_explicit_channel_tag():
+    c2 = _source(
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_proton_2pt.py"
+    )
+    builder = _source(
+        "application/EMT_disconnected_1pt/perlmutter/"
+        "Pyquda_EMT_disconnected_build_3pt.py"
+    )
+    for source in (c2, builder):
+        assert "get_spatial_vector_tag" in source
+        assert "get_interpolator_channel_tag" in source
+        assert "EMT_DISC_SETUP_TAG" in source
+        assert "_k0_" not in source
+    assert "c2_channel_tag" in c2
+    assert "default_c2_channel_tag" in builder
+
+
 def test_proton_emt_parameters_use_only_canonical_boost_names():
     module = _source("pyquda_measurement_utils/proton_EMT_vibe_develop.py")
     assert "self.save_propagators" not in module

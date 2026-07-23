@@ -10,6 +10,8 @@ from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import parse_
 from pyquda_measurement_utils.io_corr import (
     get_emt_proton_2pt_file_tag,
     get_emt_proton_quark_3pt_file_tag,
+    get_interpolator_channel_tag,
+    get_spatial_vector_tag,
 )
 
 
@@ -59,14 +61,19 @@ width = float(os.environ.get("EMT_PROTON_WIDTH", "1.0"))
 boost_in = parse_triplet(os.environ.get("EMT_PROTON_BOOST_IN", "0.0.0"))
 boost_out = parse_triplet(os.environ.get("EMT_PROTON_BOOST_OUT", "0.0.0"))
 gauss_smear = bool(int(os.environ.get("EMT_PROTON_GAUSS_SMEAR", "1")))
-default_sm_tag = (
-    f"1HYP_GSRC_W{width:g}_k0_{args.interpolator}"
-    if gauss_smear else f"1HYP_POINT_{args.interpolator}"
+default_setup_tag = (
+    f"1HYP_GSRC_W{width:g}_bin{get_spatial_vector_tag(boost_in)}"
+    f"_bout{get_spatial_vector_tag(boost_out)}"
+    if gauss_smear
+    else "1HYP_POINT"
 )
-sm_tag = os.environ.get(
-    "EMT_PROTON_SM_TAG",
-    default_sm_tag,
+setup_tag = os.environ.get("EMT_PROTON_SETUP_TAG", default_setup_tag)
+c2_channel_tag = get_interpolator_channel_tag(
+    setup_tag, args.interpolator
 )
+c3_channel_tag = get_interpolator_channel_tag(
+    setup_tag, args.interpolator, args.interpolator
+) + "." + "-".join(pol_list)
 
 parameters = {
     "qext": qext,
@@ -85,9 +92,9 @@ parameters = {
     "multigrid": parse_optional_multigrid_blocks(args.mg_block),
 }
 
-c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
+c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, c2_channel_tag)
 quark_3pt_tags = {
-    t_sep: get_emt_proton_quark_3pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag, pf, t_sep)
+    t_sep: get_emt_proton_quark_3pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, c3_channel_tag, pf, t_sep)
     for t_sep in t_separations
 }
 quark_3pt_out = os.environ.get("EMT_PROTON_3PT_OUT")

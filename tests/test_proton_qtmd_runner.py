@@ -9,6 +9,7 @@ import pytest
 from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import (
     parse_optional_multigrid_blocks,
 )
+from pyquda_measurement_utils.proton_EMT_vibe_develop import ProtonQuarkEMT
 from pyquda_measurement_utils.proton_qTMD_pyquda import proton_TMD
 from pyquda_measurement_utils.tools import array_to_numpy
 
@@ -209,6 +210,54 @@ def test_proton_qtmd_measurement_keeps_only_c2_state():
         "t_separations",
     ):
         assert not hasattr(measurement, field)
+
+
+def test_proton_emt_source_job_tags_select_declared_separations():
+    measurement = ProtonQuarkEMT(
+        {
+            "qext": [[0, 0, 0, 0]],
+            "pf": [0, 0, 0, 0],
+            "p_2pt": [[0, 0, 0, 0]],
+            "CG_GaussSmear": False,
+            "boost_in": [0, 0, 0],
+            "boost_out": [0, 0, 0],
+            "width": 1.0,
+            "pol": ["PpUnpol"],
+            "t_separations": [6, 8, 12],
+            "flow_type": "symanzik",
+            "flow_epsilon": 0.09,
+            "flow_steps": 1,
+            "multigrid": None,
+        }
+    )
+
+    normalized = measurement._normalize_source_job(
+        {"src_pos": [0, 0, 0, 0], "tags": {12: "dt12", 6: "dt6"}}
+    )
+    assert normalized["tags"] == {12: "dt12", 6: "dt6"}
+    assert normalized["_t_separations"] == [6, 12]
+
+    with pytest.raises(ValueError, match="nonempty mapping"):
+        measurement._normalize_source_job({"src_pos": [0, 0, 0, 0], "tags": {}})
+    with pytest.raises(ValueError, match="not declared"):
+        measurement._normalize_source_job(
+            {"src_pos": [0, 0, 0, 0], "tags": {10: "dt10"}}
+        )
+    with pytest.raises(ValueError, match="duplicate"):
+        measurement._normalize_source_job(
+            {"src_pos": [0, 0, 0, 0], "tags": {6: "a", "6": "b"}}
+        )
+
+
+def test_proton_emt_separation_callback_follows_hdf5_write():
+    source = (
+        REPO_ROOT
+        / "pyquda_measurement_utils/proton_EMT_vibe_develop.py"
+    ).read_text()
+    write_call = source.rindex("save_emt_quark_3pt_hdf5(")
+    separation_callback = source.index("on_separation_done(source_job")
+    source_callback = source.index("on_source_done(source_job")
+    assert write_call < separation_callback < source_callback
 
 
 def test_proton_emt_requires_explicit_nonempty_t_separations():

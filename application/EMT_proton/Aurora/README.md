@@ -30,6 +30,15 @@ Defaults:
 Outputs go under `data/`; logs go under `log/`; QUDA tuning/profile files go
 under `.cache/`.
 
+Output tags keep setup and channel identity separate. Gaussian smearing uses
+`1HYP_GSRC_W<width>_binx<X>y<Y>z<Z>_boutx<X>y<Y>z<Z>`, while point-source
+runs use `1HYP_POINT` without boost fields. C2 appends `.src<SRC>`; C3 appends
+`.src<SRC>.sink<SINK>.<polarizations>` before the `PX...dt...` kinematics.
+`EMT_PROTON_SETUP_TAG` may override only the setup portion. The shared
+`ProtonQuarkEMT` API treats each source job's nonempty `tags` mapping as the
+actual separation subset to compute and can report each successful HDF5 write
+through `on_separation_done` for partial-separation resume.
+
 The connected code keeps its existing one-branch execution model. It performs
 one initial full gauge setup, uses thin gauge updates before later source and
 sequential inversions, and shares one flowed-gauge context across all

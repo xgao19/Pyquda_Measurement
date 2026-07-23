@@ -87,6 +87,8 @@ python tests/run_smoke_tests.py
   `EMT_meson.py` should not be restored into active workflows.
 - EMT vibe outputs are HDF5-only.  Hadron correlator tags include source
   position; source-independent EMT quark-loop tags do not.
+- Proton setup tags encode only preprocessing, smearing width, and explicit input/output boosts, for example `1HYP_GSRC_W9_binx0y0z0_boutx0y0z0`. Append `.src<SRC>` for C2 and `.src<SRC>.sink<SINK>.<polarizations>` for C3; do not hide channel identity in the setup tag.
+- Each proton connected source job must provide a nonempty `tags` mapping whose keys are the actual sink separations to compute. Record resume completion through `on_separation_done` only after the corresponding HDF5 file has closed; source-level callbacks remain optional compatibility hooks.
 - Quark EMT 3pt files contain only 3pt observables.  Read denominators and full
   momentum coverage from the separate EMT 2pt files.
 - Proton `PpUnpol` two-point projection is `(C2[I] + C2[T])/4`, corresponding

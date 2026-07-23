@@ -5,7 +5,11 @@ from pathlib import Path
 from pyquda import init
 from pyquda_utils import core, io
 
-from pyquda_measurement_utils.io_corr import get_emt_proton_2pt_file_tag
+from pyquda_measurement_utils.io_corr import (
+    get_emt_proton_2pt_file_tag,
+    get_interpolator_channel_tag,
+    get_spatial_vector_tag,
+)
 from pyquda_measurement_utils.proton_EMT_vibe_develop import ProtonQuarkEMT
 from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import parse_optional_multigrid_blocks
 from pyquda_measurement_utils.tools import mpi_print
@@ -61,9 +65,13 @@ boost_in = parse_triplet(os.environ.get("EMT_DISC_BOOST_IN", "0.0.0"))
 boost_out = parse_triplet(os.environ.get("EMT_DISC_BOOST_OUT", "0.0.0"))
 pol_list = parse_str_list(os.environ.get("EMT_DISC_POL", "PpUnpol"))
 t_separations = args.t_separations
-sm_tag = os.environ.get(
-    "EMT_DISC_SM_TAG",
-    f"1HYP_GSRC_W{width:g}_k0_{args.interpolator}",
+setup_tag = os.environ.get(
+    "EMT_DISC_SETUP_TAG",
+    f"1HYP_GSRC_W{width:g}_bin{get_spatial_vector_tag(boost_in)}"
+    f"_bout{get_spatial_vector_tag(boost_out)}",
+)
+c2_channel_tag = get_interpolator_channel_tag(
+    setup_tag, args.interpolator
 )
 
 parameters = {
@@ -84,7 +92,7 @@ parameters = {
     "multigrid": parse_optional_multigrid_blocks(args.mg_block),
 }
 
-c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, sm_tag)
+c2_tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, conf, 0, src_pos, c2_channel_tag)
 
 init(mpi_geometry, enable_mps=True)
 

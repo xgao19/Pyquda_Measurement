@@ -26,6 +26,8 @@ from pyquda_measurement_utils.io_corr import (
     get_emt_gluon_loop_file_tag,
     get_emt_proton_2pt_file_tag,
     get_emt_quark_loop_file_tag,
+    get_interpolator_channel_tag,
+    get_spatial_vector_tag,
 )
 
 
@@ -55,16 +57,23 @@ def default_loop_sm_tag():
     return os.environ.get("EMT_1PT_SETUP_TAG", "1HYP")
 
 
-def default_c2_sm_tag(interpolator):
+def default_c2_channel_tag(interpolator):
     width = float(os.environ.get("EMT_DISC_WIDTH", "1.0"))
-    return os.environ.get("EMT_DISC_SM_TAG", f"1HYP_GSRC_W{width:g}_k0_{interpolator}")
+    boost_in = parse_triplet(os.environ.get("EMT_DISC_BOOST_IN", "0.0.0"))
+    boost_out = parse_triplet(os.environ.get("EMT_DISC_BOOST_OUT", "0.0.0"))
+    setup_tag = os.environ.get(
+        "EMT_DISC_SETUP_TAG",
+        f"1HYP_GSRC_W{width:g}_bin{get_spatial_vector_tag(boost_in)}"
+        f"_bout{get_spatial_vector_tag(boost_out)}",
+    )
+    return get_interpolator_channel_tag(setup_tag, interpolator)
 
 
-def infer_paths(kind, configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_sm_tag):
+def infer_paths(kind, configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_channel_tag):
     paths = []
     for cfg in configs:
         if kind == "c2":
-            tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, cfg, 0, src_pos, c2_sm_tag)
+            tag = get_emt_proton_2pt_file_tag(data_dir, lat_tag, cfg, 0, src_pos, c2_channel_tag)
         elif kind == "quark":
             tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, cfg, 0, loop_sm_tag)
         elif kind == "gluon":
@@ -168,12 +177,12 @@ src_pos = parse_triplet(os.environ.get("EMT_1PT_SRC_POS", "0.0.0")) + [
 t_separations = args.t_separations
 c2_momentum = os.environ.get("EMT_DISC_C2_MOMENTUM", "PX0PY0PZ0")
 loop_sm_tag = default_loop_sm_tag()
-c2_sm_tag = default_c2_sm_tag(args.interpolator)
+c2_channel_tag = default_c2_channel_tag(args.interpolator)
 
-c2_paths = paths_from_env("EMT_DISC_C2_FILES", infer_paths("c2", configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_sm_tag))
-quark_paths = paths_from_env("EMT_DISC_QUARK_1PT_FILES", infer_paths("quark", configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_sm_tag))
+c2_paths = paths_from_env("EMT_DISC_C2_FILES", infer_paths("c2", configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_channel_tag))
+quark_paths = paths_from_env("EMT_DISC_QUARK_1PT_FILES", infer_paths("quark", configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_channel_tag))
 gluon_paths = (
-    paths_from_env("EMT_DISC_GLUON_1PT_FILES", infer_paths("gluon", configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_sm_tag))
+    paths_from_env("EMT_DISC_GLUON_1PT_FILES", infer_paths("gluon", configs, data_dir, lat_tag, src_pos, loop_sm_tag, c2_channel_tag))
     if args.include_gluon
     else []
 )
@@ -279,7 +288,7 @@ ratio_proxy = np.mean(ratio_proxy, axis=-1)
 output = os.environ.get("EMT_DISC_3PT_OUT")
 if output is None:
     cfg_tag = cfg_output_tag(configs)
-    out_name = f"{lat_tag}.EMTdisc3pt.{cfg_tag}.0.{site_tag(src_pos)}.{loop_sm_tag}.c2_{c2_sm_tag}.h5"
+    out_name = f"{lat_tag}.EMTdisc3pt.{cfg_tag}.0.{site_tag(src_pos)}.{loop_sm_tag}.c2_{c2_channel_tag}.h5"
     output = str(Path(data_dir) / "EMTdisc3pt" / out_name)
 
 Path(output).parent.mkdir(parents=True, exist_ok=True)

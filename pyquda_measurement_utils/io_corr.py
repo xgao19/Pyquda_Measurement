@@ -27,12 +27,26 @@ def get_sample_log_tag(ama, src, sm):
     return log_sample
 
 
-def get_pion_channel_tag(sm, src_interpolator, sink_interpolator=None):
-    """Append explicit pion source/sink interpolator identity to a setup tag."""
+def get_spatial_vector_tag(vector):
+    """Return a compact x/y/z tag for a three-component integer vector."""
+    if len(vector) != 3:
+        raise ValueError("spatial vector tags require exactly three components")
+    return f"x{int(vector[0])}y{int(vector[1])}z{int(vector[2])}"
+
+
+def get_interpolator_channel_tag(sm, src_interpolator, sink_interpolator=None):
+    """Append explicit source/sink interpolator identity to a setup tag."""
     tag = f"{sm}.src{src_interpolator}"
     if sink_interpolator is not None:
         tag += f".sink{sink_interpolator}"
     return tag
+
+
+def get_pion_channel_tag(sm, src_interpolator, sink_interpolator=None):
+    """Append explicit pion source/sink interpolator identity to a setup tag."""
+    return get_interpolator_channel_tag(
+        sm, src_interpolator, sink_interpolator
+    )
 
 
 # Build the standard point-source two-point output tag.
