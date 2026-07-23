@@ -49,6 +49,7 @@ _PART_ATTRS = {
     "part_index",
     "hp_start",
     "hp_stop_exclusive",
+    "shard_mean_vector_count",
 }
 
 
@@ -395,24 +396,52 @@ def _temporary_path(path):
     return path.with_name(path.name + f".tmp.{os.getpid()}.{uuid4().hex}")
 
 
-def write_raw_part_hdf5(
-    path, raw_datasets, attrs, source_bookkeeping, metadata_datasets=None
+def write_shard_part_hdf5(
+    path,
+    attrs,
+    metadata_datasets=None,
+    raw_datasets=None,
+    source_bookkeeping=None,
+    shard_mean_datasets=None,
 ):
-    """Atomically replace one shard part after its HDF5 payload is closed."""
+    """Atomically replace one raw, mean, or combined shard part."""
+    if raw_datasets is None and shard_mean_datasets is None:
+        raise ValueError("a shard part should contain raw or shard-mean datasets")
+    if raw_datasets is not None and source_bookkeeping is None:
+        raise ValueError("raw shard datasets require source bookkeeping")
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _temporary_path(path)
     with h5py.File(tmp, "w") as h5:
         _write_attrs(h5, attrs)
-        raw = h5.require_group("raw")
-        for name, values in raw_datasets.items():
-            raw.create_dataset(name, data=values)
-        for name, values in source_bookkeeping.items():
-            raw.create_dataset(name, data=np.asarray(values, dtype=np.int32))
+        if raw_datasets is not None:
+            raw = h5.require_group("raw")
+            for name, values in raw_datasets.items():
+                raw.create_dataset(name, data=values)
+            for name, values in source_bookkeeping.items():
+                raw.create_dataset(name, data=np.asarray(values, dtype=np.int32))
+        if shard_mean_datasets is not None:
+            shard_mean = h5.require_group("shard_mean")
+            for name, values in shard_mean_datasets.items():
+                shard_mean.create_dataset(name, data=values)
         for name, values in (metadata_datasets or {}).items():
             h5.create_dataset(name, data=values)
         h5.flush()
     os.replace(tmp, path)
+
+
+def write_raw_part_hdf5(
+    path, raw_datasets, attrs, source_bookkeeping, metadata_datasets=None
+):
+    """Atomically replace one raw shard part after its payload is closed."""
+    write_shard_part_hdf5(
+        path,
+        attrs,
+        metadata_datasets=metadata_datasets,
+        raw_datasets=raw_datasets,
+        source_bookkeeping=source_bookkeeping,
+    )
 
 
 def shard_part_attrs(
@@ -574,6 +603,10 @@ def discover_shard_layout(
         with h5py.File(first_path, "r") as first:
             if first.attrs.get("shard_schema") != SHARD_SCHEMA:
                 raise ValueError(f"shard {first_path} has incompatible schema")
+            if not bool(first.attrs.get("raw_per_vector_stored", True)):
+                raise ValueError(
+                    "mean-only shards cannot be finalized as per-vector raw data"
+                )
             hp_count = int(first.attrs["hp_vectors_per_base"])
             interval = int(first.attrs["block_interval_solves"])
             if first.attrs.get("source_bookkeeping_schema") != SOURCE_BOOKKEEPING_SCHEMA:
@@ -772,4 +805,5 @@ __all__ = [
     "shard_part_path",
     "validate_hierarchical_probing_options",
     "write_raw_part_hdf5",
+    "write_shard_part_hdf5",
 ]

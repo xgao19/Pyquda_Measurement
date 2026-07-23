@@ -159,6 +159,9 @@ def test_solver_controls_are_absent_from_measurement_attrs():
     assert "flow_batch_size" not in attrs_one
     assert "flow_batch_size" not in attrs_two
     assert sample_log_fingerprint(attrs_one) == sample_log_fingerprint(attrs_two)
+    mean_attrs = {**attrs_one, **one._shard_storage_attrs(False)}
+    raw_attrs = {**attrs_one, **one._shard_storage_attrs(True)}
+    assert sample_log_fingerprint(mean_attrs) != sample_log_fingerprint(raw_attrs)
 
 
 def test_ringed_kinetic_is_extracted_from_vector_derivative_diagonal():
@@ -250,6 +253,7 @@ def test_logged_base_skips_before_inverter_and_without_hdf5(tmp_path, monkeypatc
     }
     common["output_kind"] = "emt_quark_1pt"
     common["block_interval_solves"] = 64
+    common.update(measurement._shard_storage_attrs(False))
     prepare_sample_log(log, tag, common)
     append_completed_base(log, tag, common, 0)
 
@@ -489,7 +493,7 @@ def test_plain_noise_batches_across_bases_and_logs_only_successful_batches(
     monkeypatch.setattr(measurement, "_invert_and_measure_batch", fake_measure)
     monkeypatch.setattr(
         emt_module,
-        "write_raw_part_hdf5",
+        "write_shard_part_hdf5",
         lambda path, *_args, **_kwargs: writes.append(path.name),
     )
     monkeypatch.setattr(
@@ -546,7 +550,7 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
 
     monkeypatch.setattr(measurement, "_invert_and_measure_batch", fake_measure)
     monkeypatch.setattr(
-        emt_module, "write_raw_part_hdf5",
+        emt_module, "write_shard_part_hdf5",
         lambda path, *_args, **_kwargs: writes.append(path.name),
     )
     monkeypatch.setattr(
@@ -572,6 +576,78 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
     assert all({base for base, _ in batch} == {0} for batch in batches)
     assert completed == [0]
     assert len(writes) == 1
+
+
+@pytest.mark.parametrize("save_raw_per_vector", [False, True])
+def test_hp_shard_mean_accumulates_across_flow_batches(
+    tmp_path, monkeypatch, save_raw_per_vector
+):
+    gauge = FakeGauge()
+    measurement = make_measurement(
+        config_num=8,
+        noise_scheme="hierarchical_probing",
+        hp_num_vectors=4,
+    )
+    writes = []
+    monkeypatch.setattr(emt_module, "getMPIComm", lambda: FakeComm())
+    monkeypatch.setattr(
+        emt_module,
+        "iter_noise_base_hp_interval",
+        lambda _info, base, hp_start, hp_stop, *_args, **_kwargs: iter(
+            [(base * 4 + hp, base, hp, object()) for hp in range(hp_start, hp_stop)]
+        ),
+    )
+
+    def fake_measure(
+        _gauge, _dirac, records, _phases, timers=None,
+        restore_original_gauge=True,
+    ):
+        records = list(records)
+        output = zero_batch_output(len(records))
+        for source_idx, record in enumerate(records):
+            for values in output.values():
+                values[source_idx].fill(record[2] + 1)
+        return output
+
+    def fake_write(path, attrs, **kwargs):
+        writes.append((path, attrs, kwargs))
+
+    monkeypatch.setattr(measurement, "_invert_and_measure_batch", fake_measure)
+    monkeypatch.setattr(emt_module, "write_shard_part_hdf5", fake_write)
+    monkeypatch.setattr(
+        emt_module, "append_completed_base", lambda *_args, **_kwargs: None
+    )
+    attrs = {
+        "config_num": 8,
+        "noise_stream": 0,
+        "n_vec": 1,
+        "n_base_noise": 1,
+        "effective_n_inversions": 4,
+        "raw_per_vector_stored": save_raw_per_vector,
+        "shard_mean_stored": True,
+    }
+    measurement._measure_base_shards(
+        gauge, object(), [1, 4, 0],
+        str(tmp_path / "test.h5"), [None], attrs,
+        tmp_path / "shards", tmp_path / "sample.log", 0, 1, 64,
+        set(), 2, save_raw_per_vector,
+    )
+
+    assert len(writes) == 1
+    _, write_attrs, payload = writes[0]
+    assert int(write_attrs["shard_mean_vector_count"]) == 4
+    for values in payload["shard_mean_datasets"].values():
+        np.testing.assert_allclose(values, 2.5)
+    if save_raw_per_vector:
+        assert payload["raw_datasets"] is not None
+        np.testing.assert_array_equal(
+            payload["raw_datasets"]["flowed_noise_norm_pervec"][:, 0, 0, 0],
+            [1, 2, 3, 4],
+        )
+        assert payload["source_bookkeeping"] is not None
+    else:
+        assert payload["raw_datasets"] is None
+        assert payload["source_bookkeeping"] is None
 
 
 def test_source_loop_uses_one_full_mg_setup_then_thin_restores(tmp_path, monkeypatch):
@@ -607,7 +683,9 @@ def test_source_loop_uses_one_full_mg_setup_then_thin_restores(tmp_path, monkeyp
             [(base, base, hp_start, object())]
         ),
     )
-    monkeypatch.setattr(emt_module, "write_raw_part_hdf5", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        emt_module, "write_shard_part_hdf5", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr(
         measurement,
         "_measure_flowed_batch",

@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-07-18
+Last updated: 2026-07-23
 
 This file contains only reusable environment facts, stable conventions, and
 pitfalls that are easy to repeat.  Commit history and completed-work summaries
@@ -171,8 +171,14 @@ python tests/run_smoke_tests.py
   origin-zero loop to a hadron source therefore uses
   `exp(-2 pi i q.(source-origin)/L)`; do not reverse both signs.
 - Production quark EMT 1pt is base-oriented: base-internal part files are only
-  checkpoints, a base is complete only after all HP vectors validate, and an
-  explicit streaming finalizer publishes one canonical EMTc file.
+  checkpoints, and a base is complete only after all HP vectors validate.
+- EMT shards default to one complex128 arithmetic mean per HP part.  Set
+  `save_raw_per_vector=True` only when per-vector raw data and the current
+  canonical finalizer are required; raw mode stores both raw and the same part
+  mean.  Mean-only shards intentionally do not use the per-vector finalizer.
+  `block_interval_solves` controls vectors per part independently of
+  `flow_batch_size`; HP256 with interval 64 and batch 32 has four parts per base
+  and two flow batches per part.
 
 ## qTMD Conventions And Pitfalls
 

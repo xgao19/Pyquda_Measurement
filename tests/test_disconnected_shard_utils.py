@@ -32,6 +32,7 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     shard_part_attrs,
     shard_part_path,
     write_raw_part_hdf5,
+    write_shard_part_hdf5,
 )
 
 
@@ -87,6 +88,93 @@ def _common_attrs(configured_n_vec):
     }
     attrs.update(basis_attrs())
     return attrs
+
+
+def test_shard_writer_saves_mean_and_optional_raw(tmp_path):
+    derivative = np.arange(3 * 16 * 4 * 2 * 2 * 3, dtype=np.float64).reshape(
+        3, 16, 4, 2, 2, 3
+    ).astype(np.complex128)
+    derivative += 0.5j * derivative
+    raw_datasets = {
+        "local_bilinear_pervec": np.ones((3, 16, 2, 2, 3), dtype=np.complex128),
+        "derivative_bilinear_pervec": derivative,
+        "flowed_noise_norm_pervec": np.ones((3, 2, 2, 3), dtype=np.complex128),
+    }
+    shard_means = {
+        name.removesuffix("_pervec"): np.mean(values, axis=0)
+        for name, values in raw_datasets.items()
+    }
+    attrs = shard_part_attrs(_common_attrs(1), 0, 0, 0, 3, 3)
+    attrs.update({
+        "raw_per_vector_stored": True,
+        "shard_mean_stored": True,
+        "shard_mean_vector_count": 3,
+    })
+    raw_path = tmp_path / "raw_and_mean.h5"
+    write_shard_part_hdf5(
+        raw_path,
+        attrs,
+        raw_datasets=raw_datasets,
+        source_bookkeeping={
+            "base_noise_index": [0, 0, 0],
+            "hp_index": [0, 1, 2],
+        },
+        shard_mean_datasets=shard_means,
+    )
+    with h5py.File(raw_path, "r") as h5:
+        assert "raw" in h5
+        assert "shard_mean" in h5
+        np.testing.assert_array_equal(
+            h5["raw/derivative_bilinear_pervec"], derivative
+        )
+        np.testing.assert_allclose(
+            h5["shard_mean/derivative_bilinear"], np.mean(derivative, axis=0)
+        )
+        tmunu_per_vector = emt_tensor_from_derivative_bilinear(derivative)
+        tmunu_from_mean = emt_tensor_from_derivative_bilinear(
+            h5["shard_mean/derivative_bilinear"][()][None, ...]
+        )[0]
+        np.testing.assert_allclose(
+            tmunu_from_mean, np.mean(tmunu_per_vector, axis=0)
+        )
+
+    mean_path = tmp_path / "mean_only.h5"
+    attrs["raw_per_vector_stored"] = False
+    write_shard_part_hdf5(
+        mean_path,
+        attrs,
+        shard_mean_datasets=shard_means,
+    )
+    with h5py.File(mean_path, "r") as h5:
+        assert "raw" not in h5
+        assert "shard_mean" in h5
+        assert int(h5.attrs["shard_mean_vector_count"]) == 3
+
+
+def test_raw_finalizer_rejects_mean_only_shards(tmp_path):
+    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.mean")
+    shard_dir = tmp_path / "EMTc" / "shards"
+    path = shard_part_path(shard_dir, tag, 0, 0, 0, 1)
+    attrs = shard_part_attrs(_common_attrs(1), 0, 0, 0, 1, 1)
+    attrs.update({
+        "raw_per_vector_stored": False,
+        "shard_mean_stored": True,
+        "shard_mean_vector_count": 1,
+    })
+    write_shard_part_hdf5(
+        path,
+        attrs,
+        shard_mean_datasets={
+            "local_bilinear": np.zeros((16, 2, 2, 3), dtype=np.complex128),
+            "derivative_bilinear": np.zeros(
+                (16, 4, 2, 2, 3), dtype=np.complex128
+            ),
+            "flowed_noise_norm": np.zeros((2, 2, 3), dtype=np.complex128),
+        },
+        metadata_datasets=basis_metadata(),
+    )
+    with pytest.raises(ValueError, match="mean-only shards cannot be finalized"):
+        finalize_emt_quark_1pt_shards(shard_dir, tag, 1)
 
 
 def _write_synthetic_base(shard_dir, tag, base_idx, configured_n_vec):
@@ -153,6 +241,28 @@ def test_emt_finalize_streams_shards_and_embeds_ringed_kinetic(tmp_path):
                     emt[f"avg/Tmunu/T{mu+1}{nu+1}"][()],
                     np.mean(raw_t[:, mu, nu], axis=0) / 8,
                 )
+
+
+def test_raw_finalizer_accepts_shards_with_additional_means(tmp_path):
+    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.raw_mean")
+    shard_dir = tmp_path / "EMTc" / "shards"
+    _write_synthetic_base(shard_dir, tag, 0, configured_n_vec=1)
+    for path in sorted(shard_dir.glob("*.h5")):
+        with h5py.File(path, "r+") as h5:
+            h5.attrs["raw_per_vector_stored"] = True
+            h5.attrs["shard_mean_stored"] = True
+            h5.attrs["shard_mean_vector_count"] = h5["raw/hp_index"].shape[0]
+            means = h5.require_group("shard_mean")
+            for raw_name in (
+                "local_bilinear_pervec",
+                "derivative_bilinear_pervec",
+                "flowed_noise_norm_pervec",
+            ):
+                means.create_dataset(
+                    raw_name.removesuffix("_pervec"),
+                    data=np.mean(h5[f"raw/{raw_name}"][()], axis=0),
+                )
+    assert finalize_emt_quark_1pt_shards(shard_dir, tag, 1) == tag + ".h5"
 
 
 def test_finalize_rejects_partial_base_and_preserves_old_canonical(tmp_path):

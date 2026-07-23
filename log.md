@@ -1238,3 +1238,24 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Corrected the pion/proton qTMD tables to show the raw signs
   `Y5_raw=-gamma_y gamma5` and `T5_raw=-gamma_t gamma5`, and distinguished raw
   tensor products from the optional Hermitian factor `1j`.
+
+## 2026-07-23: Add mean-first disconnected EMT shards
+
+- Added `save_raw_per_vector=False` to disconnected quark EMT production. Every
+  shard stores complex128 means for local bilinears, derivative bilinears, and
+  flowed-noise norm; enabling the flag additionally preserves the existing
+  per-vector raw payload and source bookkeeping.
+- Mean-only HP parts accumulate flow batches without allocating a complete
+  part-sized raw buffer. Storage mode is part of the sample-log fingerprint,
+  and shard metadata records the mean definition, vector count, axes, HP range,
+  base, and part.
+- Kept Tmunu derived from the unsymmetrized derivative primitive instead of
+  duplicating it in shards. Raw-plus-mean files remain compatible with the
+  current canonical finalizer, while mean-only input fails with an explicit
+  unsupported-payload error.
+- Added the `--save-raw-per-vector` application and wrapper flag, documented
+  extensible base/part naming without planned-base-count tags, and added shard,
+  batching, fingerprint, EMT-linearity, and finalizer regression coverage.
+- Python compileall, shell syntax, diff hygiene, and a standalone HDF5 schema
+  smoke passed. Full PyQUDA pytest/GPU regression still requires an Aurora
+  compute allocation because MPICH cannot initialize in the login shell.

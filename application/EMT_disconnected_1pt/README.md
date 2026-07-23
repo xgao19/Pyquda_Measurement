@@ -377,6 +377,24 @@ With the default 64-solve part interval, example names are:
 <canonical-stem>.base000003.part0001.hp0064-0127.h5
 ```
 
+The canonical stem should describe the estimator and physics parameters, not
+the planned base count. Do not add tags such as `N32`; the base and part indices
+already support extending the same measurement with additional bases.
+
+Every part stores the arithmetic mean over its HP interval in:
+
+```text
+shard_mean/local_bilinear
+shard_mean/derivative_bilinear
+shard_mean/flowed_noise_norm
+```
+
+This mean-only layout is the default. Pass `--save-raw-per-vector` to also
+store the existing `raw/*_pervec` datasets and source bookkeeping. The mean is
+accumulated in complex128 and `shard_mean_vector_count` records its weight.
+Tmunu is not duplicated; derive it from `shard_mean/derivative_bilinear` with
+`emt_tensor_from_derivative_bilinear()` after adding a length-one source axis.
+
 Each complete part is first written to a temporary file and then atomically
 renamed. After every part of one base has closed successfully, rank 0 appends
 one exact line to:
@@ -398,9 +416,11 @@ checking whether its shard files are still present, so completed shards may be
 transferred immediately. An unlogged base is recomputed from its first HP
 vector. Part-level resume inside a base is intentionally not supported.
 
-The finalizer is a separate destination-side operation. It does not read the
-sample log. It validates the complete base/HP layout and metadata while
-streaming all parts into one canonical file:
+The finalizer is a separate destination-side operation for shards produced
+with `--save-raw-per-vector`. It does not read the sample log. It validates the
+complete base/HP layout and metadata while streaming all parts into one
+canonical file. Mean-only shards intentionally fail with a clear unsupported
+payload error in the current release:
 
 ```text
 EMTc/<lat>.EMTc.<cfg>.<ama>.<setup-tag>.h5
@@ -455,7 +475,15 @@ derived/ringed/kinetic_pervec
 derived/ringed/kinetic_spacetime
 ```
 
-The primitive shapes are:
+The shard-mean shapes are:
+
+```text
+shard_mean/local_bilinear      [16,q,flow,t_abs]
+shard_mean/derivative_bilinear [16,4,q,flow,t_abs]
+shard_mean/flowed_noise_norm   [q,flow,t_abs]
+```
+
+When `--save-raw-per-vector` is enabled, the additional raw shapes are:
 
 ```text
 raw/local_bilinear_pervec      [source,16,q,flow,t_abs]
@@ -512,7 +540,8 @@ EMT_1PT_HP_NUM_VECTORS=2 \
 bash "$APP/run_quark_1pt.sh" \
   --config_num 0 \
   --mg-block 8.8.4.4 \
-  --flow-batch-size 1
+  --flow-batch-size 1 \
+  --save-raw-per-vector
 ```
 
 `--config_num` is required even for the test gauge. It is part of the
@@ -659,7 +688,8 @@ run_method () {
   bash "$APP/run_quark_1pt.sh" \
     --config_num 0 \
     --mg-block 8.8.4.4 \
-    --flow-batch-size "$batch"
+    --flow-batch-size "$batch" \
+    --save-raw-per-vector
 }
 ```
 

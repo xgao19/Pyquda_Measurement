@@ -37,6 +37,11 @@ parser.add_argument(
     default=1,
     help="number of stochastic sources flowed together (default: 1)",
 )
+parser.add_argument(
+    "--save-raw-per-vector",
+    action="store_true",
+    help="save per-vector raw datasets in addition to the required shard means",
+)
 args = parser.parse_args()
 
 conf = args.config_num
@@ -107,4 +112,5 @@ quark_1pt.flowed_fermionic_1pt(
     base_stop=base_stop,
     block_interval_solves=block_interval_solves,
     flow_batch_size=args.flow_batch_size,
+    save_raw_per_vector=args.save_raw_per_vector,
 )

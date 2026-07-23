@@ -67,7 +67,7 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     shard_part_attrs,
     shard_part_path,
     validate_hierarchical_probing_options,
-    write_raw_part_hdf5,
+    write_shard_part_hdf5,
 )
 
 @dataclass(frozen=True)
@@ -399,6 +399,62 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
             for name, tail in self._raw_step_tail_shapes(latt_info).items()
         }
 
+    @staticmethod
+    def _shard_storage_attrs(save_raw_per_vector):
+        return {
+            "raw_per_vector_stored": bool(save_raw_per_vector),
+            "shard_mean_stored": True,
+            "shard_mean_definition": (
+                "arithmetic_mean_over_hp_interval_complex128"
+            ),
+            "shard_mean_local_axes": "gamma,q,flow,t",
+            "shard_mean_derivative_axes": "gamma,derivative,q,flow,t",
+            "shard_mean_noise_norm_axes": "q,flow,t",
+        }
+
+    @staticmethod
+    def _shard_mean_name(raw_name):
+        if not raw_name.endswith("_pervec"):
+            raise ValueError(
+                f"raw shard dataset {raw_name!r} does not end in '_pervec'"
+            )
+        return raw_name.removesuffix("_pervec")
+
+    def _empty_shard_sums(self, latt_info):
+        return {
+            self._shard_mean_name(name): np.zeros(shape[1:], dtype=np.complex128)
+            for name, shape in self._raw_batch_shapes(latt_info, 1).items()
+        }
+
+    def _accumulate_shard_sums(self, shard_sums, raw_batch):
+        source_counts = {int(values.shape[0]) for values in raw_batch.values()}
+        if len(source_counts) != 1:
+            raise ValueError("raw batch datasets have inconsistent source counts")
+        source_count = source_counts.pop()
+        for raw_name, values in raw_batch.items():
+            mean_name = self._shard_mean_name(raw_name)
+            shard_sums[mean_name] += np.sum(values, axis=0, dtype=np.complex128)
+        return source_count
+
+    def _shard_means_from_raw(self, raw_datasets):
+        return {
+            self._shard_mean_name(name): np.mean(
+                values, axis=0, dtype=np.complex128
+            )
+            for name, values in raw_datasets.items()
+        }
+
+    @staticmethod
+    def _shard_means_from_sums(shard_sums, vector_count):
+        vector_count = int(vector_count)
+        if vector_count <= 0:
+            raise ValueError(
+                f"shard vector count should be positive, got {vector_count}"
+            )
+        return {
+            name: values / vector_count for name, values in shard_sums.items()
+        }
+
     def _metadata_datasets(self):
         return basis_metadata()
 
@@ -593,7 +649,7 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
     def _measure_base_shards(
         self, U, dirac, randPara, tag, momentum_projectors, attrs,
         shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
-        completed_bases, flow_batch_size,
+        completed_bases, flow_batch_size, save_raw_per_vector=False,
     ):
         n_vec, n_zn, _ = randPara
         hp_count = hp_vectors_per_base(self.noise_scheme, self.hp_num_vectors)
@@ -621,23 +677,32 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
             else:
                 pending_bases.append(base_idx)
 
-        def write_part(base_idx, part_idx, hp_start, hp_stop, raw_datasets):
+        def write_part(
+            base_idx, part_idx, hp_start, hp_stop,
+            raw_datasets, shard_mean_datasets,
+        ):
             path = shard_part_path(
                 shard_dir, tag, base_idx, part_idx, hp_start, hp_stop
             )
             write_attrs = shard_part_attrs(
                 common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
             )
-            bookkeeping = part_source_bookkeeping(
-                base_idx, hp_start, hp_stop, hp_count
-            )
+            write_attrs["shard_mean_vector_count"] = int(hp_stop - hp_start)
+            bookkeeping = None
+            if raw_datasets is not None:
+                bookkeeping = part_source_bookkeeping(
+                    base_idx, hp_start, hp_stop, hp_count
+                )
+            else:
+                write_attrs.pop("source_bookkeeping_schema", None)
             if U.latt_info.mpi_rank == 0:
-                write_raw_part_hdf5(
+                write_shard_part_hdf5(
                     path,
-                    raw_datasets,
                     write_attrs,
-                    bookkeeping,
                     metadata_datasets=metadata_datasets,
+                    raw_datasets=raw_datasets,
+                    source_bookkeeping=bookkeeping,
+                    shard_mean_datasets=shard_mean_datasets,
                 )
             comm.Barrier()
 
@@ -681,12 +746,14 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
                 write_t0 = _timer_start()
                 for source_offset, base_idx in enumerate(batch_bases):
                     source_slice = slice(source_offset, source_offset + 1)
+                    raw_source = {
+                        name: values[source_slice]
+                        for name, values in raw.items()
+                    }
                     write_part(
                         base_idx, 0, 0, 1,
-                        {
-                            name: values[source_slice]
-                            for name, values in raw.items()
-                        },
+                        raw_source if save_raw_per_vector else None,
+                        self._shard_means_from_raw(raw_source),
                     )
                     complete_base(base_idx)
                 timers["write"] += _timer_stop(write_t0)
@@ -699,12 +766,18 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
         for base_idx in pending_bases:
             for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
                 count = hp_stop - hp_start
-                raw_part = {
-                    name: np.zeros(shape, dtype=np.complex128)
-                    for name, shape in self._raw_batch_shapes(
-                        U.latt_info, count
-                    ).items()
-                }
+                raw_part = None
+                shard_sums = None
+                if save_raw_per_vector:
+                    raw_part = {
+                        name: np.zeros(shape, dtype=np.complex128)
+                        for name, shape in self._raw_batch_shapes(
+                            U.latt_info, count
+                        ).items()
+                    }
+                else:
+                    shard_sums = self._empty_shard_sums(U.latt_info)
+                accumulated_count = 0
                 timers = self._new_batch_timers()
                 part_t0 = _timer_start()
                 for batch_hp_start, batch_hp_stop in _interval_batches(
@@ -721,14 +794,29 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
                         restore_original_gauge=not first_inversion_batch,
                     )
                     first_inversion_batch = False
-                    destination = slice(
-                        batch_hp_start - hp_start, batch_hp_stop - hp_start
+                    if save_raw_per_vector:
+                        destination = slice(
+                            batch_hp_start - hp_start, batch_hp_stop - hp_start
+                        )
+                        for name, values in raw.items():
+                            raw_part[name][destination] = values
+                    else:
+                        accumulated_count += self._accumulate_shard_sums(
+                            shard_sums, raw
+                        )
+                    del raw
+                if not save_raw_per_vector and accumulated_count != count:
+                    raise RuntimeError(
+                        f"measured {accumulated_count} vectors for a {count}-vector part"
                     )
-                    for name, values in raw.items():
-                        raw_part[name][destination] = values
+                if save_raw_per_vector:
+                    shard_means = self._shard_means_from_raw(raw_part)
+                else:
+                    shard_means = self._shard_means_from_sums(shard_sums, count)
                 write_t0 = _timer_start()
                 write_part(
-                    base_idx, part_idx, hp_start, hp_stop, raw_part
+                    base_idx, part_idx, hp_start, hp_stop,
+                    raw_part, shard_means,
                 )
                 timers["write"] += _timer_stop(write_t0)
                 total = _timer_stop(part_t0)
@@ -750,8 +838,9 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
         base_stop=None,
         block_interval_solves=64,
         flow_batch_size=1,
+        save_raw_per_vector=False,
     ):
-        """Compute full stochastic EMT primitives with optional batched flow."""
+        """Compute stochastic EMT shard means and optional per-vector raw data."""
         return self._run_sharded_measurement(
             gauge,
             invPara,
@@ -763,6 +852,7 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
             base_stop=base_stop,
             block_interval_solves=block_interval_solves,
             flow_batch_size=flow_batch_size,
+            save_raw_per_vector=save_raw_per_vector,
         )
 
     def _run_sharded_measurement(
@@ -777,8 +867,12 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
         base_stop=None,
         block_interval_solves=64,
         flow_batch_size=1,
+        save_raw_per_vector=False,
     ):
         """Shared counter-noise, inversion, flow, shard, and resume runner."""
+        if not isinstance(save_raw_per_vector, (bool, np.bool_)):
+            raise TypeError("save_raw_per_vector should be a boolean")
+        save_raw_per_vector = bool(save_raw_per_vector)
         if not tag:
             raise ValueError("a non-empty canonical output tag is required")
         flow_batch_size = _positive_flow_batch_size(flow_batch_size)
@@ -798,7 +892,11 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
         counter_stream = int(randseed)
 
         n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
-        attrs = self._measurement_attrs(latt_info, invPara, randPara, counter_config, counter_stream, n_eff, Ns3)
+        attrs = self._measurement_attrs(
+            latt_info, invPara, randPara,
+            counter_config, counter_stream, n_eff, Ns3,
+        )
+        attrs.update(self._shard_storage_attrs(save_raw_per_vector))
         if sample_log_file is None:
             raise ValueError("sample_log_file is required for base-level resume")
         common_attrs = {
@@ -846,7 +944,7 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
         return self._measure_base_shards(
             U, dirac, randPara, tag, momentum_projectors, attrs,
             shard_dir, sample_log_file, base_start, base_stop, block_interval_solves,
-            completed_bases, flow_batch_size,
+            completed_bases, flow_batch_size, save_raw_per_vector,
         )
 
 def _copy_h5_attrs(obj, attrs):
