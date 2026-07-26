@@ -227,3 +227,15 @@ python tests/run_smoke_tests.py
   shared runner. It supports full-volume plain/HP counter noise but no
   spin-color dilution or stored ringed factors. Average `K` over configurations
   before any nonlinear normalization; never average per-configuration `1/K`.
+
+## Boosted Smearing
+
+- Keep the public interface `boosted_smearing(src, *, w, boost)` unchanged for
+  both `LatticeFermion` and `LatticePropagator`.
+- Smear a propagator with one batched distributed FFT over all spin-color
+  columns. Repeating the fermion FFT and Gaussian-kernel construction for each
+  of the 12 source columns can accumulate allocator/collective state and hang
+  later sequential sources on l64.
+- Do not add a persistent device kernel cache without validating SYCL queue and
+  MPI-decomposition ownership. The current per-call kernel and batched field
+  FFT are bitwise equivalent to the historical column-wise implementation.

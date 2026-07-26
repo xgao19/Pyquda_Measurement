@@ -1268,3 +1268,23 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Made each connected source job's `tags` mapping select the actual separation subset. Added `on_separation_done` after successful HDF5 closure so production resumes can record and recompute individual missing separations.
 - Updated the l64 connected runner to use dynamic EMT schema identity, construct pending separation maps, and log each completed source-separation immediately.
 - Python compilation, shell syntax, exact-tag/partial-resume assertions, and 29 application bookkeeping tests passed. MPI-importing pytest modules still require an Aurora compute allocation.
+
+## 2026-07-26: Batch boosted smearing over propagator columns
+
+- Replaced the 12-column `LatticePropagator` smearing loop with one distributed
+  propagator FFT, one Gaussian-kernel FFT, an in-place broadcast multiply, and
+  one inverse FFT. The public interface, kernel, FFT backend, and existing
+  total timer remain unchanged.
+- S8T8 deterministic fermion/propagator tests with zero and nonzero boosts were
+  bitwise identical between the old and batched implementations on one and
+  four MPI ranks. Repeated propagator smearing improved by 3.02x and 5.58x,
+  respectively, without late-call degradation.
+- S8T8 proton EMT C2 and C3 outputs were bitwise identical old versus new on
+  both MPI layouts. A 64-rank l64 config-1050 run completed dt6, dt8, and dt10
+  in 985.78 seconds and passed the previous dt10 sequential-smearing hang.
+- A same-allocation l64 old/new dt6 control was bitwise identical for C2,
+  local and derivative primitives, `C3_chi`, and `C3_Tmunu`. The approximately
+  `1e-9` differences from older benchmark files are cross-job multigrid/solver
+  reproducibility rather than a smearing change.
+- Focused boosted-smearing and proton-EMT tests both passed with four tests;
+  Python 3.12 compileall and diff hygiene also passed.

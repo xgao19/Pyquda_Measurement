@@ -16,7 +16,6 @@ from time import perf_counter
 import numpy as np
 
 # PyQUDA imports
-from pyquda.field import Ns, Nc
 from pyquda.field import LatticeInfo, LatticeFermion, LatticePropagator, LatticeComplex
 
 # Import PyQUDA's distributed FFT
@@ -99,9 +98,9 @@ def _build_kernel_realspace_distributed(xp, latt_info: LatticeInfo, w: float, bo
     
     return kernel_field
 
-def _boosted_smearing_fermion(src: LatticeFermion, *, w: float, boost: Sequence[float]):
+def _boosted_smearing_field(src, *, w: float, boost: Sequence[float]):
     """
-    Core implementation of boosted smearing for a single fermion.
+    Core implementation of boosted smearing for a fermion or propagator.
     Optimized: Assumes Identity Gauge (No U_trafo input).
     """
     latt_info: LatticeInfo = src.latt_info
@@ -111,7 +110,7 @@ def _boosted_smearing_fermion(src: LatticeFermion, *, w: float, boost: Sequence[
     # 1. Forward FFT (Distributed)
     # ---------------------------------------------------------
     # because U=Identity, so we don't need to do src.lexico() -> einsum -> evenodd()
-    # directly do FFT on LatticeFermion
+    # directly do FFT on the full field
     psi_p = fft(src, fft3d=True, backend="cupy" if xp.__name__=="cupy" else "numpy")
 
     # ---------------------------------------------------------
@@ -121,7 +120,8 @@ def _boosted_smearing_fermion(src: LatticeFermion, *, w: float, boost: Sequence[
     K_p = fft(K_xyz, fft3d=True, backend="cupy" if xp.__name__=="cupy" else "numpy")
 
     # multiply in momentum space: psi(k) * K(k)
-    psi_p.data = psi_p.data * K_p.data[..., None, None]
+    kernel_shape = (...,) + (None,) * len(src.field_shape)
+    psi_p.data *= K_p.data[kernel_shape]
 
     # ---------------------------------------------------------
     # 3. Inverse FFT (Distributed)
@@ -144,17 +144,15 @@ def boosted_smearing(
     boost: Sequence[float],
 ):
     t0 = perf_counter()
-    if isinstance(src, LatticeFermion):
-        out = _boosted_smearing_fermion(src, w=w, boost=boost)
-        mpi_timer_print(src.latt_info, "boosted_smearing", perf_counter() - t0, field="LatticeFermion", width=w, boost=boost)
-        return out
-    if isinstance(src, LatticePropagator):
-        out = LatticePropagator(src.latt_info)
-        for s in range(Ns):
-            for c in range(Nc):
-                # pass in a single fermion
-                f_sm = _boosted_smearing_fermion(src.getFermion(s, c), w=w, boost=boost)
-                out.setFermion(f_sm, s, c)
-        mpi_timer_print(src.latt_info, "boosted_smearing", perf_counter() - t0, field="LatticePropagator", width=w, boost=boost)
+    if isinstance(src, (LatticeFermion, LatticePropagator)):
+        out = _boosted_smearing_field(src, w=w, boost=boost)
+        mpi_timer_print(
+            src.latt_info,
+            "boosted_smearing",
+            perf_counter() - t0,
+            field=src.__class__.__name__,
+            width=w,
+            boost=boost,
+        )
         return out
     raise TypeError(f"boosted_smearing: unsupported src type: {type(src)}")

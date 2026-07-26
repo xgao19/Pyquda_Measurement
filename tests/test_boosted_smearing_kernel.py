@@ -74,3 +74,50 @@ def test_boosted_smearing_kernel_opposite_boosts_are_conjugates():
             delattr(np, "asnumpy")
 
     np.testing.assert_allclose(plus, minus.conj())
+
+
+def test_propagator_smearing_batches_all_spin_color_columns(monkeypatch):
+    class FakeInfo:
+        pass
+
+    class FakePropagator:
+        field_shape = [4, 4, 3, 3]
+
+        def __init__(self, data):
+            self.latt_info = FakeInfo()
+            self.data = data
+
+    class FakeComplex:
+        def __init__(self, data):
+            self.data = data
+
+    source_data = np.ones((2, 2, 2, 2, 2, 4, 4, 3, 3), dtype=np.complex128)
+    kernel_data = np.full((2, 2, 2, 2, 2), 2.0, dtype=np.complex128)
+    source = FakePropagator(source_data.copy())
+    calls = []
+
+    def fake_fft(field, **kwargs):
+        calls.append(("fft", field))
+        return field
+
+    def fake_ifft(field, **kwargs):
+        calls.append(("ifft", field))
+        return field
+
+    monkeypatch.setattr(boosted, "LatticeFermion", type("FakeFermion", (), {}))
+    monkeypatch.setattr(boosted, "LatticePropagator", FakePropagator)
+    monkeypatch.setattr(boosted, "fft", fake_fft)
+    monkeypatch.setattr(boosted, "ifft", fake_ifft)
+    monkeypatch.setattr(
+        boosted,
+        "_build_kernel_realspace_distributed",
+        lambda *_args, **_kwargs: FakeComplex(kernel_data),
+    )
+    monkeypatch.setattr(boosted, "_get_xp_from_array", lambda _data: np)
+    monkeypatch.setattr(boosted, "mpi_timer_print", lambda *_args, **_kwargs: None)
+
+    result = boosted.boosted_smearing(source, w=9.0, boost=[0, 0, 0])
+
+    assert result is source
+    assert [name for name, _field in calls] == ["fft", "fft", "ifft"]
+    np.testing.assert_allclose(result.data, 2.0)
