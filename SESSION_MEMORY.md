@@ -239,3 +239,8 @@ python tests/run_smoke_tests.py
 - Do not add a persistent device kernel cache without validating SYCL queue and
   MPI-decomposition ownership. The current per-call kernel and batched field
   FFT are bitwise equivalent to the historical column-wise implementation.
+- Before a dpnp field crosses into the NumPy-backed distributed FFT, explicitly
+  wait for its SYCL queue. Keep the synchronization at the source and kernel
+  forward-FFT inputs, after momentum-space multiplication before inverse FFT,
+  and before returning the inverse-FFT result to QUDA. Do not replace these
+  ownership boundaries with an MPI barrier.

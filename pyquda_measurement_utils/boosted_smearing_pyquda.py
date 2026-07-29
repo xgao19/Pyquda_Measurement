@@ -27,6 +27,12 @@ except ImportError:
 from pyquda_comm import getMPIRank, getCoordFromRank
 from pyquda_measurement_utils.tools import _get_xp_from_array, _asarray_on_queue, mpi_timer_print
 
+def _wait_sycl_queue(field):
+    data = getattr(field, "data", field)
+    queue = getattr(data, "sycl_queue", None)
+    if queue is not None:
+        queue.wait()
+
 def _exp_complex(xp, real, imag):
     if xp.__name__ == "torch":
         return xp.exp(real) * (xp.cos(imag) + 1j * xp.sin(imag))
@@ -111,12 +117,14 @@ def _boosted_smearing_field(src, *, w: float, boost: Sequence[float]):
     # ---------------------------------------------------------
     # because U=Identity, so we don't need to do src.lexico() -> einsum -> evenodd()
     # directly do FFT on the full field
+    _wait_sycl_queue(src)
     psi_p = fft(src, fft3d=True, backend="cupy" if xp.__name__=="cupy" else "numpy")
 
     # ---------------------------------------------------------
     # 2. Apply Momentum Space Kernel
     # ---------------------------------------------------------
     K_xyz = _build_kernel_realspace_distributed(xp, latt_info, w, boost)
+    _wait_sycl_queue(K_xyz)
     K_p = fft(K_xyz, fft3d=True, backend="cupy" if xp.__name__=="cupy" else "numpy")
 
     # multiply in momentum space: psi(k) * K(k)
@@ -126,7 +134,9 @@ def _boosted_smearing_field(src, *, w: float, boost: Sequence[float]):
     # ---------------------------------------------------------
     # 3. Inverse FFT (Distributed)
     # ---------------------------------------------------------
+    _wait_sycl_queue(psi_p)
     psi_smeared = ifft(psi_p, fft3d=True, backend="cupy" if xp.__name__=="cupy" else "numpy")
+    _wait_sycl_queue(psi_smeared)
 
     # ---------------------------------------------------------
     # 4. Result

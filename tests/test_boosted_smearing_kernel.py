@@ -17,6 +17,25 @@ class FakeLatticeComplex:
         self.data = None
 
 
+def test_wait_sycl_queue_waits_only_when_queue_is_present():
+    class FakeQueue:
+        def __init__(self):
+            self.wait_count = 0
+
+        def wait(self):
+            self.wait_count += 1
+
+    class FakeData:
+        def __init__(self, queue):
+            self.sycl_queue = queue
+
+    queue = FakeQueue()
+    boosted._wait_sycl_queue(FakeData(queue))
+    boosted._wait_sycl_queue(np.zeros(1))
+
+    assert queue.wait_count == 1
+
+
 def test_exp_complex_matches_numpy_complex_exponential():
     real = np.array([0.0, -1.0, -2.0])
     imag = np.array([0.0, 0.5, -0.25])
@@ -94,17 +113,21 @@ def test_propagator_smearing_batches_all_spin_color_columns(monkeypatch):
     source_data = np.ones((2, 2, 2, 2, 2, 4, 4, 3, 3), dtype=np.complex128)
     kernel_data = np.full((2, 2, 2, 2, 2), 2.0, dtype=np.complex128)
     source = FakePropagator(source_data.copy())
-    calls = []
+    events = []
+
+    def fake_wait(field):
+        events.append(("wait", field))
 
     def fake_fft(field, **kwargs):
-        calls.append(("fft", field))
+        events.append(("fft", field))
         return field
 
     def fake_ifft(field, **kwargs):
-        calls.append(("ifft", field))
+        events.append(("ifft", field))
         return field
 
     monkeypatch.setattr(boosted, "LatticeFermion", type("FakeFermion", (), {}))
+    monkeypatch.setattr(boosted, "_wait_sycl_queue", fake_wait)
     monkeypatch.setattr(boosted, "LatticePropagator", FakePropagator)
     monkeypatch.setattr(boosted, "fft", fake_fft)
     monkeypatch.setattr(boosted, "ifft", fake_ifft)
@@ -119,5 +142,7 @@ def test_propagator_smearing_batches_all_spin_color_columns(monkeypatch):
     result = boosted.boosted_smearing(source, w=9.0, boost=[0, 0, 0])
 
     assert result is source
-    assert [name for name, _field in calls] == ["fft", "fft", "ifft"]
+    assert [name for name, _field in events] == [
+        "wait", "fft", "wait", "fft", "wait", "ifft", "wait"
+    ]
     np.testing.assert_allclose(result.data, 2.0)

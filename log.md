@@ -1288,3 +1288,21 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   reproducibility rather than a smearing change.
 - Focused boosted-smearing and proton-EMT tests both passed with four tests;
   Python 3.12 compileall and diff hygiene also passed.
+
+## 2026-07-29: Synchronize boosted-smearing host and device boundaries
+
+- Added explicit SYCL queue waits before the source and Gaussian-kernel
+  distributed forward FFTs, after momentum-space multiplication before the
+  inverse FFT, and before returning the result to QUDA. The public interface,
+  Gaussian kernel, NumPy FFT backend, physics expressions, HDF5 schema, and
+  production timer output are unchanged.
+- Focused queue-order, boosted-smearing, and proton-EMT tests passed with nine
+  tests on an Aurora compute node.
+- S8T8 direct fermion and propagator smearing was bitwise identical before and
+  after the change on one and four ranks. Tiny S8T8 proton EMT C2 and all C3
+  datasets and attributes were also bitwise identical on both layouts.
+- A 64-rank, eight-node l64 config-1242 run completed dt6, dt8, dt10, and dt12.
+  C2, all C3 datasets, and HDF5 attributes were bitwise identical to the
+  existing production baseline; all numerical data were finite and Tmunu
+  symmetry maxabs was zero. Validation artifacts are under
+  run/test_gauge/EMT_proton/validation_boosted_sync_20260729_183942.
