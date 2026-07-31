@@ -277,6 +277,7 @@ class ProtonQuarkEMT(FlowedFermionBilinearKernel):
                 interpolator=interpolator,
                 attrs=c2_attrs,
             )
+            self._cleanup_source_objects(prop_fw)
 
             qext_xyz = [[q[0], q[1], q[2]] for q in self.qlist]
             phases_3pt = phase.MomentumPhase(latt_info).getPhases(qext_xyz, src_pos)
@@ -314,7 +315,7 @@ class ProtonQuarkEMT(FlowedFermionBilinearKernel):
                     inversion_t0 = perf_counter()
                     raw_seq_bw = create_bw_seq_raw_pyquda(
                         dirac,
-                        prop_fw.copy(),
+                        prop_fw,
                         src_pos,
                         self.width if self.CG_GaussSmear else None,
                         self.boost_out if self.CG_GaussSmear else None,

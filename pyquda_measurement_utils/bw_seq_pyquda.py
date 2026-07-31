@@ -36,6 +36,15 @@ PolProjections = {
     "PpUnpol": Pp,  
 }
 
+
+def _wait_sycl_queue(field):
+    """Wait for a field's SYCL queue when one is available."""
+    data = getattr(field, "data", field)
+    queue = getattr(data, "sycl_queue", None)
+    if queue is not None:
+        queue.wait()
+
+
 def _iter_bw_seq_raw(dirac, prop: LatticePropagator, origin, sm_width, sm_boost, momentum, t_sep, pol_list, flavor, interpolator="5"):
     if interpolator == "5":
         gamma_insert = Cg5
@@ -204,11 +213,9 @@ def down_quark_insertion_pyquda(Q: LatticePropagator, Gamma, P):
     P_mat = to_backend_matrix(P)
     Gt_mat = G_mat.T 
 
-    # --- 3. Precompute spin space matrix operations ---
+    # --- 3. Build and consume spin intermediates term by term ---
     PDu = xp.einsum('ij, ...jiab -> ...ab', P_mat, flat_Q)
     GtDG = xp.einsum('ij, ...jkab, kl -> ...ilab', Gt_mat, flat_Q, G_mat)
-    GtD = xp.einsum('ij, ...jkab -> ...ikab', Gt_mat, flat_Q)
-    PDG = xp.einsum('ij, ...jkab, kl -> ...ilab', P_mat, flat_Q, G_mat)
 
     # --- 4. Color tensor contraction ---
     # CRITICAL FIX: Create eps on Host first, then move to specific Queue
@@ -221,12 +228,21 @@ def down_quark_insertion_pyquda(Q: LatticePropagator, Gamma, P):
 
     # Term 1
     term1 = xp.einsum('abc, def, ...fc, ...uveb -> ...uvad', eps, eps, PDu, GtDG)
+    _wait_sycl_queue(term1)
+    del PDu, GtDG
 
     # Term 2
+    GtD = xp.einsum('ij, ...jkab -> ...ikab', Gt_mat, flat_Q)
+    PDG = xp.einsum('ij, ...jkab, kl -> ...ilab', P_mat, flat_Q, G_mat)
     term2 = xp.einsum('abc, def, ...ujec, ...jkfb -> ...ukad', eps, eps, GtD, PDG)
+    _wait_sycl_queue(term2)
+    del GtD, PDG
 
     # Combine
-    D_flat = term2 - term1
+    term2 -= term1
+    _wait_sycl_queue(term2)
+    del term1
+    D_flat = term2
 
     # --- 5. Post-processing ---
     D_transposed = xp.swapaxes(D_flat, -4, -3)
@@ -262,11 +278,8 @@ def up_quark_insertion_pyquda(Qu: LatticePropagator, Qd: LatticePropagator, Gamm
     P_mat = to_backend_matrix(P)
     Gt_mat = G_mat.T
 
-    # --- 3. Precompute intermediate terms ---
+    # --- 3. Keep only the shared down-quark spin contraction resident ---
     GtDG = xp.einsum('ij, ...jkab, kl -> ...ilab', Gt_mat, Qd_flat, G_mat)
-    PDu = xp.einsum('ij, ...jkab -> ...ikab', P_mat, Qu_flat)
-    DuP = xp.einsum('...jkab, kl -> ...jlab', Qu_flat, P_mat)
-    TrDuP = xp.einsum('...kjab, jk -> ...ab', Qu_flat, P_mat)
 
     # --- 4. Epsilon contraction ---
     # CRITICAL FIX: Create eps on Host, then move to Queue
@@ -280,19 +293,34 @@ def up_quark_insertion_pyquda(Qu: LatticePropagator, Qd: LatticePropagator, Gamm
     # Term 1
     T1_scalar = xp.einsum('...mnbe, ...mnad -> ...bead', GtDG, Qu_flat)
     R1_pre = xp.einsum('abc, def, ...bead -> ...cf', eps, eps, T1_scalar)
-    R1 = xp.einsum('ij, ...cf -> ...ijcf', P_mat, R1_pre)
+    D_total = xp.einsum('ij, ...cf -> ...ijcf', P_mat, R1_pre)
+    _wait_sycl_queue(D_total)
+    del T1_scalar, R1_pre
 
     # Term 2
-    R2 = xp.einsum('abc, def, ...ad, ...jibe -> ...ijcf', eps, eps, TrDuP, GtDG)
+    TrDuP = xp.einsum('...kjab, jk -> ...ab', Qu_flat, P_mat)
+    term = xp.einsum('abc, def, ...ad, ...jibe -> ...ijcf', eps, eps, TrDuP, GtDG)
+    D_total += term
+    _wait_sycl_queue(D_total)
+    del term, TrDuP
 
     # Term 3
-    R3 = xp.einsum('abc, def, ...ikad, ...jkbe -> ...ijcf', eps, eps, PDu, GtDG)
+    PDu = xp.einsum('ij, ...jkab -> ...ikab', P_mat, Qu_flat)
+    term = xp.einsum('abc, def, ...ikad, ...jkbe -> ...ijcf', eps, eps, PDu, GtDG)
+    D_total += term
+    _wait_sycl_queue(D_total)
+    del term, PDu
 
     # Term 4
-    R4 = xp.einsum('abc, def, ...kiad, ...klbe -> ...ilcf', eps, eps, GtDG, DuP)
+    DuP = xp.einsum('...jkab, kl -> ...jlab', Qu_flat, P_mat)
+    term = xp.einsum('abc, def, ...kiad, ...klbe -> ...ilcf', eps, eps, GtDG, DuP)
+    D_total += term
+    _wait_sycl_queue(D_total)
+    del term, DuP, GtDG
 
     # Total Sum
-    D_total = -1 * (R1 + R2 + R3 + R4)
+    D_total *= -1
+    _wait_sycl_queue(D_total)
 
     # --- 5. Post-processing ---
     D_final = xp.swapaxes(D_total, -1, -2)

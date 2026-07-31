@@ -1306,3 +1306,21 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   existing production baseline; all numerical data were finite and Tmunu
   symmetry maxabs was zero. Validation artifacts are under
   run/test_gauge/EMT_proton/validation_boosted_sync_20260729_183942.
+## 2026-07-31: Stream proton sequential insertion scratch memory
+
+- Added a backend-safe SYCL queue wait helper and changed proton U/D insertion
+  contractions to construct spin/color intermediates on demand.
+- Preserved the U contraction's original `-(((R1+R2)+R3)+R4)` operation order
+  and D's `term2-term1` order while accumulating in place and releasing each
+  completed intermediate.
+- Removed the read-only full-propagator copy at the raw sequential-builder call
+  and added a queue/garbage-collection boundary after the C2 contraction.
+- Added NumPy reference tests for both original Wick formulas and the queue
+  helper. Focused proton tests passed with seven tests under PALS.
+- S8T8 direct U/D outputs and tiny proton EMT C2/C3 outputs were bitwise
+  identical before and after the change on one and four ranks.
+- A 64-rank, eight-node l64 config-1242 regression completed dt6, dt8, dt10,
+  and dt12 without `USMAllocationError`, traceback, or QUDA fatal errors.
+  Every C2/C3 dataset and HDF5 attribute was bitwise identical to the
+  pre-change baseline. Validation artifacts are under
+  `run/test_gauge/EMT_proton/validation_seq_usm_20260731_190524`.

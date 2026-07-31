@@ -244,3 +244,18 @@ python tests/run_smoke_tests.py
   forward-FFT inputs, after momentum-space multiplication before inverse FFT,
   and before returning the inverse-FFT result to QUDA. Do not replace these
   ownership boundaries with an MPI barrier.
+## Proton Sequential USM Memory
+
+- Keep the proton U insertion in the exact left-associative order
+  `-(((R1 + R2) + R3) + R4)`, but construct each Wick term only when needed,
+  accumulate it in place, wait for the owning SYCL queue, and release it before
+  constructing the next term.
+- Keep the D insertion as `term2 - term1`; release the first term's spin
+  intermediates before constructing the second term, then subtract in place.
+- The raw proton sequential builder treats the forward propagator as read-only.
+  Do not copy the full propagator at that call site. After C2, wait for the
+  visible queue and collect garbage before entering sequential construction.
+- The streamed implementation is bitwise identical to the original formulas on
+  S8T8 with one and four ranks. A 64-rank l64 config-1242 run completed all
+  U/D insertions for dt6, dt8, dt10, and dt12 without a USM allocation error;
+  every C2/C3 dataset and attribute matched the pre-change baseline exactly.
