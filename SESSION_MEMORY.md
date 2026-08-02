@@ -291,3 +291,10 @@ python tests/run_smoke_tests.py
 
 - The repo-local `skills/` library has been retired. Keep Aurora installation
   and runtime guidance in the maintained system and application documentation.
+- `_advance_flowed_props` accepts optional `substeps_per_interval=1`. The first
+  flow interval retains its historical ten substeps; later intervals use the
+  requested subdivision and divide the interval step size by the same value.
+  Callers that omit the argument retain the historical behavior exactly.
+- Do not modify `Pyquda_Measurement` while testing external l80 workflows unless
+  the user explicitly authorizes repository changes. Treat this repository as
+  read-only for such testing by default.

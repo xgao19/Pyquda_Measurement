@@ -1380,3 +1380,15 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Removed the unused `skills/aurora-pyquda-qcd` skill definition, agent metadata,
   and reference document.
 - Confirmed that no active repository file referenced the deleted skill paths.
+
+
+## 2026-08-02: Add optional fermion-flow interval subdivision
+
+- Added the optional `substeps_per_interval=1` argument to the shared fermion
+  flow advance helper.
+- Kept the historical ten-substep first interval unchanged. Later intervals now
+  use `substeps_per_interval` integration steps with the interval step size
+  divided by that value.
+- Existing callers omit the new argument and therefore retain the original
+  numerical behavior.
+- Recorded that future external workflow testing must treat this repository as

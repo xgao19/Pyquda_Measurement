@@ -212,7 +212,7 @@ class FlowedFermionBilinearKernel:
         return prop_a_flow, prop_b_flow
 
     def _advance_flowed_props(
-        self, gauge, prop_a, prop_b, step, stepsize, nsteps
+        self, gauge, prop_a, prop_b, step, stepsize, nsteps, substeps_per_interval=1
     ):
         if nsteps > 0 and step == 0:
             return self._flow_two_props_pyquda(
@@ -228,8 +228,8 @@ class FlowedFermionBilinearKernel:
                 gauge,
                 prop_a,
                 prop_b,
-                stepsize,
-                nsteps=1,
+                stepsize / substeps_per_interval,
+                nsteps=substeps_per_interval,
                 flow_type=self.flow_type,
             )
         return prop_a, prop_b
