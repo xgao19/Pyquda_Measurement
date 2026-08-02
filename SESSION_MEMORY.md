@@ -285,3 +285,9 @@ python tests/run_smoke_tests.py
 - The l64 production migration renamed directories, shards, sample logs, and
   preprocessing products in place. Sample-log fingerprints and base entries
   remain unchanged, so completed bases resume under the new canonical name.
+
+
+## Repository Guidance
+
+- The repo-local `skills/` library has been retired. Keep Aurora installation
+  and runtime guidance in the maintained system and application documentation.

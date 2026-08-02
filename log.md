@@ -1373,3 +1373,10 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Python compilation, exact helper output, application call-chain checks, active-name
   scans, and diff hygiene passed. Focused pytest exited with status 15 before
   collection because PyQUDA cannot initialize Aurora MPI from the login shell.
+
+
+## 2026-08-02: Remove the repo-local skill library
+
+- Removed the unused `skills/aurora-pyquda-qcd` skill definition, agent metadata,
+  and reference document.
+- Confirmed that no active repository file referenced the deleted skill paths.

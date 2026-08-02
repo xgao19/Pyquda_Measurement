@@ -1,4 +1,0 @@
-interface:
-  display_name: "Aurora PyQUDA QCD"
-  short_description: "Run PyQUDA QCD workflows on Aurora"
-  default_prompt: "Use $aurora-pyquda-qcd to set up and validate a PyQUDA measurement workflow on Aurora."
