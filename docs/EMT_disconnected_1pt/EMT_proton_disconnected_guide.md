@@ -215,7 +215,7 @@ bash run_gluon_1pt.sh --config_num 1000
 Expected gluon output:
 
 ```text
-data/EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5
+data/EMTgluonLoop/<lat>.EMTgluonLoop.<cfg>.<ama>.<sm>.h5
 Tmunu/T11 ... T44
 ```
 

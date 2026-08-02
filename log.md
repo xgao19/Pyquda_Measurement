@@ -1360,3 +1360,16 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Python and shell syntax checks, exact helper output, HDF5 readability probes,
   diff hygiene, and active-name scans passed. Focused pytest cannot initialize
   Aurora MPI from a login shell and exited with status 15 before collection.
+
+
+## 2026-08-02: Rename gluon EMT outputs to EMTgluonLoop
+
+- Changed the public gluon-loop tag helper, schema fixtures, and current
+  documentation from `EMTg` to the explicit `EMTgluonLoop` measurement name.
+- Kept `get_emt_gluon_loop_file_tag`, `EMT_1PT_GLUON_OUT`, HDF5 datasets,
+  attributes, flow behavior, and setup-tag semantics unchanged.
+- This is a hard naming switch without an old-path fallback. No production data
+  or sample logs existed, so no filesystem migration was needed.
+- Python compilation, exact helper output, application call-chain checks, active-name
+  scans, and diff hygiene passed. Focused pytest exited with status 15 before
+  collection because PyQUDA cannot initialize Aurora MPI from the login shell.

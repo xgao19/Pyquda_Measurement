@@ -130,7 +130,7 @@ python tests/run_smoke_tests.py
 - Disconnected shards and canonical files persist only base-noise and HP
   indices; reconstruct the effective source index as `base * N_HP + hp`.
 - Gluon EMT loops are also source independent and use
-  `EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5`.  Quark and gluon wrappers must share
+  `EMTgluonLoop/<lat>.EMTgluonLoop.<cfg>.<ama>.<sm>.h5`.  Quark and gluon wrappers must share
   the same flow grid; the production epsilon default is `0.207936`.
 - Fermion flow is four dimensional.  With `xi_f=K(t_f)xi` and
   `eta_f=K(t_f)D^{-1}xi`, a fixed-time loop estimates

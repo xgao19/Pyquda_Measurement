@@ -181,7 +181,7 @@ def _emt_site_tag(src):
 
 # Build the canonical source-independent gluon EMT loop output tag.
 def get_emt_gluon_loop_file_tag(data_dir, lat, cfg, ama, sm):
-    return str(Path(data_dir) / "EMTg" / (str(lat) + ".EMTg." + str(cfg) + "." + str(ama) + "." + str(sm)))
+    return str(Path(data_dir) / "EMTgluonLoop" / (str(lat) + ".EMTgluonLoop." + str(cfg) + "." + str(ama) + "." + str(sm)))
 
 
 # Build the canonical source-independent quark EMT loop output tag.

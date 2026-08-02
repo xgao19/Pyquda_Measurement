@@ -77,7 +77,7 @@ def test_soft_factor_tag_helpers_preserve_forward_backward_momenta():
 def test_emt_tag_helpers_preserve_measurement_kind():
     src = [1, 0, 2, 3]
 
-    assert get_emt_gluon_loop_file_tag("/data", "lat", 9, "G", "sm") == "/data/EMTg/lat.EMTg.9.G.sm"
+    assert get_emt_gluon_loop_file_tag("/data", "lat", 9, "G", "sm") == "/data/EMTgluonLoop/lat.EMTgluonLoop.9.G.sm"
     assert get_emt_quark_loop_file_tag("/data", "lat", 9, "Q", "sm") == "/data/EMTquarkLoop/lat.EMTquarkLoop.9.Q.sm"
     assert get_emt_meson_2pt_file_tag(
         "/data", "lat", 9, "Q", src, "sm", "5"

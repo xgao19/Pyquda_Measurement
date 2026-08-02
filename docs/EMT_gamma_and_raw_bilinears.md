@@ -346,5 +346,5 @@ times was 358,028 bytes: derivative 61.78%, local 15.44%, derived `C3_Tmunu`
 15.44%, `C3_chi` 0.97%, basis datasets 2.29%, and HDF5 metadata/overhead 4.08%.
 For larger production files, the ratios approach `64:16:16:1`.
 
-A gluon EMTg file has ten equal-shape upper-triangle `Tmunu/Tij` datasets, so
+An EMTgluonLoop file has ten equal-shape upper-triangle `Tmunu/Tij` datasets, so
 each component is 10% of its scientific array payload.

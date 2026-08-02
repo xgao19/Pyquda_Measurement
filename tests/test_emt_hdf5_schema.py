@@ -36,7 +36,7 @@ def test_pion_connected_serial_writer_is_root_only(monkeypatch):
 
 
 def test_emt_gluon_1pt_hdf5_schema_and_upper_triangle(tmp_path):
-    tag = str(tmp_path / "EMTgluon1pt" / "schema")
+    tag = str(tmp_path / "EMTgluonLoop" / "schema")
     tmunu_t = np.arange(4 * 4 * 5, dtype=np.float64).reshape(4, 4, 5)
 
     attrs = {
