@@ -152,8 +152,8 @@ def test_shard_writer_saves_mean_and_optional_raw(tmp_path):
 
 
 def test_raw_finalizer_rejects_mean_only_shards(tmp_path):
-    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.mean")
-    shard_dir = tmp_path / "EMTc" / "shards"
+    tag = str(tmp_path / "EMTquarkLoop" / "lat.EMTquarkLoop.9.0.mean")
+    shard_dir = tmp_path / "EMTquarkLoop" / "shards"
     path = shard_part_path(shard_dir, tag, 0, 0, 0, 1)
     attrs = shard_part_attrs(_common_attrs(1), 0, 0, 0, 1, 1)
     attrs.update({
@@ -206,8 +206,8 @@ def _write_synthetic_base(shard_dir, tag, base_idx, configured_n_vec):
 
 
 def test_emt_finalize_streams_shards_and_embeds_ringed_kinetic(tmp_path):
-    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
-    shard_dir = tmp_path / "EMTc" / "shards"
+    tag = str(tmp_path / "EMTquarkLoop" / "lat.EMTquarkLoop.9.0.sm")
+    shard_dir = tmp_path / "EMTquarkLoop" / "shards"
     _write_synthetic_base(shard_dir, tag, 0, configured_n_vec=1)
     _write_synthetic_base(shard_dir, tag, 1, configured_n_vec=2)
 
@@ -244,8 +244,8 @@ def test_emt_finalize_streams_shards_and_embeds_ringed_kinetic(tmp_path):
 
 
 def test_raw_finalizer_accepts_shards_with_additional_means(tmp_path):
-    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.raw_mean")
-    shard_dir = tmp_path / "EMTc" / "shards"
+    tag = str(tmp_path / "EMTquarkLoop" / "lat.EMTquarkLoop.9.0.raw_mean")
+    shard_dir = tmp_path / "EMTquarkLoop" / "shards"
     _write_synthetic_base(shard_dir, tag, 0, configured_n_vec=1)
     for path in sorted(shard_dir.glob("*.h5")):
         with h5py.File(path, "r+") as h5:
@@ -266,11 +266,11 @@ def test_raw_finalizer_accepts_shards_with_additional_means(tmp_path):
 
 
 def test_finalize_rejects_partial_base_and_preserves_old_canonical(tmp_path):
-    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
+    tag = str(tmp_path / "EMTquarkLoop" / "lat.EMTquarkLoop.9.0.sm")
     Path(tag).parent.mkdir(parents=True)
     with h5py.File(tag + ".h5", "w") as h5:
         h5.attrs["sentinel"] = "old"
-    shard_dir = tmp_path / "EMTc" / "shards"
+    shard_dir = tmp_path / "EMTquarkLoop" / "shards"
     _write_synthetic_base(shard_dir, tag, 0, configured_n_vec=2)
 
     with pytest.raises(ValueError, match="filename coverage mismatch"):
@@ -281,8 +281,8 @@ def test_finalize_rejects_partial_base_and_preserves_old_canonical(tmp_path):
 
 
 def test_finalizer_rejects_obsolete_persisted_source_index(tmp_path):
-    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
-    shard_dir = tmp_path / "EMTc" / "shards"
+    tag = str(tmp_path / "EMTquarkLoop" / "lat.EMTquarkLoop.9.0.sm")
+    shard_dir = tmp_path / "EMTquarkLoop" / "shards"
     _write_synthetic_base(shard_dir, tag, 0, configured_n_vec=1)
     first = shard_part_path(shard_dir, tag, 0, 0, 0, 1)
     with h5py.File(first, "r+") as h5:
@@ -292,8 +292,8 @@ def test_finalizer_rejects_obsolete_persisted_source_index(tmp_path):
 
 
 def test_emt_finalizer_rejects_one_sided_schema_v4_and_preserves_canonical(tmp_path):
-    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
-    shard_dir = tmp_path / "EMTc" / "shards"
+    tag = str(tmp_path / "EMTquarkLoop" / "lat.EMTquarkLoop.9.0.sm")
+    shard_dir = tmp_path / "EMTquarkLoop" / "shards"
     _write_synthetic_base(shard_dir, tag, 0, configured_n_vec=1)
     first = shard_part_path(shard_dir, tag, 0, 0, 0, 1)
     with h5py.File(first, "r+") as h5:
@@ -308,11 +308,11 @@ def test_emt_finalizer_rejects_one_sided_schema_v4_and_preserves_canonical(tmp_p
 
 
 def test_emt_finalizer_rejects_old_tmunu_only_shard_schema(tmp_path):
-    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
+    tag = str(tmp_path / "EMTquarkLoop" / "lat.EMTquarkLoop.9.0.sm")
     Path(tag).parent.mkdir(parents=True)
     with h5py.File(tag + ".h5", "w") as h5:
         h5.attrs["sentinel"] = "old"
-    shard_dir = tmp_path / "EMTc" / "shards"
+    shard_dir = tmp_path / "EMTquarkLoop" / "shards"
     path = shard_part_path(shard_dir, tag, 0, 0, 0, 1)
     attrs = shard_part_attrs(_common_attrs(1), 0, 0, 0, 1, 1)
     write_raw_part_hdf5(
@@ -373,7 +373,7 @@ def _write_synthetic_qtmd_base(shard_dir, tag, base_idx, legacy=False):
 
 
 def test_sample_log_is_exact_hdf5_independent_and_nvec_extensible(tmp_path):
-    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
+    tag = str(tmp_path / "EMTquarkLoop" / "lat.EMTquarkLoop.9.0.sm")
     log = tmp_path / "sample.log"
     attrs_one = _common_attrs(1)
     attrs_many = _common_attrs(128)
@@ -391,7 +391,7 @@ def test_sample_log_is_exact_hdf5_independent_and_nvec_extensible(tmp_path):
 
 
 def test_sample_log_header_mismatch_fails_without_hdf5_probe(tmp_path):
-    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
+    tag = str(tmp_path / "EMTquarkLoop" / "lat.EMTquarkLoop.9.0.sm")
     log = tmp_path / "sample.log"
     attrs = _common_attrs(1)
     prepare_sample_log(log, tag, attrs)
@@ -404,7 +404,7 @@ def test_sample_log_header_mismatch_fails_without_hdf5_probe(tmp_path):
 def test_sample_log_falls_back_to_posix_lock_when_flock_is_unsupported(
     tmp_path, monkeypatch
 ):
-    tag = str(tmp_path / "EMTc" / "lat.EMTc.9.0.sm")
+    tag = str(tmp_path / "EMTquarkLoop" / "lat.EMTquarkLoop.9.0.sm")
     log = tmp_path / "sample.log"
     attrs = _common_attrs(1)
     original_lockf = shard_module.fcntl.lockf

@@ -1324,3 +1324,39 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   Every C2/C3 dataset and HDF5 attribute was bitwise identical to the
   pre-change baseline. Validation artifacts are under
   `run/test_gauge/EMT_proton/validation_seq_usm_20260731_190524`.
+
+## 2026-08-01: Refresh lattice data preprocessing workflows
+
+- Renamed the local nested preprocessing repository directory from
+  `Lat_Data_stripping` to `Lat_Data_Preprocessing`; the remote repository name
+  remains unchanged pending a GitHub settings update.
+- Replaced the old connected proton EMT stripping scripts with independent,
+  sample-log-driven 2pt and 3pt source-average/configuration-merge tools that
+  use exact file templates and preserve the current primitive EMT schema.
+- Added concise repository navigation plus detailed workflow documentation for
+  `EMT_proton/connected_UD`, `pion_EMFF`, and `pion_qTMDWF_CG`. Updated active
+  qTMDWF documentation and skill paths without touching `legacy`.
+- Verified the copied EMT programs against the validated production versions;
+  shell syntax, Python compilation, exact path reconstruction for the first
+  200 configurations, and no-glob input discovery checks passed.
+
+
+## 2026-08-02: Rename disconnected quark EMT outputs to EMTquarkLoop
+
+- Changed the public quark-loop tag helper, official disconnected application,
+  analysis helpers, tests, and current documentation from `EMTc` to the more
+  explicit `EMTquarkLoop` measurement name. This is a hard naming switch with
+  no fallback reader for the retired path.
+- Standardized shard storage under `EMTquarkLoop/shards` and kept planned base
+  count out of setup tags. Base and part indices remain in shard filenames and
+  HDF5 bookkeeping.
+- Synchronized the active l64 production and lattice-data preprocessing
+  workflows. Migrated 12,800 production shards, 200 sample logs, 200
+  configuration averages, and two merged files by same-filesystem rename;
+  shard inode and size checks confirmed that HDF5 payloads were not rewritten.
+- Updated sample-log canonical headers atomically while preserving fingerprints
+  and all 3,200 completed-base entries. The migrated production missed-base
+  dry run over configurations 1--200 reported zero missing bases.
+- Python and shell syntax checks, exact helper output, HDF5 readability probes,
+  diff hygiene, and active-name scans passed. Focused pytest cannot initialize
+  Aurora MPI from a login shell and exited with status 15 before collection.

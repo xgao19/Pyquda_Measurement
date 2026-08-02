@@ -187,7 +187,7 @@ difference has zero expectation but nonzero variance. An actual S8T8 test with
 difference of `0.981` SEM for solved fields at tolerance `1e-15`; one-rank and
 four-rank means agreed at relative L2 approximately `2.0e-16`.
 
-The canonical EMTc primitive axes are
+The canonical EMTquarkLoop primitive axes are
 
 ```text
 raw/local_bilinear_pervec      [source,gamma,q,flow,t_abs]
@@ -215,7 +215,7 @@ and checks the stored \(T_{44}\):
 import h5py
 import numpy as np
 
-with h5py.File("example.EMTc.h5", "r") as h5:
+with h5py.File("example.EMTquarkLoop.h5", "r") as h5:
     labels = [x.decode() for x in h5["gamma_list"][...]]
     vector = [labels.index(x) for x in ("X", "Y", "Z", "T")]
     d_avg = h5["avg/derivative_bilinear"][...]
@@ -229,7 +229,7 @@ For stochastic errors, do not load a large production source axis at once.
 Stream blocks and apply the spatial-volume normalization only after summing:
 
 ```python
-with h5py.File("example.EMTc.h5", "r") as h5:
+with h5py.File("example.EMTquarkLoop.h5", "r") as h5:
     raw = h5["raw/derivative_bilinear_pervec"]
     labels = [x.decode() for x in h5["gamma_list"][...]]
     vector = [labels.index(x) for x in ("X", "Y", "Z", "T")]
@@ -255,7 +255,7 @@ def physical_gamma_axis(values, transform, gamma_axis):
     result = np.tensordot(transform, moved, axes=(1, 0))
     return np.moveaxis(result, 0, gamma_axis)
 
-with h5py.File("example.EMTc.h5", "r") as h5:
+with h5py.File("example.EMTquarkLoop.h5", "r") as h5:
     local_phys = physical_gamma_axis(
         h5["avg/local_bilinear"][...],
         h5["physical_from_pyquda"][...],
@@ -309,7 +309,7 @@ reconstruction.
 No EMT datasets are compressed.  Therefore element counts give the large-file
 storage ratios directly, while HDF5 metadata matters only for small test files.
 
-For a disconnected EMTc with large `N_eff`, the source-scaling payload is
+For a disconnected EMTquarkLoop with large `N_eff`, the source-scaling payload is
 
 ```text
 derivative primitive : local primitive : flowed-noise norm

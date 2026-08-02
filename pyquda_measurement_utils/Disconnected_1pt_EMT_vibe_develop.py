@@ -954,7 +954,7 @@ def _copy_h5_attrs(obj, attrs):
 
 
 def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
-    """Validate complete EMT base shards and atomically build one EMTc output."""
+    """Validate complete EMT base shards and atomically build one EMTquarkLoop output."""
     n_base_noise = int(n_base_noise)
     manifest = discover_shard_layout(
         shard_dir, canonical_tag, n_base_noise,

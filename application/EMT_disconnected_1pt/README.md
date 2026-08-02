@@ -5,7 +5,7 @@ one-point functions used in disconnected energy-momentum-tensor calculations.
 The primary numerical question is how quickly pure stochastic noise, 4D HP16,
 and 4D HP256 converge at the same Dirac-solve cost.
 
-Two observables from the same canonical `EMTc` file are used for the comparison:
+Two observables from the same canonical `EMTquarkLoop` file are used for the comparison:
 
 ```text
 the embedded ringed-fermion kinetic estimator K
@@ -48,7 +48,7 @@ docs/EMT_disconnected_1pt/EMT_proton_disconnected_guide.md
 docs/flowed_quark_ringed_norm/flowed_quark_ringed_norm.md
   Describes the dedicated standalone ringed-normalization workflow. That
   workflow remains useful for high-statistics kinetic measurements, but it is
-  not required here because EMTc already contains the kinetic estimator.
+  not required here because EMTquarkLoop already contains the kinetic estimator.
 ```
 
 ## Relation to the Standalone Ringed-Norm Exercise
@@ -105,7 +105,7 @@ The practical differences are summarized below.
 | contraction per flow time | four vector-diagonal derivative terms summed directly | 16 local plus `16x4` derivative channels; `Tmunu` and `K` are derived from them |
 | inversion, flow, and derivative count | one inversion and one common flow per source; four derivative directions | the same counts per source; extra work is Gamma contraction, momentum projection, and I/O |
 | spin-color dilution | not used | not used |
-| canonical output | kinetic-only `FlowedQuarkRinged` file | full primitive `EMTc` file with averaged `Tmunu` and `derived/ringed` kinetic data |
+| canonical output | kinetic-only `FlowedQuarkRinged` file | full primitive `EMTquarkLoop` file with averaged `Tmunu` and `derived/ringed` kinetic data |
 | typical use | dedicated high-statistics normalization study | reuse one quark loop for several hadron source times and study EMT or other bilinears |
 
 The EMT file is therefore much larger. Its 64 derivative channels dominate
@@ -161,7 +161,7 @@ The benchmark usually examines Euclidean `T44`, often called `T00` after the
 appropriate Euclidean-to-Minkowski interpretation. All stored primitives and
 derived EMT components are bare, unringed, and unrenormalized.
 
-The same EMTc file also contains the ringed-fermion kinetic estimator
+The same EMTquarkLoop file also contains the ringed-fermion kinetic estimator
 
 ```text
 K_r(t_f,tau) = -2 / Vs * sum_mu
@@ -423,7 +423,7 @@ canonical file. Mean-only shards intentionally fail with a clear unsupported
 payload error in the current release:
 
 ```text
-EMTc/<lat>.EMTc.<cfg>.<ama>.<setup-tag>.h5
+EMTquarkLoop/<lat>.EMTquarkLoop.<cfg>.<ama>.<setup-tag>.h5
 ```
 
 Missing parts, incomplete HP intervals, mixed parameters, or an incompatible
@@ -550,11 +550,11 @@ counter-noise identity and is never inferred from an environment variable.
 Expected production files are:
 
 ```text
-$DATA/EMTc/shards/
-  S8T8.EMTc.0.0.smoke_hp2.base000000.part0000.hp0000-0001.h5
+$DATA/EMTquarkLoop/shards/
+  S8T8.EMTquarkLoop.0.0.smoke_hp2.base000000.part0000.hp0000-0001.h5
 
 $DATA/sample_log_disconnected/
-  S8T8.EMTc.0.0.smoke_hp2.log
+  S8T8.EMTquarkLoop.0.0.smoke_hp2.log
 ```
 
 The log should contain `base000000`. Running the same command again should skip
@@ -574,13 +574,13 @@ bash "$APP/run_finalize_quark_1pt.sh" --config_num 0
 Expected canonical output:
 
 ```text
-$DATA/EMTc/S8T8.EMTc.0.0.smoke_hp2.h5
+$DATA/EMTquarkLoop/S8T8.EMTquarkLoop.0.0.smoke_hp2.h5
 ```
 
 Inspect the main metadata and bookkeeping:
 
 ```bash
-H5="$DATA/EMTc/S8T8.EMTc.0.0.smoke_hp2.h5"
+H5="$DATA/EMTquarkLoop/S8T8.EMTquarkLoop.0.0.smoke_hp2.h5"
 PY=${PYTHON:-python3}
 
 "$PY" - "$H5" <<'PY'
@@ -743,7 +743,7 @@ For the 2048-solve case, use the corresponding base counts instead.
 
 ## Convergence Analysis
 
-The analysis helper reads finalized EMTc files and groups all HP vectors of one
+The analysis helper reads finalized EMTquarkLoop files and groups all HP vectors of one
 randomized base before computing cumulative statistics. It reads only the one
 or two vector-derivative channels needed for the selected symmetric `Tmunu`;
 it does not load the full 16x4 primitive into memory.
@@ -754,9 +754,9 @@ Run:
 PY=${PYTHON:-python3}
 
 "$PY" "$ROOT/application/analysis_helper/emt_quark_1pt_convergence.py" \
-  --input pure="$DATA/EMTc/S8T8.EMTc.0.0.benchmark_pure.h5" \
-  --input HP16="$DATA/EMTc/S8T8.EMTc.0.0.benchmark_hp16.h5" \
-  --input HP256="$DATA/EMTc/S8T8.EMTc.0.0.benchmark_hp256.h5" \
+  --input pure="$DATA/EMTquarkLoop/S8T8.EMTquarkLoop.0.0.benchmark_pure.h5" \
+  --input HP16="$DATA/EMTquarkLoop/S8T8.EMTquarkLoop.0.0.benchmark_hp16.h5" \
+  --input HP256="$DATA/EMTquarkLoop/S8T8.EMTquarkLoop.0.0.benchmark_hp256.h5" \
   --flow_index 1 \
   --component T44 \
   --output_dir "$WORK/analysis"
@@ -952,7 +952,7 @@ axis and form complete base averages first.
 ## Optional Proton C2 and Quark Disconnected C3
 
 The canonical quark loop is independent of the hadron source position and
-source time. One full-time EMTc file can therefore be reused for several C2
+source time. One full-time EMTquarkLoop file can therefore be reused for several C2
 sources on the same gauge configuration.
 
 Produce one proton C2 with the same gauge and momentum setup:
@@ -981,7 +981,7 @@ bash "$APP/run_build_disconnected_3pt.sh" --configs 0 \
   --t_separations 2
 ```
 
-EMTc stores loops at absolute lattice time. Before forming the product, the
+EMTquarkLoop stores loops at absolute lattice time. Before forming the product, the
 builder reads the full source position from the C2 file and converts both the
 spatial Fourier origin and time coordinate:
 
@@ -1015,7 +1015,7 @@ C3_disc = <C2 L>_cfg - <C2>_cfg <L>_cfg.
 ```
 
 Run the builder with an explicit configuration list after producing matching
-C2 and EMTc files for every configuration:
+C2 and EMTquarkLoop files for every configuration:
 
 ```bash
 bash "$APP/run_build_disconnected_3pt.sh" --configs 100,102,104
@@ -1050,7 +1050,7 @@ Pyquda_EMT_disconnected_quark_1pt.py
 
 run_finalize_quark_1pt.sh
 Pyquda_EMT_disconnected_finalize_quark_1pt.py
-  Stream shards into one canonical EMTc file.
+  Stream shards into one canonical EMTquarkLoop file.
 
 run_proton_2pt.sh
 Pyquda_EMT_disconnected_proton_2pt.py
@@ -1065,7 +1065,7 @@ Shared production implementation:
 
 ```text
 pyquda_measurement_utils/Disconnected_1pt_EMT_vibe_develop.py
-  Flowed quark contraction, shard production, and EMTc finalizer.
+  Flowed quark contraction, shard production, and EMTquarkLoop finalizer.
 
 pyquda_measurement_utils/Disconnected_utils_vibe_develop.py
   Counter noise, HP sign patterns, base/HP-part paths, atomic shard writes,
@@ -1093,7 +1093,7 @@ shell wrapper
   -> EMTDisconnectedQuark1pt.flowed_fermionic_1pt(...)
   -> atomic base/HP shards + sample log
   -> quark finalizer
-  -> canonical EMTc
+  -> canonical EMTquarkLoop
   -> convergence helper
   -> CSV + PNG/PDF
 ```

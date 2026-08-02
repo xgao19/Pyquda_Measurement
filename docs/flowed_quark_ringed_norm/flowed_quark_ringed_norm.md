@@ -30,7 +30,7 @@ K_r = -2 / Vs * sum_mu L_D[gamma_mu,mu](q=0).
 ```
 
 This equality is both a convention statement and the primary numerical
-cross-check against `EMTc/derived/ringed`.
+cross-check against `EMTquarkLoop/derived/ringed`.
 
 ## Resume and batching
 

@@ -14,7 +14,7 @@ generates reproducible headless comparison plots.  Partial hierarchical-
 probing prefixes are deliberately excluded from its uncertainty estimates.
 
 `emt_quark_1pt_convergence.py` is the focused quark-loop benchmark entry point. It
-accepts any labeled set of finalized EMTc files, reads only the primitive
+accepts any labeled set of finalized EMTquarkLoop files, reads only the primitive
 channels needed for a requested `Tmunu`, and compares that component with the
 embedded ringed kinetic using complete-base cumulative means and SEM.  It can
 be run directly; the guided commands are in

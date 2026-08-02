@@ -186,7 +186,7 @@ def get_emt_gluon_loop_file_tag(data_dir, lat, cfg, ama, sm):
 
 # Build the canonical source-independent quark EMT loop output tag.
 def get_emt_quark_loop_file_tag(data_dir, lat, cfg, ama, sm):
-    return str(Path(data_dir) / "EMTc" / (str(lat) + ".EMTc." + str(cfg) + "." + str(ama) + "." + str(sm)))
+    return str(Path(data_dir) / "EMTquarkLoop" / (str(lat) + ".EMTquarkLoop." + str(cfg) + "." + str(ama) + "." + str(sm)))
 
 
 # Build the pion/meson quark EMT three-point output tag.

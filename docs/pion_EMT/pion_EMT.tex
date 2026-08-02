@@ -726,7 +726,7 @@ The output file (written by \code{save\_emt\_quark\_3pt\_hdf5}) contains:
   \item HDF5 attributes: \code{measurement}, \code{flow\_type}, \code{flow\_epsilon}, \code{flow\_steps}, \code{n\_t\_separations}, \code{src\_interpolator}, \code{sink\_interpolator}, \code{contraction\_convention} (``B''), \code{meson\_sign} ($+1$), \code{n\_qext}. The spin-zero pion channel is specified only by the source and sink interpolators; no separate spin-projection label is used.
 \end{itemize}
 
-The connected primitive axes differ from the disconnected EMTc axes.  The
+The connected primitive axes differ from the disconnected EMTquarkLoop axes.  The
 following reconstruction reproduces the stored tensor exactly:
 \begin{verbatim}
 with h5py.File(path, "r") as h5:
@@ -886,7 +886,7 @@ Finally, the result is divided by the spatial volume $V_3 = L_x L_y L_z$ to obta
 
 \subsubsection{HDF5 output format (Quark 1pt)}
 
-The canonical EMTc (written by the shard finalizer) contains:
+The canonical EMTquarkLoop (written by the shard finalizer) contains:
 
 \begin{itemize}[nosep]
   \item \code{raw/local\_bilinear\_pervec}: \code{[n\_vec,16,Nq,Nsteps+1,Nt]}.
@@ -920,7 +920,7 @@ The EMT 1pt run extracts this identity directly from
 the vector diagonal channels of
 \code{raw/derivative\_bilinear\_pervec}, without another solve, flow update, derivative, or
 gather, and writes \code{derived/ringed/kinetic\_pervec} and
-\code{derived/ringed/kinetic\_spacetime} in the same EMTc; it does not contain
+\code{derived/ringed/kinetic\_spacetime} in the same EMTquarkLoop; it does not contain
 configuration-local \code{Z\_ring} datasets.  The same quantity can be checked
 against
 
@@ -934,7 +934,7 @@ the inverse of each configuration's kinetic value is not equivalent.  The
 local identity and flowed-noise norm remain diagnostics.  The complete
 convention and schema are documented in the disconnected one-point note.
 Production one-point jobs write base/HP-interval shards by default.  Only the
-explicit finalizer publishes the canonical EMTc with embedded kinetic data after
+explicit finalizer publishes the canonical EMTquarkLoop with embedded kinetic data after
 all configured bases have complete HP coverage.
 
 \subsection{Gluon One-Point Function}
@@ -1116,7 +1116,7 @@ For each gauge configuration, four HDF5 files are read:
                        & \code{C3\_chi}     & \code{[Nts, Ns+1, Nq, Nt]} \\
                        & \code{C3\_Tmunu}   & \code{[Nts, Ns+1, Nq, 4, 4, Nt]} \\
 \midrule
-\code{EMTc/...h5}     & \code{avg/Tmunu/Tij} & \code{[Nq, Ns+1, Nt]} each \\
+\code{EMTquarkLoop/...h5}     & \code{avg/Tmunu/Tij} & \code{[Nq, Ns+1, Nt]} each \\
                        & \code{avg/flowed\_noise\_norm} & \code{[Nq, Ns+1, Nt]} \\
                        & \code{raw/local\_bilinear\_pervec} & \code{[Nv,16,Nq,Ns+1,Nt]} \\
                        & \code{raw/derivative\_bilinear\_pervec} & \code{[Nv,16,4,Nq,Ns+1,Nt]} \\
@@ -1146,10 +1146,10 @@ $t_{\text{sink}} \in [0, N_t - 1]$.
 
 The 1pt loops $L_{\mu\nu}(q, \tau)$ also use \textbf{absolute lattice time}
 $\tau \in [0, N_t - 1]$ for the operator insertion.  The 1pt measurement is
-source independent: its canonical EMTc file omits the \code{src} label and one
+source independent: its canonical EMTquarkLoop file omits the \code{src} label and one
 full-time loop file per configuration is reused for every two-point source
 time.  The value of $t_0$ must therefore be read from the corresponding hadron
-two-point file, not from the EMTc file.
+two-point file, not from the EMTquarkLoop file.
 
 The physically meaningful time coordinates are \emph{relative to the source}:
 
@@ -1173,7 +1173,7 @@ For source-dependent hadron correlators, the source position $x_0$ is stored in:
     authoritative source).
 \end{itemize}
 The canonical quark loop name is
-\code{EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5} and intentionally contains no
+\code{EMTquarkLoop/<lat>.EMTquarkLoop.<cfg>.<ama>.<sm>.h5} and intentionally contains no
 source position.
 
 Parsing example (Python pseudocode):
@@ -1505,7 +1505,7 @@ Meson 2pt     & \code{EMT2pt/}  & \code{C2}          & \code{[16, Np, Nt]} \\
 Quark 3pt     & \code{EMT3pt/}  & \code{C2}          & \code{[Nt]} \\
               &                  & \code{C3\_chi}      & \code{[Nts, Ns+1, Nq, Nt]} \\
               &                  & \code{C3\_Tmunu}    & \code{[Nts, Ns+1, Nq, 4, 4, Nt]} \\
-Quark 1pt     & \code{EMTc/}    & \code{raw/derivative\_bilinear\_pervec} & \code{[Nv,16,4,Nq,Ns+1,Nt]} \\
+Quark 1pt     & \code{EMTquarkLoop/}    & \code{raw/derivative\_bilinear\_pervec} & \code{[Nv,16,4,Nq,Ns+1,Nt]} \\
               &                  & \code{avg/Tmunu/Tij}    & \code{[Nq, Ns+1, Nt]} \\
 Gluon 1pt       & \code{EMTg/<lat>.EMTg.<cfg>.<ama>.<sm>.h5} & \code{Tmunu/Tij} & \code{[Nq, Ns+1, Nt]} \\
 \bottomrule

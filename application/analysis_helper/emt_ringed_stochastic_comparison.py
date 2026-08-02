@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 @dataclass(frozen=True)
 class RingedBaseSeries:
-    """One complete-base kinetic estimator series from a canonical EMTc file."""
+    """One complete-base kinetic estimator series from a canonical EMTquarkLoop file."""
 
     mode: str
     path: Path
@@ -120,7 +120,7 @@ def _text(value):
 
 
 def load_ringed_base_series(path, mode, flow_index=1):
-    """Load and average complete HP bases from one canonical EMTc file."""
+    """Load and average complete HP bases from one canonical EMTquarkLoop file."""
     if mode not in MODE_SPECS:
         raise ValueError(f"unknown comparison mode {mode!r}")
     spec = MODE_SPECS[mode]

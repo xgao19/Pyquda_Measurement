@@ -259,3 +259,29 @@ python tests/run_smoke_tests.py
   S8T8 with one and four ranks. A 64-rank l64 config-1242 run completed all
   U/D insertions for dt6, dt8, dt10, and dt12 without a USM allocation error;
   every C2/C3 dataset and attribute matched the pre-change baseline exactly.
+
+## Lattice Data Preprocessing
+
+- The local preprocessing repository is
+  `Pyquda_Measurement/Lat_Data_Preprocessing`; its GitHub origin still uses the
+  historical `xgao19/Lat_Data_stripping` name until renamed in GitHub settings.
+- Active workflows are `EMT_proton/connected_UD`, `pion_EMFF`, and
+  `pion_qTMDWF_CG`; do not modify the archived `legacy` tree during active
+  workflow maintenance.
+- Connected proton EMT preprocessing is sample-log driven and reconstructs
+  exact input paths without directory globbing. It performs separate 2pt and
+  3pt source-average and configuration-merge stages with antiperiodic temporal
+  boundary signs.
+
+
+## Disconnected Quark EMT Naming
+
+- Use `EMTquarkLoop` as the canonical directory and measurement stem for
+  disconnected quark EMT loops. Active code does not fall back to the retired
+  `EMTc` name.
+- Keep the measurement kind out of the setup tag. A production setup tag is
+  `1HYP_Z4_HP256_Q2_symanzik_eps0.09_F10`; planned base count does not belong
+  in the canonical identity because bases may be extended later.
+- The l64 production migration renamed directories, shards, sample logs, and
+  preprocessing products in place. Sample-log fingerprints and base entries
+  remain unchanged, so completed bases resume under the new canonical name.

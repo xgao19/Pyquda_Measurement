@@ -152,7 +152,7 @@ bash run_quark_1pt.sh --config_num 1000
 Expected quark output:
 
 ```text
-data/EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5
+data/EMTquarkLoop/<lat>.EMTquarkLoop.<cfg>.<ama>.<sm>.h5
 raw/local_bilinear_pervec
 raw/derivative_bilinear_pervec
 raw/flowed_noise_norm_pervec
@@ -195,10 +195,10 @@ The current builder implements this for the quark loop, and also for the
 optional gluon loop when `--include_gluon` is requested, as
 `roll(time_axis, -t0)` before any C3 product or ensemble subtraction.
 
-The canonical EMTc file has no source-position tag because the same loop is
+The canonical EMTquarkLoop file has no source-position tag because the same loop is
 reused for every `t0` on that configuration.
 
-The saved quark loop is an unringed flowed bilinear.  The same EMTc embeds
+The saved quark loop is an unringed flowed bilinear.  The same EMTquarkLoop embeds
 kinetic data under `derived/ringed`, extracted from the identical raw EMT
 vectors.  It contains no per-configuration ringed factor: compute that factor
 only after averaging `derived/ringed/kinetic_spacetime` over the ensemble.
@@ -310,7 +310,7 @@ connected pion/proton axis examples are in
 [`docs/EMT_gamma_and_raw_bilinears.md`](../EMT_gamma_and_raw_bilinears.md).
 
 For ringed-fermion normalization, read
-`derived/ringed/kinetic_spacetime` from the same canonical EMTc.  The exact
+`derived/ringed/kinetic_spacetime` from the same canonical EMTquarkLoop.  The exact
 reconstruction below remains a useful cross-check:
 
 ```text

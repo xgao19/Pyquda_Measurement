@@ -1,6 +1,6 @@
 """Complete-base convergence diagnostics for canonical EMT quark loops.
 
-The CLI intentionally reads finalized EMTc files, not production shards.  It
+The CLI intentionally reads finalized EMTquarkLoop files, not production shards.  It
 compares the two inexpensive diagnostics that are most useful when validating
 a stochastic method on one gauge configuration:
 
@@ -234,7 +234,7 @@ def _plot_observable(series_and_stats, observable, output_stem, ylabel):
 def analyze_quark_1pt_convergence(
     inputs, output_dir, flow_index=1, q_index=None, component="T44"
 ):
-    """Create CSV summaries and two convergence figures from EMTc files."""
+    """Create CSV summaries and two convergence figures from EMTquarkLoop files."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     series = [
@@ -319,7 +319,7 @@ def _parse_input(text):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Compare complete-base convergence in finalized EMTc files."
+        description="Compare complete-base convergence in finalized EMTquarkLoop files."
     )
     parser.add_argument("--input", action="append", type=_parse_input, required=True, metavar="LABEL=FILE")
     parser.add_argument("--output_dir", required=True)

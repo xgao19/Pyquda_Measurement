@@ -97,7 +97,7 @@ randPara = [
 base_start = int(os.environ.get("EMT_1PT_BASE_START", "0"))
 base_stop = int(os.environ.get("EMT_1PT_BASE_STOP", str(randPara[0])))
 block_interval_solves = int(os.environ.get("EMT_1PT_BLOCK_INTERVAL_SOLVES", "64"))
-shard_dir = os.environ.get("EMT_1PT_SHARD_DIR", os.path.join(data_dir, "EMTc", "shards"))
+shard_dir = os.environ.get("EMT_1PT_SHARD_DIR", os.path.join(data_dir, "EMTquarkLoop", "shards"))
 
 quark_1pt = EMTDisconnectedQuark1pt(parameters)
 output_tag = os.environ.get("EMT_1PT_QUARK_OUT", quark_1pt_tag)

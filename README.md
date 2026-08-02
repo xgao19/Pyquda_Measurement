@@ -322,11 +322,11 @@ For quark/gluon one-point data:
 - All HP choices multiply a full-volume base source; spatial HP is not time
   dilution.  Four-dimensional fermion flow spreads the flowed fields in time,
   while the saved insertion-time axis remains explicit.
-- A single source-independent EMTc loop file per configuration stores all
+- A single source-independent EMTquarkLoop loop file per configuration stores all
   absolute insertion times and is reused for every hadron source time.
 - The identity local bilinear is stored only once in the 16-Gamma primitive;
   `flowed_noise_norm` contains only the flowed source norm.
-- EMT-derived ringed kinetic data live under `derived/ringed` in the same EMTc
+- EMT-derived ringed kinetic data live under `derived/ringed` in the same EMTquarkLoop
   file, so one atomic rename publishes the loop and kinetic data together.
 - The standalone `application/flowed_quark_ringed_norm` workflow remains
   available for dedicated kinetic-only high-statistics runs. Its
@@ -341,7 +341,7 @@ For quark/gluon one-point data:
 - Production quark 1pt wrappers default to base/HP interval shards.  Completed
   bases are recorded as exact lines in a lightweight text log. An explicit
   destination-side streaming finalizer checks parts while merging and publishes
-  one canonical EMTc file only after complete base coverage.
+  one canonical EMTquarkLoop file only after complete base coverage.
 - Gluon 1pt stores the flowed gluonic EMT building block.
 - Renormalized gradient-flow EMT combinations, vacuum subtractions, and mixing
   coefficients are applied in downstream analysis, not inside these kernels.

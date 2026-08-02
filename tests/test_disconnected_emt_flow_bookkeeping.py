@@ -242,7 +242,7 @@ def test_logged_base_skips_before_inverter_and_without_hdf5(tmp_path, monkeypatc
     measurement = make_measurement(config_num=17, flow_steps=1)
     inv = [0.1, 1.0, 1e-10, 10]
     rand = [1, 4, 0]
-    tag = str(tmp_path / "lat.EMTc.17.0.sm")
+    tag = str(tmp_path / "lat.EMTquarkLoop.17.0.sm")
     log = tmp_path / "sample.log"
     attrs = measurement._measurement_attrs(
         latt_info, inv, rand, 17, 0, 1, 8
@@ -696,7 +696,7 @@ def test_source_loop_uses_one_full_mg_setup_then_thin_restores(tmp_path, monkeyp
         gauge,
         [0.1, 1.0, 1e-10, 10],
         [2, 4, 7],
-        tag=str(tmp_path / "S1T1.EMTc.19.0.test.h5"),
+        tag=str(tmp_path / "S1T1.EMTquarkLoop.19.0.test.h5"),
         shard_dir=tmp_path / "shards",
         sample_log_file=tmp_path / "sample.log",
         base_start=0,

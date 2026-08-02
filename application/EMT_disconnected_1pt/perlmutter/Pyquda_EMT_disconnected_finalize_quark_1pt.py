@@ -20,7 +20,7 @@ canonical_tag = os.environ.get(
     "EMT_1PT_QUARK_OUT",
     get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, setup_tag),
 )
-shard_dir = os.environ.get("EMT_1PT_SHARD_DIR", os.path.join(data_dir, "EMTc", "shards"))
+shard_dir = os.environ.get("EMT_1PT_SHARD_DIR", os.path.join(data_dir, "EMTquarkLoop", "shards"))
 
 path = finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_vec)
 print("Finalized EMT quark 1pt with embedded ringed kinetic:", path, flush=True)

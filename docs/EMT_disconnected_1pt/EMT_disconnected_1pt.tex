@@ -502,7 +502,7 @@ four diagonal vector channels of
 \code{raw/derivative\_bilinear\_pervec}.  The momentum list must contain
 exactly one \(q=0\) entry for every EMT quark measurement.
 
-Every EMTc stores this data in \code{derived/ringed/kinetic\_pervec} and
+Every EMTquarkLoop stores this data in \code{derived/ringed/kinetic\_pervec} and
 \code{derived/ringed/kinetic\_spacetime}.  Publishing one HDF5 path with one
 atomic rename removes the former two-file failure window.  No ringed factor is
 stored: a factor computed from one configuration is not the final ensemble
@@ -567,7 +567,7 @@ The stochastic source \(\xi\) and solution \(\eta\) are flowed together as one
 \code{MultiField}.  This keeps both fields on the same flowed gauge background.
 After all flow steps are measured, the code extracts
 \code{derived/ringed/kinetic\_pervec} algebraically from the stored \(q=0\)
-vector derivative diagonals in the same EMTc.
+vector derivative diagonals in the same EMTquarkLoop.
 
 \subsection{Four-Dimensional Fermion Flow and the Time-Slice Projector}
 \label{sec:full_volume_flow_source}
@@ -807,7 +807,7 @@ Only \(\mu\leq\nu\) tensor components are written in the averaged
 
 The canonical loop file is source independent:
 \begin{center}
-  \code{EMTc/<lat>.EMTc.<cfg>.<ama>.<sm>.h5}.
+  \code{EMTquarkLoop/<lat>.EMTquarkLoop.<cfg>.<ama>.<sm>.h5}.
 \end{center}
 It stores every absolute insertion time and is reused for all hadron two-point
 source times on the same configuration.
@@ -871,7 +871,7 @@ by $i$ only for the Hermitian $i[\gamma_\mu,\gamma_\nu]/2$ convention.  A
 complete portable example, including connected pion and proton axis orders, is
 in \code{docs/EMT\_gamma\_and\_raw\_bilinears.md}.
 
-\subsection{Storage Weight of One Canonical EMTc}
+\subsection{Storage Weight of One Canonical EMTquarkLoop}
 
 All large arrays are uncompressed.  Ignoring the small averaged and metadata
 datasets, the source-scaling payload has the ratio
@@ -926,10 +926,10 @@ recomputed and atomically replaced.
 Measurement jobs do not update the canonical file.  A separate serial
 finalizer runs where all parts have been collected and requires complete
 coverage of bases \(0,\ldots,N_{\mathrm{base}}-1\).  It checks each expected
-part once while streaming raw datasets into a temporary canonical EMTc file, accumulates the
+part once while streaming raw datasets into a temporary canonical EMTquarkLoop file, accumulates the
 averages without holding the complete source axis in memory, and derives the
 EMT and embedded kinetic data from the four vector derivative channels.  One
-atomic rename publishes the complete EMTc, so downstream analysis cannot see a
+atomic rename publishes the complete EMTquarkLoop, so downstream analysis cannot see a
 new loop without its matching kinetic data.  Non-overlapping base ranges may be
 scheduled independently; overlapping jobs are unsupported.
 
