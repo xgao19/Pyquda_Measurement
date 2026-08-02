@@ -1101,12 +1101,13 @@ class EMTDisconnectedGluon1pt:
         self.flow_type = _normalize_flow_type(parameters["flow_type"])
         self.flow_epsilon = parameters["flow_epsilon"]
         self.flow_steps = parameters["flow_steps"]
+        self.flow_substeps_per_interval = parameters.get("flow_substeps_per_interval", 1)
         self.config_num = parameters.get("config_num")
         self.gauge_preprocessing = parameters.get(
             "gauge_preprocessing", "unspecified"
         )
 
-    def _advance_flowed_gauge(self, U_flow, step, stepsize, Nsteps):
+    def _advance_flowed_gauge(self, U_flow, step, stepsize, Nsteps, substeps_per_interval=1):
         """Advance the flowed gauge field using the gluon-flow schedule."""
         if Nsteps > 0 and step == 0:
             if self.flow_type == "wilson":
@@ -1115,9 +1116,9 @@ class EMTDisconnectedGluon1pt:
                 U_flow.symanzikFlow(10, epsilon=stepsize / 10)
         elif Nsteps > 0 and step < Nsteps:
             if self.flow_type == "wilson":
-                U_flow.wilsonFlow(1, epsilon=stepsize)
+                U_flow.wilsonFlow(substeps_per_interval, epsilon=stepsize / substeps_per_interval)
             elif self.flow_type == "symanzik":
-                U_flow.symanzikFlow(1, epsilon=stepsize)
+                U_flow.symanzikFlow(substeps_per_interval, epsilon=stepsize / substeps_per_interval)
 
     @staticmethod
     def _F_clover_traceless(U: LatticeGauge, mu: int, nu: int):
@@ -1201,7 +1202,7 @@ class EMTDisconnectedGluon1pt:
                         Tmunu_t[mu, nu, :, step, :] += 2.0 * slice_t
 
             mpi_print(latt_info, f"{self.flow_type}Flow step = {step}")
-            self._advance_flowed_gauge(U_flow, step, stepsize, Nsteps)
+            self._advance_flowed_gauge(U_flow, step, stepsize, Nsteps, self.flow_substeps_per_interval)
 
         Tmunu_t /= Ns3
         attrs = {

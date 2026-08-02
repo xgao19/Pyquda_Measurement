@@ -1392,3 +1392,18 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Existing callers omit the new argument and therefore retain the original
   numerical behavior.
 - Recorded that future external workflow testing must treat this repository as
+  read-only unless the user explicitly authorizes changes.
+
+
+## 2026-08-02: Add configurable gluon flow substeps
+
+- Added `flow_substeps_per_interval` to the disconnected gluon EMT constructor,
+  defaulting to one for backward compatibility.
+- Kept the first flow interval at ten `epsilon/10` steps and subdivided later
+  intervals for both Wilson and Symanzik flow when requested.
+- Condensed `SESSION_MEMORY.md` to reusable environment facts, stable
+  conventions, and repeatable pitfalls; removed completed-work and validation
+  history that belongs in this log.
+- Synchronized the repository `AGENTS.md` with the workspace policy that always
+  updates `log.md` but updates session memory only when reusable knowledge
+  changes.

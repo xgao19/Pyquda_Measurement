@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-07-23
+Last updated: 2026-08-02
 
 This file contains only reusable environment facts, stable conventions, and
 pitfalls that are easy to repeat.  Commit history and completed-work summaries
@@ -19,35 +19,27 @@ belong in `log.md` and Git history.
 
 ### Perlmutter
 
-- The default software root is
-  `/global/cfs/cdirs/m4559/xgao/software_gradientflow`; do not fall back to the
-  old `/global/cfs/cdirs/m3760/xgao/software` stack.
-- The default Python environment is
-  `/global/cfs/cdirs/m4559/xgao/software_gradientflow/venv-quda-develop`.
-- The QUDA install prefix is
-  `/global/cfs/cdirs/m4559/xgao/software_gradientflow/quda-develop/install`.
-- PyQUDA is installed editable from
-  `/global/cfs/cdirs/m4559/xgao/software_gradientflow/PyQUDA-develop` (core at
-  `PyQUDA-develop/pyquda_core`).
-- Use `systems/perlmutter/activate-venv-quda.sh` for the module stack, but verify
-  that `python` and `QUDA_PATH` resolve to the locations above; do not accept
-  stale helper defaults silently.
-- The activation helper supplies the required Cray MPI/HDF5 settings.  Keep
-  `MPICH_GPU_SUPPORT_ENABLED=1` and verify `h5py.get_config().mpi` when parallel
-  HDF5 is required.
-- `login32` is useful for small GPU smoke tests; multi-rank production tests
-  still require a valid Slurm allocation.
+- Use `/global/cfs/cdirs/m4559/xgao/software_gradientflow`, its
+  `venv-quda-develop`, `quda-develop/install`, and editable `PyQUDA-develop`;
+  do not fall back to the old `m3760` stack.
+- Activate with `systems/perlmutter/activate-venv-quda.sh`, then verify `python`
+  and `QUDA_PATH`. Keep `MPICH_GPU_SUPPORT_ENABLED=1` and verify MPI-enabled
+  h5py when parallel HDF5 is required.
+- `login32` is suitable only for small GPU smoke tests. Multi-rank work requires
+  a valid Slurm allocation.
 
 ### Aurora
 
-- Main checkout:
-  `/lus/flare/projects/StructNGB/xgao/software_gradientflow/Pyquda_Measurement`.
-- Activation helper:
+- The checkout is
+  `/lus/flare/projects/StructNGB/xgao/software_gradientflow/Pyquda_Measurement`;
+  activate it with
   `/lus/flare/projects/StructNGB/xgao/software_gradientflow/activate-pyquda-develop.sh`.
-- Use `backend="dpnp", backend_target="sycl"`; do not introduce Torch XPU
-  paths unless explicitly requested.
-- Launch multi-rank jobs through PALS inside a compute allocation and keep
-  parallel h5py enabled.
+- Use `backend="dpnp"`, `backend_target="sycl"`, PALS inside a compute
+  allocation, and MPI-enabled h5py. Do not introduce Torch XPU paths unless
+  explicitly requested.
+- FLAT production uses `ZE_FLAT_DEVICE_HIERARCHY=FLAT`,
+  `ONEAPI_DEVICE_SELECTOR=level_zero:gpu`, integer tile affinity,
+  `QUDA_ENABLE_P2P=0`, and `QUDA_ENABLE_TUNING=1`.
 
 ### Smoke Inputs
 
@@ -57,244 +49,146 @@ belong in `log.md` and Git history.
 
 ## Repository Hygiene And Verification
 
-- Preserve unrelated user changes in a dirty worktree; never clean or rewrite
-  them implicitly.
-- Use `apply_patch` for manual edits and keep all code comments in English.
-- Never commit generated HDF5 data, logs, profiles, tuning/cache directories,
-  `__pycache__`, or LaTeX intermediates.
-- Build LaTeX in `/tmp` with `texlive/2024`; copy back only tracked PDFs.
-- On CuPy, avoid implicit CuPy-to-NumPy conversion.  Explicitly use `.get()`
-  before constructing NumPy/backend gamma arrays.
-- If `py_compile` cannot write `__pycache__` on a restrictive filesystem, use
-  `ast.parse` for a write-free syntax check.
-- Some successful QUDA jobs print shutdown leak warnings.  Check the exit code
-  and physics output before treating those warnings as a failed measurement.
-- Lightweight regression entry point:
-
-```bash
-source systems/perlmutter/activate-venv-quda.sh
-python tests/run_smoke_tests.py
-```
+- Preserve unrelated user changes; never clean, stash, reset, or rewrite them
+  implicitly. All code comments must be in English.
+- Never commit generated HDF5 data, runtime logs, profiles, tuning/cache
+  directories, `__pycache__`, or LaTeX intermediates.
+- Convert backend arrays to NumPy explicitly. If bytecode cache writes are not
+  possible, use `ast.parse` for a write-free syntax check.
+- QUDA shutdown leak warnings are not sufficient evidence of failure; check the
+  exit code and physics output.
+- Run lightweight regressions with `python tests/run_smoke_tests.py` after
+  activating the appropriate environment.
+- Treat this repository as read-only while testing external l80 workflows unless
+  the user explicitly authorizes repository changes.
 
 ## EMT Conventions And Pitfalls
 
-- The fifth `gauge.hypSmear` argument is QUDA `dir_ignore`, not a projection
-  count.  Active production fixes it to `-1` for 4D HYP; do not add a CLI or
-  environment override.
-- Active implementations are
-  `pyquda_measurement_utils/pion_EMT_vibe_develop.py` and
-  `pyquda_measurement_utils/proton_EMT_vibe_develop.py`.  The removed legacy
-  `EMT_meson.py` should not be restored into active workflows.
-- EMT vibe outputs are HDF5-only.  Hadron correlator tags include source
-  position; source-independent EMT quark-loop tags do not.
-- Proton setup tags encode only preprocessing, smearing width, and explicit input/output boosts, for example `1HYP_GSRC_W9_binx0y0z0_boutx0y0z0`. Append `.src<SRC>` for C2 and `.src<SRC>.sink<SINK>.<polarizations>` for C3; do not hide channel identity in the setup tag.
-- Each proton connected source job must provide a nonempty `tags` mapping whose keys are the actual sink separations to compute. Record resume completion through `on_separation_done` only after the corresponding HDF5 file has closed; source-level callbacks remain optional compatibility hooks.
-- Quark EMT 3pt files contain only 3pt observables.  Read denominators and full
-  momentum coverage from the separate EMT 2pt files.
-- Proton `PpUnpol` two-point projection is `(C2[I] + C2[T])/4`, corresponding
-  to `(1+gamma_4)/4`; the source interpolator label `5` is not a sink projector.
-- Flow schedule is always measure first, then flow: step 0 is unflowed, the
-  first interval uses ten `epsilon/10` substeps, and later intervals use one
-  `epsilon` step.
-- Meson/proton connected EMT uses fixed-sink convention B with
+- The fifth `gauge.hypSmear` argument is QUDA `dir_ignore`; active 4D HYP uses
+  `-1` and must not expose it as a casual runtime override.
+- Active connected implementations are `pion_EMT_vibe_develop.py` and
+  `proton_EMT_vibe_develop.py`. EMT outputs are HDF5-only.
+- Measurement identity must include every independent axis. In multi-stream
+  ensembles, stream and configuration must both appear in filenames, logs,
+  metadata, and resume fingerprints.
+- Proton setup tags encode preprocessing, smearing width, and explicit input and
+  output boosts. C2/C3 tags additionally identify source, sink interpolator,
+  polarization, and actual sink separation.
+- A connected proton source job supplies a nonempty `tags` mapping keyed by the
+  sink separations to compute. Mark a separation complete only after its HDF5
+  file closes. Three-point files never embed C2 data.
+- `PpUnpol` is `(C2[I] + C2[T])/4`, i.e. `(1+gamma_4)/4`; source interpolator
+  label `5` is not a sink projector.
+- Flow always measures before advancing: step 0 is unflowed and the first
+  interval uses ten `epsilon/10` substeps. Later intervals default to one step;
+  the fermion/gluon helpers can divide them with `substeps_per_interval`, while
+  the gluon constructor reads `flow_substeps_per_interval`.
+- Connected EMT uses fixed-sink convention B with
   `dst2 = gamma5 * seq_raw^dagger * gamma5` and `meson_sign = 1`.
-- Proton left-acting derivatives must act on the raw sequential propagator
-  before the final gamma5-hermiticity/index transform.  Applying `covDev`
-  directly to finalized `seq_data` breaks gauge covariance.
-- Pion sequential sources require active-line sink smearing.  For pion EMFF,
-  the 2pt has no momentum transfer and must use source-side boosts on both ends;
-  do not mix source and sink boost choices in the denominator.
-- Gluon 1pt stores the full gluonic building block.  The traceless operation in
-  `_F_clover_traceless` projects each field-strength matrix to `su(3)`; it does
-  not make the final EMT tensor traceless.
+- Proton left derivatives act on the raw sequential propagator before the final
+  gamma5-hermiticity/index transform; differentiating finalized `seq_data`
+  breaks gauge covariance.
+- Pion sequential sources require active-line sink smearing. Pion EMFF C2 has no
+  momentum transfer and uses source-side boosts at both ends.
+- `_F_clover_traceless` projects each gluon field-strength matrix to `su(3)`; it
+  does not make the final EMT tensor traceless.
 
-## EMT Disconnected One-Point Loops
+## Disconnected EMT Loops
 
-- For the current `l64c64a076` ensemble, `am_q=-0.015` is the strange test mass
-  and `am_q=-0.049` is the light test mass. Keep their data, sample logs, MG
-  benchmarks, and tuning caches in separate run directories; these values are
-  not universal defaults for other ensembles.
-- Never construct a distributed stochastic source by resetting the same
-  backend RNG seed on every MPI rank.  Equal local shapes repeat the local
-  field; use global-coordinate counter noise for decomposition independence.
-- Quark loops use decomposition-independent full-volume counter-based `Z4`
-  noise.  The counter includes global `x,y,z,t`, spin, color, configuration,
-  base-noise index, and an optional stream salt.
-- Production configuration identity must be supplied explicitly on the CLI;
-  never infer it from an environment variable or silently default it to zero.
-- One source-independent EMTc file is written per configuration and contains
-  every absolute insertion time.  Reuse it for all hadron source times and
-  align time with `tau_abs = (t0 + tau_rel) % Nt` and rephase spatial momentum
-  by `exp[-2 pi i q.(x0-origin)/L]`.  Reject loop files without explicit global
-  lattice/Fourier-origin provenance.
-- Disconnected shards and canonical files persist only base-noise and HP
-  indices; reconstruct the effective source index as `base * N_HP + hp`.
-- Gluon EMT loops are also source independent and use
-  `EMTgluonLoop/<lat>.EMTgluonLoop.<cfg>.<ama>.<sm>.h5`.  Quark and gluon wrappers must share
-  the same flow grid; the production epsilon default is `0.207936`.
-- Fermion flow is four dimensional.  With `xi_f=K(t_f)xi` and
-  `eta_f=K(t_f)D^{-1}xi`, a fixed-time loop estimates
-  `Tr[P_tau Gamma K D^{-1} K^dag]`: the observable is spatially summed at fixed
-  `tau`, but the initial stochastic source must cover every time slice.
-- Flow contractions load the flowed gauge into QUDA's global resident state.
-  Restore the original gauge before the next stochastic inversion; loading it
-  only once before the source loop causes later inversions to use the wrong
-  resident gauge.
-- A full initial `loadGauge(U)` already leaves the original gauge/MG state
-  resident.  The first inversion must use it directly; only inversions after a
-  flowed-gauge context need `thin_update_only=True` restoration.
-- A single initial-time projector is incomplete at nonzero flow time.  A
-  complete time-dilution basis is unbiased only after all projectors are
-  summed, with the corresponding inversion cost.
-- Spatial HP and 4D HP both multiply a full-volume base source.  Spatial HP has
-  time-independent probing signs; it is not a 3D or time-diluted source.
-- Flowed EMT defaults to isotropic 4D
-  `interleaved_xyzt_binary_projected_to_evenodd` HP.  The S8T8 counter-Z4 test
-  found 4D HP16 effective on every time slice, while spatial HP left temporal
-  neighbors uncancelled and increased variance.
-- Only MPI rank 0 should open the serial quark/gluon HDF5 output file.
-- The physical disconnected correlator requires ensemble subtraction:
-  `<C2 L> - <C2><L>`.  A single-configuration product is only an unsubtracted
-  diagnostic proxy.
-- Quark EMT now stores the complete 16 local plus `16x4` unsymmetrized
-  derivative basis; derive the old EMT from vector channels.  Raw PyQUDA `Y5`
-  and `T5` need minus signs for uniform `gamma_mu gamma5`, and raw tensor masks
-  are `[gamma_mu,gamma_nu]/2` without `i`; use the stored basis transform.
-- EMT operator schema v5 stores the identity only in the 16-Gamma local basis,
-  names the separate source norm `flowed_noise_norm`, and embeds the kinetic
-  data under `derived/ringed` in EMTc.  Compute physical ringed factors only
-  after ensemble-averaging the kinetic expectation value.
-- A time- or momentum-resolved disconnected derivative loop must contain both
-  sides of `overleftrightarrow_D`.  Production reconstructs the left term from
-  the right term at `-q` with `Gamma# = gamma5 Gamma^dag gamma5`; the old
-  one-sided shortcut is invalid for nonzero `q_mu` and for fixed-time `D4`.
-  The stored loop already includes exactly one closed-fermion-loop Wick minus.
-- EMT loop projection uses `exp(+2 pi i q.(x-origin)/L)`.  Rephasing an
-  origin-zero loop to a hadron source therefore uses
-  `exp(-2 pi i q.(source-origin)/L)`; do not reverse both signs.
-- Production quark EMT 1pt is base-oriented: base-internal part files are only
-  checkpoints, and a base is complete only after all HP vectors validate.
-- EMT shards default to one complex128 arithmetic mean per HP part.  Set
-  `save_raw_per_vector=True` only when per-vector raw data and the current
-  canonical finalizer are required; raw mode stores both raw and the same part
-  mean.  Mean-only shards intentionally do not use the per-vector finalizer.
-  `block_interval_solves` controls vectors per part independently of
-  `flow_batch_size`; HP256 with interval 64 and batch 32 has four parts per base
-  and two flow batches per part.
+- Use decomposition-independent full-volume counter-based `Z4` noise. Its
+  counter includes global coordinates, spin, color, configuration, base index,
+  and stream salt; never reset the same local RNG seed on every rank.
+- Supply configuration identity explicitly. Do not infer it from an environment
+  variable or default it to zero.
+- `EMTquarkLoop` and `EMTgluonLoop` are the canonical source-independent names;
+  do not restore the retired `EMTc` or `EMTg` names.
+- Loop files contain all absolute insertion times. Align to a hadron source with
+  `tau_abs = (t0 + tau_rel) % Nt` and rephase momentum by
+  `exp[-2 pi i q.(source-origin)/L]`; reject files without lattice and Fourier
+  origin provenance.
+- Fermion flow is four dimensional even when the observable is spatially summed
+  at fixed time. The stochastic source must cover every time slice.
+- Flow contractions replace QUDA's resident gauge. Restore the original gauge
+  before the next inversion; the initial inversion can use the original
+  resident gauge directly.
+- Spatial and 4D hierarchical probing both multiply a full-volume base source.
+  Spatial HP is not time dilution. The standard flowed-EMT ordering is isotropic
+  4D `interleaved_xyzt_binary_projected_to_evenodd`.
+- Shards store base and HP indices; reconstruct the effective source index as
+  `base * N_HP + hp`. A base is complete only after every planned HP part
+  validates and the base-level sample log is written.
+- Mean-only mode always stores one complex128 part mean. Raw mode stores both
+  per-vector data and the same part mean. `block_interval_solves` controls part
+  size independently of `flow_batch_size`.
+- Only MPI rank 0 opens serial quark/gluon HDF5 output files.
+- Physical disconnected correlators require ensemble subtraction. If step1
+  stores `L_avg=L_sum/Vs`, construct the hadron correlator as
+  `Vs * (<C2 L_avg> - <C2><L_avg>)`; do not multiply local VEV or ringed kinetic
+  normalization by `Vs` again.
+- The quark loop stores the 16 local and `16x4` unsymmetrized derivative basis.
+  Raw `Y5` and `T5` require minus signs for uniform `gamma_mu gamma5`; raw tensor
+  masks are `[gamma_mu,gamma_nu]/2` without `i`.
+- Time- or momentum-resolved derivative loops require both sides of
+  `overleftrightarrow_D`. Reconstruct the left term from the right term at `-q`
+  with `Gamma# = gamma5 Gamma^dag gamma5`; the stored loop contains exactly one
+  closed-fermion-loop Wick minus.
+- Loop projection uses `exp(+2 pi i q.(x-origin)/L)`, so source rephasing uses
+  the opposite sign.
+- Setup tags describe the measurement setup, not the planned total base count;
+  bases may be extended without changing measurement identity.
 
 ## qTMD Conventions And Pitfalls
 
-- Keep CG/GI qTMD/PDF index geometry and transport in the neutral
-  `qtmd_operator_utils.py`; connected pion/proton code must not import
-  disconnected production modules.  Convert backend arrays to host only via
-  `tools.array_to_numpy`.
-- qTMDWF and qDA local pion C2 use explicit fixed source Gamma labels and a
-  full 16-Gamma sink scan.
-- For pion qTMD/PDF and EMFF, the smearing tag describes only the gauge and
-  smearing setup.  Encode source and sink interpolators explicitly in output
-  tags, HDF5 provenance and sample-log identity; do not hide the channel in a
-  user-overridable smearing tag.
-- Fixed-length GI staple index is
-  `[b_T, b_z, eta, transverse_direction]`, with even `b_z`,
-  `eta >= abs(b_z)/2`, `b_T >= 0`, and total length `2*eta + b_T`.
-- With `D_mu psi(x) = U_mu(x) psi(x+mu)`, `covDev` composition acts on the
-  endpoint field in the reverse order of the geometric staple segments.  Keep
-  the geometric segment list unchanged and reverse it only when transporting
-  the endpoint fermion or gauge-link basis field.
-- Prefer cached gauge-only staple transporters and apply them to the shifted
-  endpoint field.  Keep the direct covariant-shift path for validation.
+- Keep common CG/GI geometry and transport in `qtmd_operator_utils.py`;
+  connected code must not import disconnected production modules.
+- qTMDWF and qDA local pion C2 use fixed source Gamma labels and a full 16-Gamma
+  sink scan. Put source/sink interpolators in tags, HDF5 provenance, and resume
+  identity rather than a user-overridable smearing tag.
+- Fixed-length GI staple indices are `[b_T, b_z, eta, transverse_direction]`,
+  with even `b_z`, `eta >= abs(b_z)/2`, `b_T >= 0`, and length `2*eta + b_T`.
+- `covDev` composition acts on endpoint fields in reverse geometric segment
+  order. Keep geometric segments unchanged and reverse only endpoint transport.
+- Prefer cached gauge-only staple transporters; retain the direct covariant-shift
+  path for validation.
 - The disconnected estimator is `xi^dagger P Gamma O_b eta`, with
-  `eta=D^{-1}xi`; apply `O_b` to `eta`, never to `xi`.  The reversed
-  `eta^dagger P Gamma O_b xi` estimator targets the wrong trace, so its data
-  must not be reused.
-- When constructing disconnected `CG_qTMD`, reset the shifted solution before
-  changing transverse direction; otherwise the `b_Y` path incorrectly starts
-  from the final `b_X` displacement.
-- Local-limit invariant:
+  `eta=D^{-1}xi`; apply `O_b` to `eta`, never to `xi`.
+- Reset the shifted solution before changing transverse direction when building
+  disconnected `CG_qTMD`.
+- Preserve the local-limit invariant
   `GI_PDF(bz=0) = CG_PDF(bz=0) = CG_qTMD(bT=0,bz=0)`.
-- Disconnected qTMD production uses source-independent canonical tags,
-  counter-based full-volume `Z4`, base/HP-interval shards, and explicit
-  destination-side finalize.
+- Disconnected qTMD uses source-independent tags, full-volume counter `Z4`,
+  base/HP-interval shards, and explicit destination-side finalization.
 
-## Flowed-Quark Ringed Normalization
+## Ringed Normalization, Smearing, And Proton Memory
 
-- Standalone ringed, EMT, and qTMD resume only from a fingerprinted base-level
-  text sample log; production must not require local shards to remain after a
-  base is logged. Finalizers validate parts once while merging at the destination.
-- Multigrid blocks, solver tolerance and maxiter are runtime controls, not
-  disconnected measurement identity; resumed base ranges may mix them.
-- Standalone ringed uses `RingedQuark1pt`, a kinetic-only subclass of the EMT
-  shared runner. It supports full-volume plain/HP counter noise but no
-  spin-color dilution or stored ringed factors. Average `K` over configurations
-  before any nonlinear normalization; never average per-configuration `1/K`.
-
-## Boosted Smearing
-
-- Keep the public interface `boosted_smearing(src, *, w, boost)` unchanged for
-  both `LatticeFermion` and `LatticePropagator`.
-- Smear a propagator with one batched distributed FFT over all spin-color
-  columns. Repeating the fermion FFT and Gaussian-kernel construction for each
-  of the 12 source columns can accumulate allocator/collective state and hang
-  later sequential sources on l64.
-- Do not add a persistent device kernel cache without validating SYCL queue and
-  MPI-decomposition ownership. The current per-call kernel and batched field
-  FFT are bitwise equivalent to the historical column-wise implementation.
-- Before a dpnp field crosses into the NumPy-backed distributed FFT, explicitly
-  wait for its SYCL queue. Keep the synchronization at the source and kernel
-  forward-FFT inputs, after momentum-space multiplication before inverse FFT,
-  and before returning the inverse-FFT result to QUDA. Do not replace these
-  ownership boundaries with an MPI barrier.
-## Proton Sequential USM Memory
-
-- Keep the proton U insertion in the exact left-associative order
-  `-(((R1 + R2) + R3) + R4)`, but construct each Wick term only when needed,
-  accumulate it in place, wait for the owning SYCL queue, and release it before
-  constructing the next term.
-- Keep the D insertion as `term2 - term1`; release the first term's spin
-  intermediates before constructing the second term, then subtract in place.
-- The raw proton sequential builder treats the forward propagator as read-only.
-  Do not copy the full propagator at that call site. After C2, wait for the
-  visible queue and collect garbage before entering sequential construction.
-- The streamed implementation is bitwise identical to the original formulas on
-  S8T8 with one and four ranks. A 64-rank l64 config-1242 run completed all
-  U/D insertions for dt6, dt8, dt10, and dt12 without a USM allocation error;
-  every C2/C3 dataset and attribute matched the pre-change baseline exactly.
+- Standalone ringed, EMT, and qTMD resume from fingerprinted base-level sample
+  logs. Finalized bases must not depend on local shards remaining available.
+- Multigrid blocks, solver tolerance, and maxiter are runtime controls, not
+  disconnected measurement identity.
+- Average the ringed kinetic expectation `K` over configurations before nonlinear
+  normalization; never average per-configuration `1/K`.
+- Keep `boosted_smearing(src, *, w, boost)` unchanged for fermions and
+  propagators. Smear all propagator spin-color columns in one batched distributed
+  FFT rather than repeating FFT setup per column.
+- Wait on the owning SYCL queue at dpnp/NumPy distributed-FFT boundaries: before
+  forward FFT inputs, after momentum multiplication, and before returning to
+  QUDA. MPI barriers do not replace queue ownership fences.
+- Do not add a persistent smearing device-kernel cache without validating SYCL
+  queue and MPI-decomposition ownership.
+- Preserve proton U insertion order `-(((R1 + R2) + R3) + R4)` and D insertion
+  order `term2 - term1`. Construct and release Wick intermediates sequentially,
+  with queue waits before release.
+- The raw sequential builder treats the forward propagator as read-only; do not
+  copy the full propagator. Wait on its queue and collect garbage after C2 before
+  sequential construction.
 
 ## Lattice Data Preprocessing
 
-- The local preprocessing repository is
-  `Pyquda_Measurement/Lat_Data_Preprocessing`; its GitHub origin still uses the
-  historical `xgao19/Lat_Data_stripping` name until renamed in GitHub settings.
-- Active workflows are `EMT_proton/connected_UD`, `pion_EMFF`, and
-  `pion_qTMDWF_CG`; do not modify the archived `legacy` tree during active
-  workflow maintenance.
-- Connected proton EMT preprocessing is sample-log driven and reconstructs
-  exact input paths without directory globbing. It performs separate 2pt and
-  3pt source-average and configuration-merge stages with antiperiodic temporal
-  boundary signs.
-
-
-## Disconnected Quark EMT Naming
-
-- Use `EMTquarkLoop` as the canonical directory and measurement stem for
-  disconnected quark EMT loops. Active code does not fall back to the retired
-  `EMTc` name.
-- Keep the measurement kind out of the setup tag. A production setup tag is
-  `1HYP_Z4_HP256_Q2_symanzik_eps0.09_F10`; planned base count does not belong
-  in the canonical identity because bases may be extended later.
-- The l64 production migration renamed directories, shards, sample logs, and
-  preprocessing products in place. Sample-log fingerprints and base entries
-  remain unchanged, so completed bases resume under the new canonical name.
-
-
-## Repository Guidance
-
-- The repo-local `skills/` library has been retired. Keep Aurora installation
-  and runtime guidance in the maintained system and application documentation.
-- `_advance_flowed_props` accepts optional `substeps_per_interval=1`. The first
-  flow interval retains its historical ten substeps; later intervals use the
-  requested subdivision and divide the interval step size by the same value.
-  Callers that omit the argument retain the historical behavior exactly.
-- Do not modify `Pyquda_Measurement` while testing external l80 workflows unless
-  the user explicitly authorizes repository changes. Treat this repository as
-  read-only for such testing by default.
+- Active preprocessing lives in `Lat_Data_Preprocessing`; do not modify its
+  archived `legacy` tree during active workflow maintenance.
+- Connected proton EMT preprocessing is sample-log driven, reconstructs exact
+  paths without globs, and handles C2 and C3 separately with antiperiodic
+  temporal-boundary signs.
+- Disconnected preprocessing keeps local/ringed normalization on spatially
+  averaged loops and restores exactly one factor of `Vs` only when constructing
+  hadron disconnected three-point functions.

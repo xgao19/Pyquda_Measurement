@@ -6,10 +6,11 @@
 - This applies to both new code and modifications to existing code.
 
 ## Commit Memory
-- Before each commit, update both `SESSION_MEMORY.md` and `log.md`.
-- In `log.md`, use the date and title of the commit that is about to be
-  created. Do not leave an entry as `Pending Commit` after committing, and do
-  not reuse the title or date from an older pending entry.
+- Before each commit, update `log.md`.
+- Update `SESSION_MEMORY.md` only when reusable environment facts, stable
+  conventions, or easy-to-repeat pitfalls actually change.
+- Do not add commit summaries, completed-work notes, validation diaries, or old
+  output paths to `SESSION_MEMORY.md`; keep those in `log.md` and Git history.
 
 ## Behavioral Guidelines
 These guidelines reduce common LLM coding mistakes. Use judgment for trivial tasks.
