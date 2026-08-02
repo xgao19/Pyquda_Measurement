@@ -1407,3 +1407,17 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Synchronized the repository `AGENTS.md` with the workspace policy that always
   updates `log.md` but updates session memory only when reusable knowledge
   changes.
+
+
+## 2026-08-02: Reduce proton C2 term2 peak memory
+
+- Reordered the three term2 contractions in `contract_proton_c2` so the
+  interpolator contraction precedes the 16-Gamma expansion, without changing
+  term1 or the surrounding object lifetime.
+- Verified the old and new expressions on temporary NumPy tensors at
+  `rtol=1e-12` and `atol=1e-12`; syntax and diff hygiene checks passed.
+- Completed a 10-node, 100-rank Aurora C2-only run for two cfg400 sources with
+  no USM, QUDA, or MPI failure. All 2,000 datasets per source were finite and
+  length 80. The production-reference comparison passed at `rtol=1e-10`, with
+  maximum pointwise relative difference `2.303e-11` and unchanged reference
+  checksums.

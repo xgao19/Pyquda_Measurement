@@ -145,8 +145,8 @@ def contract_proton_c2(
     )
     del t2_s1, t2_s2
     term2_p3 = xp.einsum(
-        "gtmn, wtzyxmlcf -> gwtzyxnlcf",
-        p_2pt_gamma,
+        "kl, wtzyxmlcf -> wtzyxmkcf",
+        interpolator_matrix,
         prop_f.data,
         optimize=True,
     )
@@ -155,15 +155,15 @@ def contract_proton_c2(
     )
     del term2_sink
     t2_f2 = xp.einsum(
-        "wtzyxkncf, gwtzyxnlcf -> gwtzyxkl",
+        "wtzyxkncf, wtzyxmkcf -> wtzyxnm",
         t2_f1,
         term2_p3,
         optimize=True,
     )
     del t2_f1, term2_p3
     t2_f3 = xp.einsum(
-        "kl, gwtzyxkl -> gwtzyx",
-        interpolator_matrix,
+        "gtmn, wtzyxnm -> gwtzyx",
+        p_2pt_gamma,
         t2_f2,
         optimize=True,
     )
