@@ -513,7 +513,8 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
             )
 
     def _measure_flowed_batch(
-        self, U, xis, etas, momentum_projectors, timers=None
+        self, U, xis, etas, momentum_projectors, timers=None,
+        substeps_per_interval=1,
     ):
         """Flow and contract a non-empty source batch in its original order."""
         xis = list(xis)
@@ -552,7 +553,8 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
                 if step == 0:
                     n_steps, step_size = 10, self.flow_epsilon / 10
                 else:
-                    n_steps, step_size = 1, self.flow_epsilon
+                    n_steps = substeps_per_interval
+                    step_size = self.flow_epsilon / substeps_per_interval
                 fields = []
                 for xi, eta in zip(xis, etas):
                     fields.extend((xi, eta))

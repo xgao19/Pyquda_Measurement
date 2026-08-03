@@ -1421,3 +1421,13 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   length 80. The production-reference comparison passed at `rtol=1e-10`, with
   maximum pointwise relative difference `2.303e-11` and unchanged reference
   checksums.
+
+
+## 2026-08-03: Add disconnected fermion-flow interval subdivision
+
+- Added an optional `substeps_per_interval=1` argument to the disconnected
+  fermion-loop batch flow method.
+- Kept the first interval at ten steps and subdivided later intervals while
+  preserving the original default behavior and total flow time.
+- Verified syntax, diff hygiene, the l80 static validators, and default and
+  three-substep schedules with a non-GPU mock.
