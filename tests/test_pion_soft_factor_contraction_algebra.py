@@ -315,29 +315,130 @@ def test_stitch_lexico_rebuilds_a_split_volume():
     np.testing.assert_allclose(stitched, full)
 
 
-def _sum_kept_planes(grid, gather_dims, local_value):
+def _gather_reduce_bookkeeping(grid, gather_dims, keep_all=False):
+    """Ranks that survive the final sum, and the spatial scale factor.
+
+    Each rank's pre-gather partial sum is 1. Allgather replaces it with the
+    sum of the gathered subcommunicator. Time is concatenated, so only one
+    time-slice is accumulated here. Summing every spatial copy of a gathered
+    axis multiplies the correlator by that axis's grid size.
+    """
     from pyquda_measurement_utils.pion_soft_factor_vibe_develop import rank_keeps_gathered_plane
 
-    total = 0
+    grid = tuple(grid)
+    stitched = 1
+    for dim in (0, 1, 2):
+        if dim in gather_dims:
+            stitched *= grid[dim]
+    contributors = []
+    reduced = 0
     for gx in range(grid[0]):
         for gy in range(grid[1]):
             for gz in range(grid[2]):
                 for gt in range(grid[3]):
-                    if rank_keeps_gathered_plane((gx, gy, gz, gt), grid, gather_dims):
-                        total += local_value
-    return total
+                    coord = (gx, gy, gz, gt)
+                    kept = True if keep_all else rank_keeps_gathered_plane(coord, grid, gather_dims)
+                    if not kept:
+                        continue
+                    contributors.append(coord)
+                    if gt == 0:
+                        reduced += stitched
+    true_sum = grid[0] * grid[1] * grid[2]
+    return reduced / true_sum, contributors
 
 
 def test_gathered_plane_is_not_multiplied_by_the_spatial_grid():
-    # x and z were allgathered, so only one of the Gx*Gz copies may be summed.
+    # bT along x and bz along z on grid (Gx, Gy, Gz, Gt) = (2, 1, 2, 1).
     grid = (2, 1, 2, 1)
-    local = 3.0 + 4.0j
-    assert _sum_kept_planes(grid, {0, 2}, local) == local
-    assert _sum_kept_planes(grid, {0, 2}, 1) != grid[0] * grid[2]
+    gather_dims = {0, 2}
+    factor, contributors = _gather_reduce_bookkeeping(grid, gather_dims)
+    naive, _ = _gather_reduce_bookkeeping(grid, gather_dims, keep_all=True)
+    assert contributors == [(0, 0, 0, 0)]
+    assert factor == 1
+    assert naive == grid[0] * grid[2]
+    assert factor != naive
 
-    # y is not gathered, so each y-rank still adds its own slab.
+    # y is not gathered, so every y-rank still adds its own slab.
     split_y = (2, 2, 2, 1)
-    assert _sum_kept_planes(split_y, {0, 2}, 1.0) == split_y[1]
+    y_factor, y_contributors = _gather_reduce_bookkeeping(split_y, {0, 2})
+    assert y_factor == 1
+    assert y_contributors == [(0, 0, 0, 0), (0, 1, 0, 0)]
+
+    # Time is concatenated, not summed, but both time ranks must still send data.
+    split_t = (2, 1, 2, 2)
+    t_factor, t_contributors = _gather_reduce_bookkeeping(split_t, {0, 2})
+    assert t_factor == 1
+    assert t_contributors == [(0, 0, 0, 0), (0, 0, 0, 1)]
 
     # No replication: every rank still owns its local sum.
-    assert _sum_kept_planes((1, 1, 1, 1), {0, 2}, 5.0) == 5.0
+    single_factor, single_contributors = _gather_reduce_bookkeeping((1, 1, 1, 1), {0, 2})
+    assert single_factor == 1
+    assert single_contributors == [(0, 0, 0, 0)]
+
+
+def test_wall_propagator_attrs_are_a_root_only_serial_write(tmp_path, monkeypatch):
+    import inspect
+
+    import h5py
+
+    import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
+
+    source = inspect.getsource(soft.pion_soft_factor.save_wall_propagator)
+    assert "H5File" not in source
+    assert "h5py.File" in source
+    assert source.index("Barrier()") < source.index("h5py.File")
+
+    events = []
+    real_file = h5py.File
+
+    def tracking_file(name, mode="r", *args, **kwargs):
+        events.append(("open", mode, kwargs.get("driver")))
+        assert kwargs.get("driver") != "mpio"
+        return real_file(name, mode, *args, **kwargs)
+
+    class Comm:
+        def __init__(self, rank):
+            self.rank = rank
+
+        def Barrier(self):
+            events.append(("barrier", self.rank))
+
+        def Get_rank(self):
+            return self.rank
+
+    class Prop:
+        def saveH5(self, filename, label):
+            events.append("saveH5")
+            with real_file(filename, "w") as handle:
+                handle["propagator"] = np.array([1.0])
+
+    monkeypatch.setattr(h5py, "File", tracking_file)
+    measurement = soft.pion_soft_factor(
+        {
+            "quark_mom": [[0, 0, 0]],
+            "bT_dir": [0],
+            "bT_length": 0,
+            "tsep_list": [1],
+        }
+    )
+
+    monkeypatch.setattr(soft, "getMPIComm", lambda: Comm(0))
+    tag = str(tmp_path / "wall")
+    measurement.save_wall_propagator(Prop(), tag, attrs={"lat_tag": "S8", "tslice": 1})
+    assert events == [
+        "saveH5",
+        ("barrier", 0),
+        ("open", "a", None),
+        ("barrier", 0),
+    ]
+    with real_file(tag + ".h5", "r") as handle:
+        assert handle.attrs["lat_tag"] == "S8"
+        assert handle.attrs["tslice"] == 1
+        assert "propagator" in handle
+
+    events.clear()
+    monkeypatch.setattr(soft, "getMPIComm", lambda: Comm(1))
+    measurement.save_wall_propagator(
+        Prop(), str(tmp_path / "other"), attrs={"lat_tag": "skipped"}
+    )
+    assert events == ["saveH5", ("barrier", 1), ("barrier", 1)]
