@@ -736,6 +736,88 @@ def test_soft_factor_collects_every_channel_with_one_mpi_gather(monkeypatch):
     assert gather_calls[0][1] == [4, -1, -1, -1]
 
 
+def test_local_lexico_shift_matches_full_field_and_avoids_host_path(monkeypatch):
+    import sys
+
+    import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
+
+    rng = np.random.default_rng(41)
+    field_shape = (1, 1, 1, 4, 4, 4, 3, 3)
+    fields = [
+        rng.normal(size=field_shape) + 1j * rng.normal(size=field_shape)
+        for _ in range(4)
+    ]
+
+    class FakePropagator:
+        def __init__(self, data, counts):
+            self.data = data
+            self.counts = counts
+
+        def lexico(self, _copy):
+            self.counts["lexico"] += 1
+            time.sleep(0.001)
+            return self.data
+
+        def shift(self, amount, mu):
+            self.counts["full_field_shift"] += 1
+            time.sleep(0.003)
+            axis = (3, 2, 1, 0)[mu]
+            return FakePropagator(np.roll(self.data, -amount, axis=axis), self.counts)
+
+    class FakeLatticeInfo:
+        size = [4, 1, 1, 1]
+        global_size = [4, 1, 1, 1]
+        mpi_rank = 0
+
+    comm_module = sys.modules["pyquda_comm"]
+    monkeypatch.setattr(soft, "_source_block_cache_limit_bytes", lambda: 0)
+    monkeypatch.setattr(
+        soft.core,
+        "gatherLattice",
+        lambda values, _axes: np.asarray(values),
+        raising=False,
+    )
+    line = np.arange(4).reshape(1, 1, 1, 4)
+    np.testing.assert_array_equal(
+        soft._shift_local_lexico(np, line, 0),
+        np.array([1, 2, 3, 0]).reshape(1, 1, 1, 4),
+    )
+
+    def run(grid_x):
+        counts = {"lexico": 0, "full_field_shift": 0}
+        monkeypatch.setattr(
+            comm_module,
+            "getGridSize",
+            lambda: [grid_x, 1, 1, 1],
+            raising=False,
+        )
+        measurement = soft.pion_soft_factor(
+            {
+                "quark_mom": [[0, 0, 0]],
+                "bT_dir": [0],
+                "bT_length": 2,
+                "tsep_list": [2],
+            }
+        )
+        monkeypatch.setattr(measurement, "apply_phase", lambda value, *_args: value)
+        props = [FakePropagator(value.copy(), counts) for value in fields]
+        start = time.perf_counter()
+        result = measurement.contract_soft_factor(
+            FakeLatticeInfo(),
+            *props,
+            [0, 0, 0],
+        )[0]
+        return result, counts, time.perf_counter() - start
+
+    reference, reference_counts, reference_time = run(2)
+    local, local_counts, local_time = run(1)
+
+    np.testing.assert_allclose(local, reference, rtol=1e-12, atol=1e-12)
+    assert reference_counts == {"lexico": 8, "full_field_shift": 4}
+    assert local_counts == {"lexico": 4, "full_field_shift": 0}
+    assert local_time < reference_time
+
+
 def test_complete_source_cache_skips_source_shift_and_lexico(monkeypatch):
     import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
 

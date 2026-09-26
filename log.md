@@ -1521,3 +1521,18 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Added a fake-CUDA test for timing aggregation and memory-watermark reporting.
   The complete 17-test focused contraction suite passed. Profiling remains off
   by default and does not change contraction output.
+
+
+## 2026-09-26: Shift rank-local soft-factor directions in lexicographic form
+
+- When the process grid has size one along a requested transverse direction,
+  source and sink propagators are converted to lexicographic form once and
+  their subsequent periodic one-site shifts use the active array backend.
+- The shift sign and t,z,y,x axis mapping follow `pyquda_comm.FullField.shift`;
+  directions split across MPI ranks retain the existing FullField halo path.
+- A full contraction comparison matched the fallback result at
+  `rtol=1e-12, atol=1e-12`. For a three-separation test walk, FullField shifts
+  fell from four to zero and lexicographic conversions from eight to four; the
+  simulated host-staging path was slower than the local-array path.
+- All 18 focused contraction tests passed. A production speedup is deliberately
+  deferred to the new opt-in CUDA profiler on the target GPU system.

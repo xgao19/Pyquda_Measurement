@@ -314,6 +314,23 @@ _LEXICO_AXIS_OF_MU = (3, 2, 1, 0)
 _GRID_INDEX_OF_LEXICO_AXIS = (3, 2, 1, 0)
 
 
+def _can_shift_lexico_locally(xp, mu):
+    """Return whether a shift direction is entirely local to each rank."""
+    try:
+        from pyquda_comm import getGridSize
+
+        return int(getGridSize()[int(mu) % 4]) == 1 and hasattr(xp, "roll")
+    except Exception:
+        return False
+
+
+def _shift_local_lexico(xp, field, mu):
+    """Apply one periodic nearest-neighbor shift to a lexicographic field."""
+    mu = int(mu)
+    direction = 1 if mu < 4 else -1
+    return xp.roll(field, -direction, axis=_LEXICO_AXIS_OF_MU[mu % 4])
+
+
 def _tmdwf_components(backward, forward, src_gamma, gamma5):
     """Site tensors whose dot product is the TMDWF trace.
 
@@ -695,7 +712,6 @@ class pion_soft_factor:
             prop_fw.data,
         )
         for idir, bT_dir in enumerate(self.bT_dir):
-            shifted_sink_backward = phased_sink_backward
             source_cache_complete = self._source_block_cache_complete(
                 prop_fw,
                 prop_bw_src,
@@ -708,16 +724,38 @@ class pion_soft_factor:
                         src_ls,
                         gamma5,
                     )
-            shifted_source_backward = None if source_cache_complete else prop_bw_src
+            local_lexico_shift = _can_shift_lexico_locally(xp, bT_dir)
+            if local_lexico_shift:
+                with profiler.measure("sink_lexico"):
+                    shifted_sink_backward = phased_sink_backward.lexico(False)
+                if source_cache_complete:
+                    shifted_source_backward = None
+                else:
+                    with profiler.measure("source_lexico"):
+                        shifted_source_backward = prop_bw_src.lexico(False)
+            else:
+                shifted_sink_backward = phased_sink_backward
+                shifted_source_backward = None if source_cache_complete else prop_bw_src
             for bT in range(self.bT_length + 1):
                 if bT != 0:
                     with profiler.measure("sink_shift"):
-                        shifted_sink_backward = shifted_sink_backward.shift(1, bT_dir)
+                        shifted_sink_backward = (
+                            _shift_local_lexico(xp, shifted_sink_backward, bT_dir)
+                            if local_lexico_shift
+                            else shifted_sink_backward.shift(1, bT_dir)
+                        )
                     if not source_cache_complete:
                         with profiler.measure("source_shift"):
-                            shifted_source_backward = shifted_source_backward.shift(1, bT_dir)
-                with profiler.measure("sink_lexico"):
-                    Gw_bperp_shift = shifted_sink_backward.lexico(False)
+                            shifted_source_backward = (
+                                _shift_local_lexico(xp, shifted_source_backward, bT_dir)
+                                if local_lexico_shift
+                                else shifted_source_backward.shift(1, bT_dir)
+                            )
+                if local_lexico_shift:
+                    Gw_bperp_shift = shifted_sink_backward
+                else:
+                    with profiler.measure("sink_lexico"):
+                        Gw_bperp_shift = shifted_sink_backward.lexico(False)
                 with profiler.measure("source_block"):
                     tmp_1 = self._cached_source_block(
                         prop_fw,
@@ -726,7 +764,11 @@ class pion_soft_factor:
                         bT,
                         lambda shifted=shifted_source_backward: soft_factor_block_from_left(
                             source_left,
-                            shifted.lexico(False).conj(),
+                            (
+                                shifted
+                                if local_lexico_shift
+                                else shifted.lexico(False)
+                            ).conj(),
                         ),
                     )
                 with profiler.measure("sink_block"):

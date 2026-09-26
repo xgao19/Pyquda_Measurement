@@ -20,9 +20,10 @@ def test_connected_emt_uses_lightweight_bilinear_base():
     assert not issubclass(ProtonQuarkEMT, EMTDisconnectedQuark1pt)
 
 
-def test_soft_factor_uses_global_propagator_shift():
+def test_soft_factor_uses_local_lexico_shift_with_global_fallback():
     source = inspect.getsource(pion_soft_factor.contract_soft_factor)
-    assert "xp.roll" not in source
+    assert "_can_shift_lexico_locally" in source
+    assert "_shift_local_lexico" in source
     assert ".shift(1, bT_dir)" in source
     assert "shift(bT" not in source
     tmdwf = inspect.getsource(pion_soft_factor.contract_tmdwf_check)
