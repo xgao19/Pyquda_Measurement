@@ -593,6 +593,56 @@ def test_wall_propagator_attr_failure_is_broadcast_to_every_rank(tmp_path, monke
             )
 
 
+def test_gpu_profiler_records_cuda_time_and_memory_watermark(monkeypatch):
+    import sys
+    import types
+
+    import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
+
+    memory_samples = iter([(80, 100), (60, 100), (70, 100)])
+
+    class FakeEvent:
+        def record(self):
+            pass
+
+        def synchronize(self):
+            pass
+
+    fake_cupy = types.ModuleType("cupy")
+    fake_cupy.cuda = types.SimpleNamespace(
+        Event=FakeEvent,
+        get_elapsed_time=lambda _start, _stop: 2.5,
+        runtime=types.SimpleNamespace(memGetInfo=lambda: next(memory_samples)),
+    )
+    fake_cupy.get_default_memory_pool = lambda: types.SimpleNamespace(used_bytes=lambda: 12)
+
+    class FakeComm:
+        def gather(self, value, root=0):
+            assert root == 0
+            return [value]
+
+    class FakeLatticeInfo:
+        mpi_rank = 0
+
+    messages = []
+    monkeypatch.setenv("PION_SOFT_PROFILE_GPU", "1")
+    monkeypatch.setitem(sys.modules, "cupy", fake_cupy)
+    monkeypatch.setattr(soft, "getMPIComm", lambda: FakeComm())
+    monkeypatch.setattr(soft, "mpi_print", lambda _latt_info, message: messages.append(message))
+
+    profiler = soft._SoftFactorGpuProfiler(FakeLatticeInfo(), fake_cupy)
+    with profiler.measure("sink_shift"):
+        pass
+    profiler.report()
+
+    assert profiler.timings["sink_shift"][0] == 1
+    assert profiler.timings["sink_shift"][1] == 2.5
+    assert profiler.peak_device_used == 40
+    assert profiler.peak_label == "sink_shift"
+    assert any("label=sink_shift" in message and "cuda_ms_max=2.500" in message for message in messages)
+    assert any("peak_label=sink_shift" in message for message in messages)
+
+
 def test_soft_factor_collects_every_channel_with_one_mpi_gather(monkeypatch):
     import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
 

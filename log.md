@@ -1506,3 +1506,18 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - This is a synchronization-correctness change outside the contraction hot
   path; it adds no per-contraction work and therefore has no meaningful
   contraction performance benchmark.
+
+
+## 2026-09-26: Add opt-in soft-factor GPU profiling
+
+- Added `PION_SOFT_PROFILE_GPU=1` instrumentation around operator setup,
+  source and sink preparation, shifts, lexicographic conversion, block
+  construction, spatial reduction, gamma contraction, and result publication.
+- Profiling uses CUDA events plus wall-clock timing, synchronizes only while
+  explicitly enabled, and reports the maximum stage time across MPI ranks.
+- Device-wide and CuPy-pool memory use are sampled after each stage; rank zero
+  reports the largest device-memory high-water mark together with its stage
+  label and rank.
+- Added a fake-CUDA test for timing aggregation and memory-watermark reporting.
+  The complete 17-test focused contraction suite passed. Profiling remains off
+  by default and does not change contraction output.

@@ -69,7 +69,10 @@ The gamma lists and default pion interpolators are kept close to the legacy
 script so that output can be compared directly before further refactoring.
 """
 
+from contextlib import contextmanager
+import os
 from pathlib import Path
+import time
 
 import h5py
 import numpy as np
@@ -106,6 +109,110 @@ soft_factor_pion_channel_pairs = {
     "Z5-X5__Z5-X5": (_z5_minus_x5, _z5_minus_x5),
 }
 G5 = gamma.gamma(15)
+
+
+def _soft_factor_gpu_profile_enabled():
+    value = os.environ.get("PION_SOFT_PROFILE_GPU", "0").strip().lower()
+    return value not in {"0", "false", "off", "no", ""}
+
+
+class _SoftFactorGpuProfiler:
+    """Collect opt-in CUDA timings and device-memory high-water marks."""
+
+    def __init__(self, latt_info, xp):
+        self.latt_info = latt_info
+        self.enabled = False
+        self.timings = {}
+        self.peak_device_used = 0
+        self.peak_pool_used = 0
+        self.peak_label = "unavailable"
+        self.device_total = 0
+        if not _soft_factor_gpu_profile_enabled():
+            return
+        try:
+            import cupy
+
+            if xp is not cupy:
+                mpi_print(latt_info, "SOFT_FACTOR_PROFILE disabled: backend is not CuPy")
+                return
+            self.cupy = cupy
+            self.enabled = True
+            self._sample_memory("start")
+        except Exception as exc:
+            self.enabled = False
+            mpi_print(latt_info, f"SOFT_FACTOR_PROFILE disabled: {type(exc).__name__}: {exc}")
+
+    def _sample_memory(self, label):
+        if not self.enabled:
+            return
+        free, total = self.cupy.cuda.runtime.memGetInfo()
+        device_used = int(total) - int(free)
+        pool_used = int(self.cupy.get_default_memory_pool().used_bytes())
+        self.device_total = int(total)
+        if device_used > self.peak_device_used:
+            self.peak_device_used = device_used
+            self.peak_label = label
+        self.peak_pool_used = max(self.peak_pool_used, pool_used)
+
+    @contextmanager
+    def measure(self, label):
+        if not self.enabled:
+            yield
+            return
+        start = self.cupy.cuda.Event()
+        stop = self.cupy.cuda.Event()
+        start.record()
+        wall_start = time.perf_counter()
+        try:
+            yield
+        finally:
+            stop.record()
+            stop.synchronize()
+            cuda_ms = float(self.cupy.cuda.get_elapsed_time(start, stop))
+            wall_ms = 1000.0 * (time.perf_counter() - wall_start)
+            entry = self.timings.setdefault(label, [0, 0.0, 0.0])
+            entry[0] += 1
+            entry[1] += cuda_ms
+            entry[2] += wall_ms
+            self._sample_memory(label)
+
+    def report(self):
+        if not self.enabled:
+            return
+        self._sample_memory("end")
+        payload = {
+            "timings": self.timings,
+            "peak_device_used": self.peak_device_used,
+            "peak_pool_used": self.peak_pool_used,
+            "peak_label": self.peak_label,
+            "device_total": self.device_total,
+        }
+        gathered = getMPIComm().gather(payload, root=0)
+        if self.latt_info.mpi_rank != 0:
+            return
+        labels = sorted({label for item in gathered for label in item["timings"]})
+        for label in labels:
+            entries = [item["timings"].get(label, [0, 0.0, 0.0]) for item in gathered]
+            mpi_print(
+                self.latt_info,
+                f"SOFT_FACTOR_PROFILE label={label} "
+                f"calls_max={max(entry[0] for entry in entries)} "
+                f"cuda_ms_max={max(entry[1] for entry in entries):.3f} "
+                f"wall_ms_max={max(entry[2] for entry in entries):.3f}",
+            )
+        peak_rank, peak = max(
+            enumerate(gathered),
+            key=lambda item: item[1]["peak_device_used"],
+        )
+        gib = float(1 << 30)
+        mpi_print(
+            self.latt_info,
+            f"SOFT_FACTOR_MEMORY peak_rank={peak_rank} "
+            f"peak_label={peak['peak_label']} "
+            f"device_used_gib={peak['peak_device_used'] / gib:.3f} "
+            f"pool_used_gib={max(item['peak_pool_used'] for item in gathered) / gib:.3f} "
+            f"device_total_gib={peak['device_total'] / gib:.3f}",
+        )
 
 
 def _source_block_cache_limit_bytes():
@@ -531,6 +638,7 @@ class pion_soft_factor:
 
     def contract_soft_factor(self, latt_info, prop_fw, prop_bw_src, prop_sink_bw, prop_sink_fw, pion_mom):
         xp = _get_xp_from_array(prop_fw.data)
+        profiler = _SoftFactorGpuProfiler(latt_info, xp)
         gamma5 = matrix_on_backend(G5, prop_fw.data)
         pion_pair_labels = list(self.pion_channel_pairs)
         gamma_pair_labels = list(self.gamma_channel_pairs)
@@ -548,27 +656,29 @@ class pion_soft_factor:
             pair_label: _raw_gamma_by_label[labels[1]]
             for pair_label, labels in self.gamma_channel_pairs.items()
         }
-        src_ls = matrix_stack_on_backend(
-            [pion_src_matrices[key] for key in pion_pair_labels], prop_fw.data
-        )
-        sink_ls = matrix_stack_on_backend(
-            [pion_sink_matrices[key] for key in pion_pair_labels], prop_fw.data
-        )
-        gamma1_ls = matrix_stack_on_backend(
-            [gamma1_matrices[key] for key in gamma_pair_labels], prop_fw.data
-        )
-        gamma2_ls = matrix_stack_on_backend(
-            [gamma2_matrices[key] for key in gamma_pair_labels], prop_fw.data
-        )
+        with profiler.measure("operator_setup"):
+            src_ls = matrix_stack_on_backend(
+                [pion_src_matrices[key] for key in pion_pair_labels], prop_fw.data
+            )
+            sink_ls = matrix_stack_on_backend(
+                [pion_sink_matrices[key] for key in pion_pair_labels], prop_fw.data
+            )
+            gamma1_ls = matrix_stack_on_backend(
+                [gamma1_matrices[key] for key in gamma_pair_labels], prop_fw.data
+            )
+            gamma2_ls = matrix_stack_on_backend(
+                [gamma2_matrices[key] for key in gamma_pair_labels], prop_fw.data
+            )
 
-        Gw_dagger = prop_sink_fw.lexico(False)
-        phased_sink_backward = self.apply_phase(
-            prop_sink_bw,
-            [-2 * pion_mom[0], -2 * pion_mom[1], -2 * pion_mom[2]],
-            1,
-        )
-        Gw_dagger_conj = Gw_dagger.conj()
-        sink_right = prepare_soft_factor_right(sink_ls, gamma5, Gw_dagger_conj)
+        with profiler.measure("prepare_sink_fixed"):
+            Gw_dagger = prop_sink_fw.lexico(False)
+            phased_sink_backward = self.apply_phase(
+                prop_sink_bw,
+                [-2 * pion_mom[0], -2 * pion_mom[1], -2 * pion_mom[2]],
+                1,
+            )
+            Gw_dagger_conj = Gw_dagger.conj()
+            sink_right = prepare_soft_factor_right(sink_ls, gamma5, Gw_dagger_conj)
         source_left = None
 
         local_shape = (
@@ -592,45 +702,53 @@ class pion_soft_factor:
                 bT_dir,
             )
             if not source_cache_complete and source_left is None:
-                source_left = prepare_soft_factor_left(
-                    prop_fw.lexico(False),
-                    src_ls,
-                    gamma5,
-                )
+                with profiler.measure("prepare_source_fixed"):
+                    source_left = prepare_soft_factor_left(
+                        prop_fw.lexico(False),
+                        src_ls,
+                        gamma5,
+                    )
             shifted_source_backward = None if source_cache_complete else prop_bw_src
             for bT in range(self.bT_length + 1):
                 if bT != 0:
-                    shifted_sink_backward = shifted_sink_backward.shift(1, bT_dir)
+                    with profiler.measure("sink_shift"):
+                        shifted_sink_backward = shifted_sink_backward.shift(1, bT_dir)
                     if not source_cache_complete:
-                        shifted_source_backward = shifted_source_backward.shift(1, bT_dir)
-                Gw_bperp_shift = shifted_sink_backward.lexico(False)
-                tmp_1 = self._cached_source_block(
-                    prop_fw,
-                    prop_bw_src,
-                    bT_dir,
-                    bT,
-                    lambda shifted=shifted_source_backward: soft_factor_block_from_left(
-                        source_left,
-                        shifted.lexico(False).conj(),
-                    ),
-                )
-                tmp_2 = soft_factor_block_from_right(Gw_bperp_shift, sink_right)
+                        with profiler.measure("source_shift"):
+                            shifted_source_backward = shifted_source_backward.shift(1, bT_dir)
+                with profiler.measure("sink_lexico"):
+                    Gw_bperp_shift = shifted_sink_backward.lexico(False)
+                with profiler.measure("source_block"):
+                    tmp_1 = self._cached_source_block(
+                        prop_fw,
+                        prop_bw_src,
+                        bT_dir,
+                        bT,
+                        lambda shifted=shifted_source_backward: soft_factor_block_from_left(
+                            source_left,
+                            shifted.lexico(False).conj(),
+                        ),
+                    )
+                with profiler.measure("sink_block"):
+                    tmp_2 = soft_factor_block_from_right(Gw_bperp_shift, sink_right)
                 for isrc in range(len(pion_pair_labels)):
                     # One spatial reduction serves every Gamma pair:
                     # M[t,j,i,k,l] = sum_{zyx,ba} A[tzyxjiba] B[tzyxklba].
-                    color_spin = xp.einsum(
-                        "tzyxjiba,tzyxklba->tjikl",
-                        tmp_1[isrc],
-                        tmp_2[isrc],
-                        optimize=True,
-                    )
-                    corr_by_gamma = xp.einsum(
-                        "tjikl,gik,glj->gt",
-                        color_spin,
-                        gamma2_ls,
-                        gamma1_ls,
-                        optimize=True,
-                    )
+                    with profiler.measure("spatial_reduce"):
+                        color_spin = xp.einsum(
+                            "tzyxjiba,tzyxklba->tjikl",
+                            tmp_1[isrc],
+                            tmp_2[isrc],
+                            optimize=True,
+                        )
+                    with profiler.measure("gamma_contract"):
+                        corr_by_gamma = xp.einsum(
+                            "tjikl,gik,glj->gt",
+                            color_spin,
+                            gamma2_ls,
+                            gamma1_ls,
+                            optimize=True,
+                        )
                     corr_local_collect[isrc, :, idir, bT] = corr_by_gamma
                     mpi_print(
                         latt_info,
@@ -642,10 +760,12 @@ class pion_soft_factor:
                     tmp_1,
                     tmp_2,
                 )
-        corr_collect = core.gatherLattice(
-            array_to_numpy(corr_local_collect),
-            [4, -1, -1, -1],
-        )
+        with profiler.measure("result_publication"):
+            corr_collect = core.gatherLattice(
+                array_to_numpy(corr_local_collect),
+                [4, -1, -1, -1],
+            )
         if latt_info.mpi_rank == 0:
             corr_collect = np.asarray(corr_collect, dtype=np.complex128)
+        profiler.report()
         return corr_collect, pion_pair_labels, gamma_pair_labels
