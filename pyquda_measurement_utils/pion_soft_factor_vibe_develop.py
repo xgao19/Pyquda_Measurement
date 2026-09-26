@@ -71,9 +71,9 @@ script so that output can be compared directly before further refactoring.
 
 from pathlib import Path
 
-import h5py
 import numpy as np
-
+from pyquda import getMPIComm
+from pyquda_comm.hdf5 import File as H5File
 from pyquda_utils import core, gamma, phase, source
 
 from pyquda_measurement_utils.fermion_bilinear_basis import (
@@ -151,9 +151,12 @@ class pion_soft_factor:
         ensure_parent_dir(save_h5)
         prop.saveH5(save_h5, "propagator")
         if attrs:
-            with h5py.File(save_h5, "a") as f:
-                for key, value in attrs.items():
-                    f.attrs[key] = value
+            # saveH5 uses MPI-IO; a serial h5py.File("a") from every rank
+            # races and can hang or raise addr overflow on Lustre.
+            with H5File(save_h5, "a") as f:
+                if getMPIComm().Get_rank() == 0:
+                    for key, value in attrs.items():
+                        f.attrs[key] = value
 
     def load_wall_propagator(self, tag):
         return core.LatticePropagator.loadH5(tag + ".h5", "propagator")
