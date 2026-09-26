@@ -1446,3 +1446,18 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   tests passed. A fixed-latency collective microbenchmark reduced 126 calls to
   one and measured 0.039475 s versus 0.000341 s (115.8x for the isolated
   publication overhead).
+
+
+## 2026-09-26: Skip source preparation on complete cache hits
+
+- Checked whether every source-side soft-factor block for a transverse
+  direction is resident before walking that direction.
+- Complete cache hits now skip all repeated source propagator shifts,
+  lexicographic materializations, and conjugations; partial caches retain the
+  one-site incremental walk and only materialize fields for missing blocks.
+- The focused regression verifies identical contraction output while the
+  second sink separation performs zero additional source shifts or source
+  lexicographic conversions. All 13 algebra tests passed.
+- For 21 separations on a 4x8x8x8 complex test field, the isolated source
+  preparation changed from 0.006525 s to 0.000000773 s after a complete cache
+  hit; the production benefit depends on halo latency and lattice volume.

@@ -535,3 +535,82 @@ def test_soft_factor_collects_every_channel_with_one_mpi_gather(monkeypatch):
     np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-12)
     assert len(gather_calls) == 1
     assert gather_calls[0][1] == [4, -1, -1, -1]
+
+
+def test_complete_source_cache_skips_source_shift_and_lexico(monkeypatch):
+    import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
+
+    rng = np.random.default_rng(37)
+    counts = {"source_shift": 0, "source_lexico": 0, "sink_shift": 0}
+    field_shape = (1, 1, 1, 3, 4, 4, 3, 3)
+
+    class CountingPropagator:
+        def __init__(self, data, role):
+            self.data = data
+            self.role = role
+
+        def lexico(self, _copy):
+            if self.role == "source":
+                counts["source_lexico"] += 1
+                time.sleep(0.002)
+            return self.data
+
+        def shift(self, amount, mu):
+            if self.role == "source":
+                counts["source_shift"] += 1
+                time.sleep(0.002)
+            elif self.role == "sink":
+                counts["sink_shift"] += 1
+            axis = (3, 2, 1, 0)[mu]
+            return CountingPropagator(np.roll(self.data, amount, axis=axis), self.role)
+
+    class FakeLatticeInfo:
+        size = [3, 1, 1, 1]
+        global_size = [3, 1, 1, 1]
+        mpi_rank = 0
+
+    def prop(role):
+        data = rng.normal(size=field_shape) + 1j * rng.normal(size=field_shape)
+        return CountingPropagator(data, role)
+
+    def cheap_block(left, gamma_ls, _gamma5, _right):
+        return np.ones(
+            (gamma_ls.shape[0], *left.shape[:4], 4, 4, 3, 3),
+            dtype=left.dtype,
+        )
+
+    measurement = soft.pion_soft_factor(
+        {
+            "quark_mom": [[0, 0, 0]],
+            "bT_dir": [0],
+            "bT_length": 2,
+            "tsep_list": [2, 4],
+        }
+    )
+    monkeypatch.setattr(measurement, "apply_phase", lambda value, *_args, **_kwargs: value)
+    monkeypatch.setattr(soft, "soft_factor_block", cheap_block)
+    monkeypatch.setattr(soft, "_source_block_cache_limit_bytes", lambda: 1 << 40)
+    monkeypatch.setattr(soft.core, "gatherLattice", lambda values, _axes: np.asarray(values), raising=False)
+
+    args = (
+        FakeLatticeInfo(),
+        prop("forward"),
+        prop("source"),
+        prop("sink"),
+        prop("sink_forward"),
+        [0, 0, 0],
+    )
+    t0 = time.perf_counter()
+    measurement.contract_soft_factor(*args)
+    first_time = time.perf_counter() - t0
+    after_first = dict(counts)
+    t1 = time.perf_counter()
+    measurement.contract_soft_factor(*args)
+    cached_time = time.perf_counter() - t1
+
+    assert after_first["source_shift"] == 2
+    assert after_first["source_lexico"] == 3
+    assert counts["source_shift"] == after_first["source_shift"]
+    assert counts["source_lexico"] == after_first["source_lexico"]
+    assert counts["sink_shift"] == 2 * after_first["sink_shift"]
+    assert cached_time < first_time

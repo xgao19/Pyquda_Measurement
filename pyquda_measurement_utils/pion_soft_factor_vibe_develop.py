@@ -428,6 +428,20 @@ class pion_soft_factor:
         self._source_block_misses += 1
         return value
 
+    def _source_block_cache_complete(self, prop_fw, prop_bw_src, bT_dir):
+        """Return whether every requested source block is already resident."""
+        cache_id = (id(prop_fw), id(prop_bw_src), tuple(self.pion_channel_pairs))
+        if getattr(self, "_source_block_cache_id", None) != cache_id:
+            self._source_block_cache = {}
+            self._source_block_cache_bytes = 0
+            self._source_block_cache_id = cache_id
+            self._source_block_hits = 0
+            self._source_block_misses = 0
+        return all(
+            (int(bT_dir), bT) in self._source_block_cache
+            for bT in range(self.bT_length + 1)
+        )
+
     def contract_soft_factor(self, latt_info, prop_fw, prop_bw_src, prop_sink_bw, prop_sink_fw, pion_mom):
         xp = _get_xp_from_array(prop_fw.data)
         gamma5 = matrix_on_backend(G5, prop_fw.data)
@@ -484,19 +498,29 @@ class pion_soft_factor:
         )
         for idir, bT_dir in enumerate(self.bT_dir):
             shifted_sink_backward = phased_sink_backward
-            shifted_source_backward = prop_bw_src
+            source_cache_complete = self._source_block_cache_complete(
+                prop_fw,
+                prop_bw_src,
+                bT_dir,
+            )
+            shifted_source_backward = None if source_cache_complete else prop_bw_src
             for bT in range(self.bT_length + 1):
                 if bT != 0:
                     shifted_sink_backward = shifted_sink_backward.shift(1, bT_dir)
-                    shifted_source_backward = shifted_source_backward.shift(1, bT_dir)
+                    if not source_cache_complete:
+                        shifted_source_backward = shifted_source_backward.shift(1, bT_dir)
                 Gw_bperp_shift = shifted_sink_backward.lexico(False)
-                Gw_bperp_dagger_shift = shifted_source_backward.lexico(False).conj()
                 tmp_1 = self._cached_source_block(
                     prop_fw,
                     prop_bw_src,
                     bT_dir,
                     bT,
-                    lambda: soft_factor_block(Gw, src_ls, gamma5, Gw_bperp_dagger_shift),
+                    lambda shifted=shifted_source_backward: soft_factor_block(
+                        Gw,
+                        src_ls,
+                        gamma5,
+                        shifted.lexico(False).conj(),
+                    ),
                 )
                 tmp_2 = soft_factor_block(Gw_bperp_shift, sink_ls, gamma5, Gw_dagger_conj)
                 for isrc in range(len(pion_pair_labels)):
@@ -523,7 +547,6 @@ class pion_soft_factor:
                     )
                 del (
                     Gw_bperp_shift,
-                    Gw_bperp_dagger_shift,
                     tmp_1,
                     tmp_2,
                 )
