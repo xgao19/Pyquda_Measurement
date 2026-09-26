@@ -1431,3 +1431,18 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   preserving the original default behavior and total flow time.
 - Verified syntax, diff hygiene, the l80 static validators, and default and
   three-substep schedules with a non-GPU mock.
+
+
+## 2026-09-26: Batch soft-factor result publication
+
+- Accumulated every local pion-pair, Gamma-pair, direction, and separation
+  result on the contraction backend before copying the small result tensor to
+  the host and entering MPI.
+- Reduced the default one-pion, six-Gamma, 21-separation path from 126
+  device synchronizations and MPI gathers per sink separation to one, without
+  changing the transferred byte count or output layout.
+- Compared the batched result against the original per-Gamma contraction on
+  random complex tensors at `rtol=1e-12, atol=1e-12`; all 11 focused algebra
+  tests passed. A fixed-latency collective microbenchmark reduced 126 calls to
+  one and measured 0.039475 s versus 0.000341 s (115.8x for the isolated
+  publication overhead).

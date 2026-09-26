@@ -84,6 +84,7 @@ from pyquda_measurement_utils.io_corr import ensure_parent_dir
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
     matrix_on_backend,
     matrix_stack_on_backend,
+    zeros_on_backend,
 )
 from pyquda_measurement_utils.tools import (
     _get_xp_from_array,
@@ -468,8 +469,19 @@ class pion_soft_factor:
         )
         Gw_dagger_conj = Gw_dagger.conj()
 
-        shape = (len(pion_pair_labels), len(gamma_pair_labels), len(self.bT_dir), self.bT_length + 1, latt_info.global_size[3])
-        corr_collect = np.empty(shape, dtype=np.complex128) if latt_info.mpi_rank == 0 else None
+        local_shape = (
+            len(pion_pair_labels),
+            len(gamma_pair_labels),
+            len(self.bT_dir),
+            self.bT_length + 1,
+            latt_info.size[3],
+        )
+        corr_local_collect = zeros_on_backend(
+            local_shape,
+            prop_fw.data.dtype,
+            xp,
+            prop_fw.data,
+        )
         for idir, bT_dir in enumerate(self.bT_dir):
             shifted_sink_backward = phased_sink_backward
             shifted_source_backward = prop_bw_src
@@ -503,15 +515,22 @@ class pion_soft_factor:
                         gamma1_ls,
                         optimize=True,
                     )
-                    for igm in range(len(gamma_pair_labels)):
-                        mpi_print(latt_info, f"Contract pion soft factor bT={bT} dir={bT_dir} pion_pair={pion_pair_labels[isrc]} gamma_pair={gamma_pair_labels[igm]}")
-                        corr_global = core.gatherLattice(array_to_numpy(corr_by_gamma[igm]), [0, -1, -1, -1])
-                        if latt_info.mpi_rank == 0:
-                            corr_collect[isrc, igm, idir, bT] = corr_global
+                    corr_local_collect[isrc, :, idir, bT] = corr_by_gamma
+                    mpi_print(
+                        latt_info,
+                        f"Contract pion soft factor bT={bT} dir={bT_dir} "
+                        f"pion_pair={pion_pair_labels[isrc]} gamma_pairs={len(gamma_pair_labels)}",
+                    )
                 del (
                     Gw_bperp_shift,
                     Gw_bperp_dagger_shift,
                     tmp_1,
                     tmp_2,
                 )
+        corr_collect = core.gatherLattice(
+            array_to_numpy(corr_local_collect),
+            [4, -1, -1, -1],
+        )
+        if latt_info.mpi_rank == 0:
+            corr_collect = np.asarray(corr_collect, dtype=np.complex128)
         return corr_collect, pion_pair_labels, gamma_pair_labels

@@ -442,3 +442,96 @@ def test_wall_propagator_attrs_are_a_root_only_serial_write(tmp_path, monkeypatc
         Prop(), str(tmp_path / "other"), attrs={"lat_tag": "skipped"}
     )
     assert events == ["saveH5", ("barrier", 1), ("barrier", 1)]
+
+
+def test_soft_factor_collects_every_channel_with_one_mpi_gather(monkeypatch):
+    import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
+
+    rng = np.random.default_rng(29)
+    field_shape = (2, 1, 1, 2, 4, 4, 3, 3)
+
+    class FakePropagator:
+        def __init__(self, data):
+            self.data = data
+
+        def lexico(self, _copy):
+            return self.data
+
+        def shift(self, amount, mu):
+            axis = (3, 2, 1, 0)[mu]
+            return FakePropagator(np.roll(self.data, amount, axis=axis))
+
+    class FakeLatticeInfo:
+        size = [2, 1, 1, 2]
+        global_size = [2, 1, 1, 2]
+        mpi_rank = 0
+
+    def random_prop():
+        data = rng.normal(size=field_shape) + 1j * rng.normal(size=field_shape)
+        return FakePropagator(data)
+
+    measurement = soft.pion_soft_factor(
+        {
+            "quark_mom": [[0, 0, 0]],
+            "bT_dir": [0],
+            "bT_length": 1,
+            "tsep_list": [2],
+        }
+    )
+    monkeypatch.setattr(measurement, "apply_phase", lambda prop, *_args, **_kwargs: prop)
+    monkeypatch.setattr(soft, "_source_block_cache_limit_bytes", lambda: 0)
+    gather_calls = []
+
+    def fake_gather(values, axes):
+        gather_calls.append((np.asarray(values).copy(), list(axes)))
+        return np.asarray(values)
+
+    monkeypatch.setattr(soft.core, "gatherLattice", fake_gather, raising=False)
+    prop_fw, prop_bw_src, prop_sink_bw, prop_sink_fw = [random_prop() for _ in range(4)]
+    got, pion_labels, gamma_labels = measurement.contract_soft_factor(
+        FakeLatticeInfo(),
+        prop_fw,
+        prop_bw_src,
+        prop_sink_bw,
+        prop_sink_fw,
+        [0, 0, 0],
+    )
+
+    gamma5 = soft.matrix_on_backend(soft.G5, prop_fw.data)
+    src_ls = soft.matrix_stack_on_backend(
+        [measurement.pion_channel_pairs[label][0] for label in pion_labels],
+        prop_fw.data,
+    )
+    sink_ls = soft.matrix_stack_on_backend(
+        [measurement.pion_channel_pairs[label][1] for label in pion_labels],
+        prop_fw.data,
+    )
+    gamma1_ls = soft.matrix_stack_on_backend(
+        [soft._raw_gamma_by_label[measurement.gamma_channel_pairs[label][0]] for label in gamma_labels],
+        prop_fw.data,
+    )
+    gamma2_ls = soft.matrix_stack_on_backend(
+        [soft._raw_gamma_by_label[measurement.gamma_channel_pairs[label][1]] for label in gamma_labels],
+        prop_fw.data,
+    )
+    expected = np.empty_like(got)
+    for bT in range(2):
+        source_shift = prop_bw_src.shift(bT, 0).lexico(False).conj()
+        sink_shift = prop_sink_bw.shift(bT, 0).lexico(False)
+        tmp_1 = soft.soft_factor_block(prop_fw.lexico(False), src_ls, gamma5, source_shift)
+        tmp_2 = soft.soft_factor_block(sink_shift, sink_ls, gamma5, prop_sink_fw.lexico(False).conj())
+        for isrc in range(len(pion_labels)):
+            for igamma in range(len(gamma_labels)):
+                corr_site = np.einsum(
+                    "tzyxjiba,ik,tzyxklba,lj->tzyx",
+                    tmp_1[isrc],
+                    gamma2_ls[igamma],
+                    tmp_2[isrc],
+                    gamma1_ls[igamma],
+                    optimize=True,
+                )
+                expected[isrc, igamma, 0, bT] = np.einsum("tzyx->t", corr_site)
+
+    np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-12)
+    assert len(gather_calls) == 1
+    assert gather_calls[0][1] == [4, -1, -1, -1]
