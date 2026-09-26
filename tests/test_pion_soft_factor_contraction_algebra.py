@@ -76,6 +76,66 @@ def test_pion_soft_factor_reduced_gamma_matches_per_gamma_trace():
     assert reduced_time < loop_time, f"reduced {reduced_time:.3f}s was not faster than loop {loop_time:.3f}s"
 
 
+def _soft_factor_block(left, gamma_ls, gamma5, right):
+    n_src = gamma_ls.shape[0]
+    spatial = left.shape[:4]
+    eye3 = np.eye(3, dtype=left.dtype)
+    spin = np.matmul(gamma_ls, gamma5)
+    spin12 = np.einsum("sil,ba->sialb", spin, eye3).reshape(n_src, 12, 12)
+    gamma5_12 = np.einsum("mn,ba->mbna", gamma5, eye3).reshape(12, 12)
+    left_m = np.transpose(left, (0, 1, 2, 3, 4, 6, 5, 7)).reshape(-1, 12, 12)
+    right_m = np.transpose(right, (0, 1, 2, 3, 4, 6, 5, 7)).reshape(-1, 12, 12)
+    right_t = np.swapaxes(np.matmul(gamma5_12, right_m), -1, -2)
+    out_m = np.matmul(left_m[None], np.matmul(spin12[:, None], right_t[None]))
+    out = out_m.reshape(n_src, *spatial, 4, 3, 4, 3)
+    return np.transpose(out, (0, 1, 2, 3, 4, 5, 7, 6, 8))
+
+
+def _time_median(fn, repeats=3):
+    samples = []
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        fn()
+        samples.append(time.perf_counter() - t0)
+    samples.sort()
+    return samples[len(samples) // 2]
+
+
+def test_pion_soft_factor_block_matmul_matches_einsum_and_is_faster():
+    rng = np.random.default_rng(7)
+    shape = (8, 8, 8, 8, 4, 4, 3, 3)
+    left = rng.normal(size=shape) + 1j * rng.normal(size=shape)
+    right = rng.normal(size=shape) + 1j * rng.normal(size=shape)
+    gamma_ls = rng.normal(size=(1, 4, 4)) + 1j * rng.normal(size=(1, 4, 4))
+    gamma5 = np.diag([1, 1, -1, -1]).astype(np.complex128)
+
+    got = _soft_factor_block(left, gamma_ls, gamma5, right)
+    ref = np.einsum(
+        "tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc",
+        left,
+        gamma_ls,
+        gamma5,
+        right,
+        gamma5,
+        optimize=True,
+    )
+    np.testing.assert_allclose(got, ref, atol=1e-10, rtol=1e-10)
+
+    matmul_time = _time_median(lambda: _soft_factor_block(left, gamma_ls, gamma5, right))
+    einsum_time = _time_median(
+        lambda: np.einsum(
+            "tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc",
+            left,
+            gamma_ls,
+            gamma5,
+            right,
+            gamma5,
+            optimize=True,
+        )
+    )
+    assert matmul_time < einsum_time, f"matmul {matmul_time:.3f}s was not faster than einsum {einsum_time:.3f}s"
+
+
 def test_pion_soft_factor_gamma_order_is_not_accidentally_commuted():
     rng = np.random.default_rng(5678)
     shape = (1, 1, 1, 1, 2, 2, 1, 1)

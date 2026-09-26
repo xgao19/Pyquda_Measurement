@@ -107,6 +107,36 @@ soft_factor_pion_channel_pairs = {
 G5 = gamma.gamma(15)
 
 
+def _spin_color_matrix(xp, prop):
+    """Pack (t,z,y,x,spin,spin,color,color) into (volume, 12, 12)."""
+    return xp.transpose(prop, (0, 1, 2, 3, 4, 6, 5, 7)).reshape(-1, 12, 12)
+
+
+def soft_factor_block(left, gamma_ls, gamma5, right):
+    """Build A or B as a batched 12x12 product.
+
+    ``left`` and ``right`` are lexicographic propagators with shape
+    ``(t,z,y,x,spin,spin,color,color)``. ``gamma_ls`` is a stack of spin
+    matrices. The result matches
+
+        einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc",
+               left, gamma_ls, gamma5, right, gamma5).
+    """
+    xp = _get_xp_from_array(left)
+    n_src = gamma_ls.shape[0]
+    spatial = left.shape[:4]
+    eye3 = xp.eye(3, dtype=left.dtype)
+    spin = xp.matmul(gamma_ls, gamma5)
+    spin12 = xp.einsum("sil,ba->sialb", spin, eye3).reshape(n_src, 12, 12)
+    gamma5_12 = xp.einsum("mn,ba->mbna", gamma5, eye3).reshape(12, 12)
+    left_m = _spin_color_matrix(xp, left)
+    right_m = _spin_color_matrix(xp, right)
+    right_t = xp.swapaxes(xp.matmul(gamma5_12, right_m), -1, -2)
+    out_m = xp.matmul(left_m[None], xp.matmul(spin12[:, None], right_t[None]))
+    out = out_m.reshape(n_src, *spatial, 4, 3, 4, 3)
+    return xp.transpose(out, (0, 1, 2, 3, 4, 5, 7, 6, 8))
+
+
 def momentum_tag(momentum):
     return "qx" + str(momentum[0]) + "qy" + str(momentum[1]) + "qz" + str(momentum[2])
 
@@ -257,8 +287,8 @@ class pion_soft_factor:
                 shifted_source_backward = prop_bw_src.shift(bT, bT_dir)
                 Gw_bperp_shift = shifted_sink_backward.lexico(False)
                 Gw_bperp_dagger_shift = shifted_source_backward.lexico(False).conj()
-                tmp_1 = xp.einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc", Gw, src_ls, gamma5, Gw_bperp_dagger_shift, gamma5, optimize=True)
-                tmp_2 = xp.einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc", Gw_bperp_shift, sink_ls, gamma5, Gw_dagger_conj, gamma5, optimize=True)
+                tmp_1 = soft_factor_block(Gw, src_ls, gamma5, Gw_bperp_dagger_shift)
+                tmp_2 = soft_factor_block(Gw_bperp_shift, sink_ls, gamma5, Gw_dagger_conj)
                 for isrc in range(len(pion_pair_labels)):
                     # One spatial reduction serves every Gamma pair:
                     # M[t,j,i,k,l] = sum_{zyx,ba} A[tzyxjiba] B[tzyxklba].
