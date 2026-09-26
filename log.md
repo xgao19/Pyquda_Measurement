@@ -1477,3 +1477,18 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - An eight-shift NumPy microbenchmark on 4x6x6x6 fields improved from
   0.021675 s to 0.014149 s, a 1.53x speedup for block construction including
   the one-time preparation.
+
+
+## 2026-09-26: Run gathered qTMDWF FFTs on one subgroup rank
+
+- Replaced shifted-axis subcommunicator allgathers with gathers whose key is
+  the rank's linear coordinate inside the gathered dimensions.
+- Only key-zero ranks now stitch the full shifted plane, copy it back to the
+  contraction backend, and execute the FFT; the other ranks contribute
+  matching zero time vectors to the final global reduction.
+- Added owner/non-owner reconstruction coverage while retaining the existing
+  direct-shift FFT comparison and spatial-reduction-factor tests. All 15
+  focused tests passed.
+- A four-copy NumPy FFT microbenchmark improved from 0.030046 s to 0.007440 s
+  when only the subgroup owner executed the correlation, a 4.04x reduction in
+  duplicated FFT work for a four-rank gathered subgroup.

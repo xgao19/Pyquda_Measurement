@@ -314,8 +314,24 @@ def _local_rank_keeps_plane(axes):
     return rank_keeps_gathered_plane(getGridCoord(), getGridSize(), gather_dims)
 
 
+def _gather_subcomm_color_key(coord, grid, gather_dims):
+    """Return the subgroup color and gathered-coordinate key for one rank."""
+    color = 0
+    color_stride = 1
+    key = 0
+    key_stride = 1
+    for dim in range(4):
+        if dim in gather_dims:
+            key += int(coord[dim]) * key_stride
+            key_stride *= int(grid[dim])
+        else:
+            color += int(coord[dim]) * color_stride
+            color_stride *= int(grid[dim])
+    return color, key
+
+
 def _gather_lexico_axes(field, axes):
-    """Allgather lexicographic axes that the correlation shifts across ranks."""
+    """Gather shifted axes onto one rank of each unaffected-coordinate group."""
     from pyquda_comm import getGridCoord, getGridSize
 
     grid = tuple(int(value) for value in getGridSize())
@@ -324,19 +340,16 @@ def _gather_lexico_axes(field, axes):
     if all(grid[dim] == 1 for dim in gather_dims):
         return field
     host = np.ascontiguousarray(array_to_numpy(field))
-    color = 0
-    stride = 1
-    for dim in range(4):
-        if dim not in gather_dims:
-            color += coord[dim] * stride
-            stride *= grid[dim]
+    color, key = _gather_subcomm_color_key(coord, grid, gather_dims)
     comm = getMPIComm()
-    sub = comm.Split(int(color), comm.Get_rank())
+    sub = comm.Split(int(color), int(key))
     try:
-        blocks = sub.allgather(host)
-        coords = sub.allgather(coord)
+        blocks = sub.gather(host, root=0)
+        coords = sub.gather(coord, root=0)
     finally:
         sub.Free()
+    if key != 0:
+        return None
     stitched = _stitch_lexico(blocks, coords, grid, gather_dims)
     xp = _get_xp_from_array(field)
     return xp.asarray(stitched)
@@ -436,19 +449,27 @@ class pion_soft_factor:
         corr_list = []
         for bT_dir in self.bT_dir:
             axes = _tmdwf_fft_axes(bT_dir, self.bz_length)
-            plane = _tmdwf_plane_from_components(
-                _gather_lexico_axes(left, axes),
-                _gather_lexico_axes(forward_c, axes),
-                bT_dir,
-                self.bT_length,
-                self.bz_length,
-            )
             keep_plane = _local_rank_keeps_plane(axes)
+            gathered_left = _gather_lexico_axes(left, axes)
+            gathered_forward = _gather_lexico_axes(forward_c, axes)
+            plane = (
+                _tmdwf_plane_from_components(
+                    gathered_left,
+                    gathered_forward,
+                    bT_dir,
+                    self.bT_length,
+                    self.bz_length,
+                )
+                if keep_plane
+                else None
+            )
             for bT in range(self.bT_length + 1):
                 for bz in range(self.bz_length + 1):
-                    corr_t = array_to_numpy(plane[bT, bz])
-                    if not keep_plane:
-                        corr_t = np.zeros_like(corr_t)
+                    corr_t = (
+                        np.asarray(array_to_numpy(plane[bT, bz]), dtype=np.complex128)
+                        if keep_plane
+                        else np.zeros(latt_info.size[3], dtype=np.complex128)
+                    )
                     corr_list.append(core.gatherLattice(corr_t, [0, -1, -1, -1]))
         return np.asarray(corr_list)
 

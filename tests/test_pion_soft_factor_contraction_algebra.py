@@ -420,6 +420,56 @@ def test_gathered_plane_is_not_multiplied_by_the_spatial_grid():
     assert single_contributors == [(0, 0, 0, 0)]
 
 
+def test_gathered_axes_are_stitched_only_on_the_subcomm_owner(monkeypatch):
+    import sys
+
+    import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
+
+    grid = (2, 1, 1, 1)
+    coords = [(0, 0, 0, 0), (1, 0, 0, 0)]
+    full = np.arange(4, dtype=np.complex128).reshape(1, 1, 1, 4, 1)
+    blocks = [full[:, :, :, :2], full[:, :, :, 2:]]
+    events = []
+
+    class FakeSubcomm:
+        def __init__(self, owner):
+            self.owner = owner
+            self.calls = 0
+
+        def gather(self, _value, root=0):
+            assert root == 0
+            self.calls += 1
+            if not self.owner:
+                return None
+            return blocks if self.calls == 1 else coords
+
+        def Free(self):
+            events.append("free")
+
+    class FakeComm:
+        def Split(self, color, key):
+            events.append(("split", color, key))
+            return FakeSubcomm(key == 0)
+
+    comm_module = sys.modules["pyquda_comm"]
+    monkeypatch.setattr(comm_module, "getGridSize", lambda: grid, raising=False)
+    monkeypatch.setattr(soft, "getMPIComm", lambda: FakeComm())
+
+    monkeypatch.setattr(comm_module, "getGridCoord", lambda: coords[0], raising=False)
+    owner = soft._gather_lexico_axes(blocks[0], [3])
+    np.testing.assert_array_equal(owner, full)
+
+    monkeypatch.setattr(comm_module, "getGridCoord", lambda: coords[1], raising=False)
+    nonowner = soft._gather_lexico_axes(blocks[1], [3])
+    assert nonowner is None
+    assert events == [
+        ("split", 0, 0),
+        "free",
+        ("split", 0, 1),
+        "free",
+    ]
+
+
 def test_wall_propagator_attrs_are_a_root_only_serial_write(tmp_path, monkeypatch):
     import inspect
 
