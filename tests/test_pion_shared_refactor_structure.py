@@ -27,8 +27,8 @@ def test_soft_factor_uses_global_propagator_shift():
     assert "shift(bT" not in source
     tmdwf = inspect.getsource(pion_soft_factor.contract_tmdwf_check)
     assert "xp.roll" not in tmdwf
-    assert ".shift(1, bT_dir)" in tmdwf
-    assert ".shift(1, 2)" in tmdwf
+    assert ".shift(" not in tmdwf
+    assert "_tmdwf_plane_from_components" in tmdwf
 
 
 def test_qtmdwf_runner_uses_exact_log_and_one_root_writer():

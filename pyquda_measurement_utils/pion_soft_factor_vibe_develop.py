@@ -107,6 +107,17 @@ soft_factor_pion_channel_pairs = {
 G5 = gamma.gamma(15)
 
 
+def _source_block_cache_limit_bytes():
+    """Keep at most half of the free device memory, or 8 GiB off-device."""
+    try:
+        import cupy
+
+        free, _total = cupy.cuda.runtime.memGetInfo()
+        return int(free) // 2
+    except Exception:
+        return 8 << 30
+
+
 def _spin_color_matrix(xp, prop):
     """Pack (t,z,y,x,spin,spin,color,color) into (volume, 12, 12)."""
     return xp.transpose(prop, (0, 1, 2, 3, 4, 6, 5, 7)).reshape(-1, 12, 12)
@@ -135,6 +146,126 @@ def soft_factor_block(left, gamma_ls, gamma5, right):
     out_m = xp.matmul(left_m[None], xp.matmul(spin12[:, None], right_t[None]))
     out = out_m.reshape(n_src, *spatial, 4, 3, 4, 3)
     return xp.transpose(out, (0, 1, 2, 3, 4, 5, 7, 6, 8))
+
+
+# Lattice mu = x,y,z,t maps onto lexicographic axes t,z,y,x.
+_LEXICO_AXIS_OF_MU = (3, 2, 1, 0)
+# Lexicographic axis t,z,y,x maps onto grid indices x,y,z,t.
+_GRID_INDEX_OF_LEXICO_AXIS = (3, 2, 1, 0)
+
+
+def _tmdwf_components(backward, forward, src_gamma, gamma5):
+    """Site tensors whose dot product is the TMDWF trace.
+
+    Two spin indices are traced at the site, leaving 4*3*3 components.
+    A circular shift of ``backward`` is the same shift of the first tensor.
+    """
+    xp = _get_xp_from_array(backward)
+    backward_bar = xp.einsum(
+        "ij,tzyxmlca,kl->tzyxkjca", gamma5, backward.conj(), gamma5, optimize=True
+    )
+    left = xp.einsum("ij,tzyxjlca->tzyxilca", src_gamma, backward_bar, optimize=True)
+    left_c = xp.einsum("tzyxjiab->tzyxiab", left, optimize=True)
+    forward_c = xp.swapaxes(xp.einsum("tzyxilba->tzyxiba", forward, optimize=True), -1, -2)
+    return left_c, forward_c
+
+
+def _tmdwf_fft_axes(bT_dir, bz_length):
+    axes = [_LEXICO_AXIS_OF_MU[int(bT_dir)]]
+    if bz_length and 1 not in axes:
+        axes.append(1)
+    return axes
+
+
+def _tmdwf_plane_from_components(left, forward, bT_dir, bT_length, bz_length):
+    """All separations from one circular correlation.
+
+    ``left`` and ``forward`` are component fields on a volume that is periodic
+    and complete along the shifted axes. Positive separations match ``np.roll``.
+    """
+    xp = _get_xp_from_array(left)
+    b_axis = _LEXICO_AXIS_OF_MU[int(bT_dir)]
+    z_axis = 1
+    axes = tuple(_tmdwf_fft_axes(bT_dir, bz_length))
+    spectrum = xp.fft.fftn(left, axes=axes) * xp.conj(
+        xp.fft.fftn(xp.conj(forward), axes=axes)
+    )
+    correlated = xp.fft.ifftn(spectrum, axes=axes)
+    spatial = sorted(axes)
+    drop = tuple(axis for axis in range(1, correlated.ndim) if axis not in spatial)
+    plane = correlated.sum(axis=drop)
+    n_b = bT_length + 1
+    n_z = bz_length + 1
+    out = xp.empty((n_b, n_z, plane.shape[0]), dtype=plane.dtype)
+    axis_pos = {axis: 1 + i for i, axis in enumerate(spatial)}
+    for bT in range(n_b):
+        for bz in range(n_z):
+            index = [slice(None)]
+            for axis in spatial:
+                shift = 0
+                if axis == b_axis:
+                    shift += bT
+                if axis == z_axis:
+                    shift += bz
+                index.append((-shift) % plane.shape[axis_pos[axis]])
+            out[bT, bz] = plane[tuple(index)]
+    return out
+
+
+def tmdwf_separation_plane(backward, forward, src_gamma, gamma5, bT_dir, bT_length, bz_length):
+    """Correlate one backward/forward pair over ``bT`` and ``bz``."""
+    left, forward_c = _tmdwf_components(backward, forward, src_gamma, gamma5)
+    return _tmdwf_plane_from_components(left, forward_c, bT_dir, bT_length, bz_length)
+
+
+def _stitch_lexico(blocks, coords, grid, gather_dims):
+    """Place local lexicographic blocks into the gathered axes."""
+    local = blocks[0].shape
+    out_size = []
+    for axis in range(4):
+        grid_index = _GRID_INDEX_OF_LEXICO_AXIS[axis]
+        factor = grid[grid_index] if grid_index in gather_dims else 1
+        out_size.append(local[axis] * factor)
+    out = np.empty((*out_size, *local[4:]), dtype=blocks[0].dtype)
+    for block, coord in zip(blocks, coords):
+        slices = []
+        for axis in range(4):
+            grid_index = _GRID_INDEX_OF_LEXICO_AXIS[axis]
+            if grid_index in gather_dims:
+                start = coord[grid_index] * local[axis]
+                slices.append(slice(start, start + local[axis]))
+            else:
+                slices.append(slice(None))
+        out[tuple(slices)] = block
+    return out
+
+
+def _gather_lexico_axes(field, axes):
+    """Allgather lexicographic axes that the correlation shifts across ranks."""
+    from pyquda_comm import getGridCoord, getGridSize
+
+    grid = tuple(int(value) for value in getGridSize())
+    coord = tuple(int(value) for value in getGridCoord())
+    gather_dims = {_GRID_INDEX_OF_LEXICO_AXIS[axis] for axis in axes}
+    if all(grid[dim] == 1 for dim in gather_dims):
+        return field
+    host = np.ascontiguousarray(array_to_numpy(field))
+    color = 0
+    stride = 1
+    for dim in range(4):
+        if dim not in gather_dims:
+            color += coord[dim] * stride
+            stride *= grid[dim]
+    comm = getMPIComm()
+    sub = comm.Split(int(color), comm.Get_rank())
+    try:
+        blocks = sub.allgather(host)
+        coords = sub.allgather(coord)
+    finally:
+        sub.Free()
+    stitched = _stitch_lexico(blocks, coords, grid, gather_dims)
+    xp = _get_xp_from_array(field)
+    return xp.asarray(stitched)
 
 
 def momentum_tag(momentum):
@@ -217,28 +348,57 @@ class pion_soft_factor:
         return core.gatherLattice(array_to_numpy(corr_t), [0, -1, -1, -1])
 
     def contract_tmdwf_check(self, latt_info, prop_fw, prop_bw, pion_mom, pion_pair_label):
-        xp = _get_xp_from_array(prop_fw.data)
         src_matrix, _ = self.pion_channel_pairs[pion_pair_label]
         src_gamma = matrix_on_backend(src_matrix, prop_fw.data)
         gamma5 = matrix_on_backend(G5, prop_fw.data)
         prop_fw_phase = self.apply_phase(prop_fw, [-pion_mom[0], -pion_mom[1], -pion_mom[2]], 1)
-        prop_fw_t = prop_fw_phase.lexico(False)
+        backward = prop_bw.lexico(False)
+        forward = prop_fw_phase.lexico(False)
+        left, forward_c = _tmdwf_components(backward, forward, src_gamma, gamma5)
         corr_list = []
         for bT_dir in self.bT_dir:
-            shifted_bw = prop_bw
+            axes = _tmdwf_fft_axes(bT_dir, self.bz_length)
+            plane = _tmdwf_plane_from_components(
+                _gather_lexico_axes(left, axes),
+                _gather_lexico_axes(forward_c, axes),
+                bT_dir,
+                self.bT_length,
+                self.bz_length,
+            )
             for bT in range(self.bT_length + 1):
-                if bT != 0:
-                    shifted_bw = shifted_bw.shift(1, bT_dir)
-                shifted = shifted_bw
                 for bz in range(self.bz_length + 1):
-                    if bz != 0:
-                        shifted = shifted.shift(1, 2)
-                    shifted_bar = xp.einsum("ij,tzyxmlca,kl->tzyxkjca", gamma5, shifted.lexico(False).conj(), gamma5, optimize=True)
-                    left = xp.einsum("ij,tzyxjlca->tzyxilca", src_gamma, shifted_bar, optimize=True)
-                    corr_local = xp.einsum("tzyxjiab,tzyxilba->tzyx", left, prop_fw_t, optimize=True)
-                    corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-                    corr_list.append(core.gatherLattice(array_to_numpy(corr_t), [0, -1, -1, -1]))
+                    corr_list.append(
+                        core.gatherLattice(array_to_numpy(plane[bT, bz]), [0, -1, -1, -1])
+                    )
         return np.asarray(corr_list)
+
+    def _cached_source_block(self, prop_fw, prop_bw_src, bT_dir, bT, build):
+        """Reuse the source-side block across sink separations.
+
+        ``tmp_1`` depends only on the two source propagators and ``b``.
+        A new source pair drops the previous cache. If the next block would
+        exceed the memory limit, it is computed and not stored.
+        """
+        cache_id = (id(prop_fw), id(prop_bw_src), tuple(self.pion_channel_pairs))
+        if getattr(self, "_source_block_cache_id", None) != cache_id:
+            self._source_block_cache = {}
+            self._source_block_cache_bytes = 0
+            self._source_block_cache_id = cache_id
+            self._source_block_hits = 0
+            self._source_block_misses = 0
+        key = (int(bT_dir), int(bT))
+        cached = self._source_block_cache.get(key)
+        if cached is not None:
+            self._source_block_hits += 1
+            return cached
+        value = build()
+        nbytes = int(getattr(value, "nbytes", 0))
+        limit = _source_block_cache_limit_bytes()
+        if self._source_block_cache_bytes + nbytes <= limit:
+            self._source_block_cache[key] = value
+            self._source_block_cache_bytes += nbytes
+        self._source_block_misses += 1
+        return value
 
     def contract_soft_factor(self, latt_info, prop_fw, prop_bw_src, prop_sink_bw, prop_sink_fw, pion_mom):
         xp = _get_xp_from_array(prop_fw.data)
@@ -292,7 +452,13 @@ class pion_soft_factor:
                     shifted_source_backward = shifted_source_backward.shift(1, bT_dir)
                 Gw_bperp_shift = shifted_sink_backward.lexico(False)
                 Gw_bperp_dagger_shift = shifted_source_backward.lexico(False).conj()
-                tmp_1 = soft_factor_block(Gw, src_ls, gamma5, Gw_bperp_dagger_shift)
+                tmp_1 = self._cached_source_block(
+                    prop_fw,
+                    prop_bw_src,
+                    bT_dir,
+                    bT,
+                    lambda: soft_factor_block(Gw, src_ls, gamma5, Gw_bperp_dagger_shift),
+                )
                 tmp_2 = soft_factor_block(Gw_bperp_shift, sink_ls, gamma5, Gw_dagger_conj)
                 for isrc in range(len(pion_pair_labels)):
                     # One spatial reduction serves every Gamma pair:
