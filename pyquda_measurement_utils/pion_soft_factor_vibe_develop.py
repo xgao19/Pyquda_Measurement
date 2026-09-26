@@ -124,6 +124,67 @@ def _spin_color_matrix(xp, prop):
     return xp.transpose(prop, (0, 1, 2, 3, 4, 6, 5, 7)).reshape(-1, 12, 12)
 
 
+def _soft_factor_spin_matrices(xp, gamma_ls, gamma5, dtype):
+    eye3 = xp.eye(3, dtype=dtype)
+    spin = xp.matmul(gamma_ls, gamma5)
+    spin12 = xp.einsum("sil,ba->sialb", spin, eye3).reshape(gamma_ls.shape[0], 12, 12)
+    gamma5_12 = xp.einsum("mn,ba->mbna", gamma5, eye3).reshape(12, 12)
+    return spin12, gamma5_12
+
+
+def _unpack_soft_factor_block(xp, out_m, n_src, spatial):
+    out = out_m.reshape(n_src, *spatial, 4, 3, 4, 3)
+    return xp.transpose(out, (0, 1, 2, 3, 4, 5, 7, 6, 8))
+
+
+def prepare_soft_factor_left(left, gamma_ls, gamma5):
+    """Precompute ``left @ (Gamma gamma5)`` for changing right fields."""
+    xp = _get_xp_from_array(left)
+    spin12, gamma5_12 = _soft_factor_spin_matrices(
+        xp,
+        gamma_ls,
+        gamma5,
+        left.dtype,
+    )
+    left_m = _spin_color_matrix(xp, left)
+    left_factor = xp.matmul(left_m[None], spin12[:, None])
+    return left_factor, gamma5_12, left.shape[:4]
+
+
+def soft_factor_block_from_left(prepared_left, right):
+    """Finish a block whose left field and pion matrix were precomputed."""
+    left_factor, gamma5_12, spatial = prepared_left
+    xp = _get_xp_from_array(right)
+    right_m = _spin_color_matrix(xp, right)
+    right_t = xp.swapaxes(xp.matmul(gamma5_12, right_m), -1, -2)
+    out_m = xp.matmul(left_factor, right_t[None])
+    return _unpack_soft_factor_block(xp, out_m, left_factor.shape[0], spatial)
+
+
+def prepare_soft_factor_right(gamma_ls, gamma5, right):
+    """Precompute ``(Gamma gamma5) @ right.T`` for changing left fields."""
+    xp = _get_xp_from_array(right)
+    spin12, gamma5_12 = _soft_factor_spin_matrices(
+        xp,
+        gamma_ls,
+        gamma5,
+        right.dtype,
+    )
+    right_m = _spin_color_matrix(xp, right)
+    right_t = xp.swapaxes(xp.matmul(gamma5_12, right_m), -1, -2)
+    right_factor = xp.matmul(spin12[:, None], right_t[None])
+    return right_factor, right.shape[:4]
+
+
+def soft_factor_block_from_right(left, prepared_right):
+    """Finish a block whose right field and pion matrix were precomputed."""
+    right_factor, spatial = prepared_right
+    xp = _get_xp_from_array(left)
+    left_m = _spin_color_matrix(xp, left)
+    out_m = xp.matmul(left_m[None], right_factor)
+    return _unpack_soft_factor_block(xp, out_m, right_factor.shape[0], spatial)
+
+
 def soft_factor_block(left, gamma_ls, gamma5, right):
     """Build A or B as a batched 12x12 product.
 
@@ -134,19 +195,10 @@ def soft_factor_block(left, gamma_ls, gamma5, right):
         einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc",
                left, gamma_ls, gamma5, right, gamma5).
     """
-    xp = _get_xp_from_array(left)
-    n_src = gamma_ls.shape[0]
-    spatial = left.shape[:4]
-    eye3 = xp.eye(3, dtype=left.dtype)
-    spin = xp.matmul(gamma_ls, gamma5)
-    spin12 = xp.einsum("sil,ba->sialb", spin, eye3).reshape(n_src, 12, 12)
-    gamma5_12 = xp.einsum("mn,ba->mbna", gamma5, eye3).reshape(12, 12)
-    left_m = _spin_color_matrix(xp, left)
-    right_m = _spin_color_matrix(xp, right)
-    right_t = xp.swapaxes(xp.matmul(gamma5_12, right_m), -1, -2)
-    out_m = xp.matmul(left_m[None], xp.matmul(spin12[:, None], right_t[None]))
-    out = out_m.reshape(n_src, *spatial, 4, 3, 4, 3)
-    return xp.transpose(out, (0, 1, 2, 3, 4, 5, 7, 6, 8))
+    return soft_factor_block_from_left(
+        prepare_soft_factor_left(left, gamma_ls, gamma5),
+        right,
+    )
 
 
 # Lattice mu = x,y,z,t maps onto lexicographic axes t,z,y,x.
@@ -474,7 +526,6 @@ class pion_soft_factor:
             [gamma2_matrices[key] for key in gamma_pair_labels], prop_fw.data
         )
 
-        Gw = prop_fw.lexico(False)
         Gw_dagger = prop_sink_fw.lexico(False)
         phased_sink_backward = self.apply_phase(
             prop_sink_bw,
@@ -482,6 +533,8 @@ class pion_soft_factor:
             1,
         )
         Gw_dagger_conj = Gw_dagger.conj()
+        sink_right = prepare_soft_factor_right(sink_ls, gamma5, Gw_dagger_conj)
+        source_left = None
 
         local_shape = (
             len(pion_pair_labels),
@@ -503,6 +556,12 @@ class pion_soft_factor:
                 prop_bw_src,
                 bT_dir,
             )
+            if not source_cache_complete and source_left is None:
+                source_left = prepare_soft_factor_left(
+                    prop_fw.lexico(False),
+                    src_ls,
+                    gamma5,
+                )
             shifted_source_backward = None if source_cache_complete else prop_bw_src
             for bT in range(self.bT_length + 1):
                 if bT != 0:
@@ -515,14 +574,12 @@ class pion_soft_factor:
                     prop_bw_src,
                     bT_dir,
                     bT,
-                    lambda shifted=shifted_source_backward: soft_factor_block(
-                        Gw,
-                        src_ls,
-                        gamma5,
+                    lambda shifted=shifted_source_backward: soft_factor_block_from_left(
+                        source_left,
                         shifted.lexico(False).conj(),
                     ),
                 )
-                tmp_2 = soft_factor_block(Gw_bperp_shift, sink_ls, gamma5, Gw_dagger_conj)
+                tmp_2 = soft_factor_block_from_right(Gw_bperp_shift, sink_right)
                 for isrc in range(len(pion_pair_labels)):
                     # One spatial reduction serves every Gamma pair:
                     # M[t,j,i,k,l] = sum_{zyx,ba} A[tzyxjiba] B[tzyxklba].

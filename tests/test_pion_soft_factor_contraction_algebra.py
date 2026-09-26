@@ -136,6 +136,50 @@ def test_pion_soft_factor_block_matmul_matches_einsum_and_is_faster():
     assert matmul_time < einsum_time, f"matmul {matmul_time:.3f}s was not faster than einsum {einsum_time:.3f}s"
 
 
+def test_prepared_soft_factor_operands_match_blocks_and_are_faster():
+    from pyquda_measurement_utils.pion_soft_factor_vibe_develop import (
+        prepare_soft_factor_left,
+        prepare_soft_factor_right,
+        soft_factor_block,
+        soft_factor_block_from_left,
+        soft_factor_block_from_right,
+    )
+
+    rng = np.random.default_rng(19)
+    shape = (4, 6, 6, 6, 4, 4, 3, 3)
+    left = rng.normal(size=shape) + 1j * rng.normal(size=shape)
+    right = rng.normal(size=shape) + 1j * rng.normal(size=shape)
+    gamma_ls = rng.normal(size=(1, 4, 4)) + 1j * rng.normal(size=(1, 4, 4))
+    gamma5 = np.diag([1, 1, -1, -1]).astype(np.complex128)
+
+    reference = soft_factor_block(left, gamma_ls, gamma5, right)
+    from_left = soft_factor_block_from_left(
+        prepare_soft_factor_left(left, gamma_ls, gamma5),
+        right,
+    )
+    from_right = soft_factor_block_from_right(
+        left,
+        prepare_soft_factor_right(gamma_ls, gamma5, right),
+    )
+    np.testing.assert_allclose(from_left, reference, atol=1e-12, rtol=1e-12)
+    np.testing.assert_allclose(from_right, reference, atol=1e-12, rtol=1e-12)
+
+    shifted_left = [np.roll(left, shift, axis=3) for shift in range(8)]
+
+    def repeated_full_blocks():
+        return [soft_factor_block(value, gamma_ls, gamma5, right) for value in shifted_left]
+
+    def prepared_right_blocks():
+        prepared = prepare_soft_factor_right(gamma_ls, gamma5, right)
+        return [soft_factor_block_from_right(value, prepared) for value in shifted_left]
+
+    full_time = _time_median(repeated_full_blocks)
+    prepared_time = _time_median(prepared_right_blocks)
+    assert prepared_time < full_time, (
+        f"prepared {prepared_time:.3f}s was not faster than repeated {full_time:.3f}s"
+    )
+
+
 def _roll_steps(field, steps, axis):
     out = field
     for _ in range(steps):

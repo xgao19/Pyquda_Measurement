@@ -1461,3 +1461,19 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - For 21 separations on a 4x8x8x8 complex test field, the isolated source
   preparation changed from 0.006525 s to 0.000000773 s after a complete cache
   hit; the production benefit depends on halo latency and lattice volume.
+
+
+## 2026-09-26: Reuse fixed soft-factor matrix operands
+
+- Added prepared-left and prepared-right block builders that retain packed
+  12x12 factors while the opposite shifted propagator changes.
+- The source path now packs and multiplies the fixed forward propagator once
+  when uncached source blocks are needed. The sink path precomputes its fixed
+  right factor once per sink separation, leaving one volume-batched matrix
+  multiplication for each transverse shift.
+- Random complex-tensor tests matched the original block builder and the full
+  legacy contraction formula at `rtol=1e-12, atol=1e-12`; all 14 focused tests
+  passed.
+- An eight-shift NumPy microbenchmark on 4x6x6x6 fields improved from
+  0.021675 s to 0.014149 s, a 1.53x speedup for block construction including
+  the one-time preparation.
