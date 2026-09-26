@@ -260,18 +260,24 @@ class pion_soft_factor:
                 tmp_1 = xp.einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc", Gw, src_ls, gamma5, Gw_bperp_dagger_shift, gamma5, optimize=True)
                 tmp_2 = xp.einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc", Gw_bperp_shift, sink_ls, gamma5, Gw_dagger_conj, gamma5, optimize=True)
                 for isrc in range(len(pion_pair_labels)):
+                    # One spatial reduction serves every Gamma pair:
+                    # M[t,j,i,k,l] = sum_{zyx,ba} A[tzyxjiba] B[tzyxklba].
+                    color_spin = xp.einsum(
+                        "tzyxjiba,tzyxklba->tjikl",
+                        tmp_1[isrc],
+                        tmp_2[isrc],
+                        optimize=True,
+                    )
+                    corr_by_gamma = xp.einsum(
+                        "tjikl,gik,glj->gt",
+                        color_spin,
+                        gamma2_ls,
+                        gamma1_ls,
+                        optimize=True,
+                    )
                     for igm in range(len(gamma_pair_labels)):
                         mpi_print(latt_info, f"Contract pion soft factor bT={bT} dir={bT_dir} pion_pair={pion_pair_labels[isrc]} gamma_pair={gamma_pair_labels[igm]}")
-                        corr_local = xp.einsum(
-                            "tzyxjiba,ik,tzyxklba,lj->tzyx",
-                            tmp_1[isrc],
-                            gamma2_ls[igm],
-                            tmp_2[isrc],
-                            gamma1_ls[igm],
-                            optimize=True,
-                        )
-                        corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-                        corr_global = core.gatherLattice(array_to_numpy(corr_t), [0, -1, -1, -1])
+                        corr_global = core.gatherLattice(array_to_numpy(corr_by_gamma[igm]), [0, -1, -1, -1])
                         if latt_info.mpi_rank == 0:
                             corr_collect[isrc, igm, idir, bT] = corr_global
                 del (
