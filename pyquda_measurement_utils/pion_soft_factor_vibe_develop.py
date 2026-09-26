@@ -404,11 +404,25 @@ class pion_soft_factor:
             # and let only rank 0 open the file serially.
             comm = getMPIComm()
             comm.Barrier()
+            attr_error = None
+            root_exception = None
             if comm.Get_rank() == 0:
-                with h5py.File(save_h5, "a") as f:
-                    for key, value in attrs.items():
-                        f.attrs[key] = value
-            comm.Barrier()
+                try:
+                    with h5py.File(save_h5, "a") as f:
+                        for key, value in attrs.items():
+                            f.attrs[key] = value
+                except Exception as exc:
+                    root_exception = exc
+                    attr_error = (type(exc).__name__, str(exc))
+            attr_error = comm.bcast(attr_error, root=0)
+            if attr_error is not None:
+                error = RuntimeError(
+                    f"Failed to write wall-propagator attributes: "
+                    f"{attr_error[0]}: {attr_error[1]}"
+                )
+                if root_exception is not None:
+                    raise error from root_exception
+                raise error
 
     def load_wall_propagator(self, tag):
         return core.LatticePropagator.loadH5(tag + ".h5", "propagator")

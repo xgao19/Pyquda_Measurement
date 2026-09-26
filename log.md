@@ -1492,3 +1492,17 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - A four-copy NumPy FFT microbenchmark improved from 0.030046 s to 0.007440 s
   when only the subgroup owner executed the correlation, a 4.04x reduction in
   duplicated FFT work for a four-rank gathered subgroup.
+
+
+## 2026-09-26: Propagate serial HDF5 attribute-write failures
+
+- Replaced the second barrier after the root-only attribute write with a
+  broadcast of a compact error description.
+- If rank zero cannot update the attributes, every rank now raises the same
+  `RuntimeError` instead of non-root ranks waiting indefinitely at a barrier.
+- Added success-path checks that the propagator data and attributes are
+  unchanged, plus root and non-root failure-path coverage. All 16 focused
+  tests passed.
+- This is a synchronization-correctness change outside the contraction hot
+  path; it adds no per-contraction work and therefore has no meaningful
+  contraction performance benchmark.

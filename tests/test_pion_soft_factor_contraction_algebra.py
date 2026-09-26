@@ -500,6 +500,10 @@ def test_wall_propagator_attrs_are_a_root_only_serial_write(tmp_path, monkeypatc
         def Get_rank(self):
             return self.rank
 
+        def bcast(self, value, root=0):
+            events.append(("bcast", self.rank, root, value))
+            return value
+
     class Prop:
         def saveH5(self, filename, label):
             events.append("saveH5")
@@ -523,7 +527,7 @@ def test_wall_propagator_attrs_are_a_root_only_serial_write(tmp_path, monkeypatc
         "saveH5",
         ("barrier", 0),
         ("open", "a", None),
-        ("barrier", 0),
+        ("bcast", 0, 0, None),
     ]
     with real_file(tag + ".h5", "r") as handle:
         assert handle.attrs["lat_tag"] == "S8"
@@ -535,7 +539,58 @@ def test_wall_propagator_attrs_are_a_root_only_serial_write(tmp_path, monkeypatc
     measurement.save_wall_propagator(
         Prop(), str(tmp_path / "other"), attrs={"lat_tag": "skipped"}
     )
-    assert events == ["saveH5", ("barrier", 1), ("barrier", 1)]
+    assert events == ["saveH5", ("barrier", 1), ("bcast", 1, 0, None)]
+
+
+def test_wall_propagator_attr_failure_is_broadcast_to_every_rank(tmp_path, monkeypatch):
+    import h5py
+    import pytest
+
+    import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
+
+    broadcast_error = ("OSError", "simulated attribute failure")
+
+    class Comm:
+        def __init__(self, rank):
+            self.rank = rank
+
+        def Barrier(self):
+            pass
+
+        def Get_rank(self):
+            return self.rank
+
+        def bcast(self, value, root=0):
+            assert root == 0
+            return value if self.rank == 0 else broadcast_error
+
+    class Prop:
+        def saveH5(self, _filename, _label):
+            pass
+
+    def failing_file(*_args, **_kwargs):
+        raise OSError("simulated attribute failure")
+
+    monkeypatch.setattr(h5py, "File", failing_file)
+    measurement = soft.pion_soft_factor(
+        {
+            "quark_mom": [[0, 0, 0]],
+            "bT_dir": [0],
+            "bT_length": 0,
+            "tsep_list": [1],
+        }
+    )
+
+    for rank in (0, 1):
+        monkeypatch.setattr(soft, "getMPIComm", lambda rank=rank: Comm(rank))
+        with pytest.raises(
+            RuntimeError,
+            match="Failed to write wall-propagator attributes: "
+            "OSError: simulated attribute failure",
+        ):
+            measurement.save_wall_propagator(
+                Prop(), str(tmp_path / f"wall-{rank}"), attrs={"lat_tag": "S8"}
+            )
 
 
 def test_soft_factor_collects_every_channel_with_one_mpi_gather(monkeypatch):
