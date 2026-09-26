@@ -313,3 +313,31 @@ def test_stitch_lexico_rebuilds_a_split_volume():
             coords.append((gx, 0, gz, 0))
     stitched = _stitch_lexico(blocks, coords, grid=(2, 1, 2, 1), gather_dims={0, 2})
     np.testing.assert_allclose(stitched, full)
+
+
+def _sum_kept_planes(grid, gather_dims, local_value):
+    from pyquda_measurement_utils.pion_soft_factor_vibe_develop import rank_keeps_gathered_plane
+
+    total = 0
+    for gx in range(grid[0]):
+        for gy in range(grid[1]):
+            for gz in range(grid[2]):
+                for gt in range(grid[3]):
+                    if rank_keeps_gathered_plane((gx, gy, gz, gt), grid, gather_dims):
+                        total += local_value
+    return total
+
+
+def test_gathered_plane_is_not_multiplied_by_the_spatial_grid():
+    # x and z were allgathered, so only one of the Gx*Gz copies may be summed.
+    grid = (2, 1, 2, 1)
+    local = 3.0 + 4.0j
+    assert _sum_kept_planes(grid, {0, 2}, local) == local
+    assert _sum_kept_planes(grid, {0, 2}, 1) != grid[0] * grid[2]
+
+    # y is not gathered, so each y-rank still adds its own slab.
+    split_y = (2, 2, 2, 1)
+    assert _sum_kept_planes(split_y, {0, 2}, 1.0) == split_y[1]
+
+    # No replication: every rank still owns its local sum.
+    assert _sum_kept_planes((1, 1, 1, 1), {0, 2}, 5.0) == 5.0

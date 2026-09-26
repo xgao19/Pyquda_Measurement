@@ -71,9 +71,9 @@ script so that output can be compared directly before further refactoring.
 
 from pathlib import Path
 
+import h5py
 import numpy as np
 from pyquda import getMPIComm
-from pyquda_comm.hdf5 import File as H5File
 from pyquda_utils import core, gamma, phase, source
 
 from pyquda_measurement_utils.fermion_bilinear_basis import (
@@ -240,6 +240,27 @@ def _stitch_lexico(blocks, coords, grid, gather_dims):
     return out
 
 
+def rank_keeps_gathered_plane(coord, grid, gather_dims):
+    """One rank per gathered subvolume may enter the final spatial sum.
+
+    After an allgather, every rank in that subcommunicator holds the same
+    plane. ``gatherLattice`` then sums over the whole grid, so the other
+    copies must contribute zero or the correlator grows by the gathered
+    grid volume.
+    """
+    replicated = [dim for dim in gather_dims if int(grid[dim]) > 1]
+    if not replicated:
+        return True
+    return all(int(coord[dim]) == 0 for dim in replicated)
+
+
+def _local_rank_keeps_plane(axes):
+    from pyquda_comm import getGridCoord, getGridSize
+
+    gather_dims = {_GRID_INDEX_OF_LEXICO_AXIS[axis] for axis in axes}
+    return rank_keeps_gathered_plane(getGridCoord(), getGridSize(), gather_dims)
+
+
 def _gather_lexico_axes(field, axes):
     """Allgather lexicographic axes that the correlation shifts across ranks."""
     from pyquda_comm import getGridCoord, getGridSize
@@ -312,12 +333,16 @@ class pion_soft_factor:
         ensure_parent_dir(save_h5)
         prop.saveH5(save_h5, "propagator")
         if attrs:
-            # saveH5 uses MPI-IO; a serial h5py.File("a") from every rank
-            # races and can hang or raise addr overflow on Lustre.
-            with H5File(save_h5, "a") as f:
-                if getMPIComm().Get_rank() == 0:
+            # saveH5 is collective MPI-IO. Attribute create/write on that
+            # handle must also be collective, so wait until it has closed
+            # and let only rank 0 open the file serially.
+            comm = getMPIComm()
+            comm.Barrier()
+            if comm.Get_rank() == 0:
+                with h5py.File(save_h5, "a") as f:
                     for key, value in attrs.items():
                         f.attrs[key] = value
+            comm.Barrier()
 
     def load_wall_propagator(self, tag):
         return core.LatticePropagator.loadH5(tag + ".h5", "propagator")
@@ -365,11 +390,13 @@ class pion_soft_factor:
                 self.bT_length,
                 self.bz_length,
             )
+            keep_plane = _local_rank_keeps_plane(axes)
             for bT in range(self.bT_length + 1):
                 for bz in range(self.bz_length + 1):
-                    corr_list.append(
-                        core.gatherLattice(array_to_numpy(plane[bT, bz]), [0, -1, -1, -1])
-                    )
+                    corr_t = array_to_numpy(plane[bT, bz])
+                    if not keep_plane:
+                        corr_t = np.zeros_like(corr_t)
+                    corr_list.append(core.gatherLattice(corr_t, [0, -1, -1, -1]))
         return np.asarray(corr_list)
 
     def _cached_source_block(self, prop_fw, prop_bw_src, bT_dir, bT, build):
