@@ -225,12 +225,14 @@ class pion_soft_factor:
         prop_fw_t = prop_fw_phase.lexico(False)
         corr_list = []
         for bT_dir in self.bT_dir:
-            shifted_bw = prop_bw.copy()
+            shifted_bw = prop_bw
             for bT in range(self.bT_length + 1):
                 if bT != 0:
-                    shifted_bw = prop_bw.shift(bT, bT_dir)
+                    shifted_bw = shifted_bw.shift(1, bT_dir)
+                shifted = shifted_bw
                 for bz in range(self.bz_length + 1):
-                    shifted = shifted_bw if bz == 0 else shifted_bw.shift(bz, 2)
+                    if bz != 0:
+                        shifted = shifted.shift(1, 2)
                     shifted_bar = xp.einsum("ij,tzyxmlca,kl->tzyxkjca", gamma5, shifted.lexico(False).conj(), gamma5, optimize=True)
                     left = xp.einsum("ij,tzyxjlca->tzyxilca", src_gamma, shifted_bar, optimize=True)
                     corr_local = xp.einsum("tzyxjiab,tzyxilba->tzyx", left, prop_fw_t, optimize=True)
@@ -282,9 +284,12 @@ class pion_soft_factor:
         shape = (len(pion_pair_labels), len(gamma_pair_labels), len(self.bT_dir), self.bT_length + 1, latt_info.global_size[3])
         corr_collect = np.empty(shape, dtype=np.complex128) if latt_info.mpi_rank == 0 else None
         for idir, bT_dir in enumerate(self.bT_dir):
+            shifted_sink_backward = phased_sink_backward
+            shifted_source_backward = prop_bw_src
             for bT in range(self.bT_length + 1):
-                shifted_sink_backward = phased_sink_backward.shift(bT, bT_dir)
-                shifted_source_backward = prop_bw_src.shift(bT, bT_dir)
+                if bT != 0:
+                    shifted_sink_backward = shifted_sink_backward.shift(1, bT_dir)
+                    shifted_source_backward = shifted_source_backward.shift(1, bT_dir)
                 Gw_bperp_shift = shifted_sink_backward.lexico(False)
                 Gw_bperp_dagger_shift = shifted_source_backward.lexico(False).conj()
                 tmp_1 = soft_factor_block(Gw, src_ls, gamma5, Gw_bperp_dagger_shift)
@@ -311,8 +316,6 @@ class pion_soft_factor:
                         if latt_info.mpi_rank == 0:
                             corr_collect[isrc, igm, idir, bT] = corr_global
                 del (
-                    shifted_sink_backward,
-                    shifted_source_backward,
                     Gw_bperp_shift,
                     Gw_bperp_dagger_shift,
                     tmp_1,

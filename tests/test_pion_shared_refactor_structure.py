@@ -23,8 +23,12 @@ def test_connected_emt_uses_lightweight_bilinear_base():
 def test_soft_factor_uses_global_propagator_shift():
     source = inspect.getsource(pion_soft_factor.contract_soft_factor)
     assert "xp.roll" not in source
-    assert "phased_sink_backward.shift(bT, bT_dir)" in source
-    assert "prop_bw_src.shift(bT, bT_dir)" in source
+    assert ".shift(1, bT_dir)" in source
+    assert "shift(bT" not in source
+    tmdwf = inspect.getsource(pion_soft_factor.contract_tmdwf_check)
+    assert "xp.roll" not in tmdwf
+    assert ".shift(1, bT_dir)" in tmdwf
+    assert ".shift(1, 2)" in tmdwf
 
 
 def test_qtmdwf_runner_uses_exact_log_and_one_root_writer():

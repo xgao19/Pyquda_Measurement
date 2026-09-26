@@ -136,6 +136,41 @@ def test_pion_soft_factor_block_matmul_matches_einsum_and_is_faster():
     assert matmul_time < einsum_time, f"matmul {matmul_time:.3f}s was not faster than einsum {einsum_time:.3f}s"
 
 
+def _roll_steps(field, steps, axis):
+    out = field
+    for _ in range(steps):
+        out = np.roll(out, 1, axis=axis)
+    return out
+
+
+def test_incremental_periodic_shift_matches_direct_and_is_faster():
+    rng = np.random.default_rng(11)
+    field = rng.normal(size=(4, 6, 6, 8)) + 1j * rng.normal(size=(4, 6, 6, 8))
+    separations = 16
+    axis = -1
+
+    direct = [_roll_steps(field, b, axis) for b in range(separations)]
+    incremental = []
+    current = field
+    for b in range(separations):
+        if b != 0:
+            current = np.roll(current, 1, axis=axis)
+        incremental.append(current.copy())
+    for b in range(separations):
+        np.testing.assert_allclose(incremental[b], direct[b], atol=0, rtol=0)
+
+    direct_time = _time_median(lambda: [_roll_steps(field, b, axis) for b in range(separations)])
+    def _incremental():
+        current = field
+        for b in range(separations):
+            if b != 0:
+                current = np.roll(current, 1, axis=axis)
+    incremental_time = _time_median(_incremental)
+    assert incremental_time < direct_time, (
+        f"incremental {incremental_time:.3f}s was not faster than direct {direct_time:.3f}s"
+    )
+
+
 def test_pion_soft_factor_gamma_order_is_not_accidentally_commuted():
     rng = np.random.default_rng(5678)
     shape = (1, 1, 1, 1, 2, 2, 1, 1)
