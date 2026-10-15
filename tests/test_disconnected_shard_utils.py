@@ -25,7 +25,7 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     SHARD_SCHEMA,
     append_completed_base,
     base_part_ranges,
-    hp_vectors_per_base,
+    vectors_per_base,
     prepare_sample_log,
     sample_log_fingerprint,
     selected_base_range,
@@ -38,8 +38,8 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
 
 def test_base_ranges_and_nondivisible_part_layout():
     assert list(selected_base_range(8, 3, 5)) == [3, 4]
-    assert hp_vectors_per_base("zn", 256) == 1
-    assert hp_vectors_per_base("hierarchical_probing", 16) == 16
+    assert vectors_per_base("zn", 256) == 1
+    assert vectors_per_base("hierarchical_probing", 32) == 32
     assert base_part_ranges(1, 64) == [(0, 0, 1)]
 
 
@@ -82,8 +82,8 @@ def _common_attrs(configured_n_vec):
         "noise_generator": "splitmix64_global_coordinate_v1",
         "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
         "noise_scheme": "hierarchical_probing",
-        "hp_num_vectors": 2,
-        "hp_ordering": "interleaved_xyzt_binary_projected_to_evenodd",
+        "vectors_per_base": 2,
+        "hp_ordering": "nested_xyzt_checkerboard_v1",
         "n_vec": configured_n_vec,
     }
     attrs.update(basis_attrs())
@@ -117,7 +117,7 @@ def test_shard_writer_saves_mean_and_optional_raw(tmp_path):
         raw_datasets=raw_datasets,
         source_bookkeeping={
             "base_noise_index": [0, 0, 0],
-            "hp_index": [0, 1, 2],
+            "probe_index": [0, 1, 2],
         },
         shard_mean_datasets=shard_means,
     )
@@ -178,12 +178,12 @@ def test_raw_finalizer_rejects_mean_only_shards(tmp_path):
 
 
 def _write_synthetic_base(shard_dir, tag, base_idx, configured_n_vec):
-    for part_idx, hp_start, hp_stop in base_part_ranges(2, 1):
-        path = shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop)
+    for part_idx, probe_start, probe_stop in base_part_ranges(2, 1):
+        path = shard_part_path(shard_dir, tag, base_idx, part_idx, probe_start, probe_stop)
         common = _common_attrs(configured_n_vec)
         common.pop("n_vec")
-        attrs = shard_part_attrs(common, base_idx, part_idx, hp_start, hp_stop, 2)
-        source_idx = base_idx * 2 + hp_start
+        attrs = shard_part_attrs(common, base_idx, part_idx, probe_start, probe_stop, 2)
+        source_idx = base_idx * 2 + probe_start
         local = np.full((1, 16, 2, 2, 3), source_idx + 0.5, dtype=np.complex128)
         derivative = np.zeros((1, 16, 4, 2, 2, 3), dtype=np.complex128)
         for mu, gamma_position in enumerate((3, 5, 7, 1)):
@@ -199,7 +199,7 @@ def _write_synthetic_base(shard_dir, tag, base_idx, configured_n_vec):
             attrs,
             {
                 "base_noise_index": [base_idx],
-                "hp_index": [hp_start],
+                "probe_index": [probe_start],
             },
             metadata_datasets=basis_metadata(),
         )
@@ -222,7 +222,7 @@ def test_emt_finalize_streams_shards_and_embeds_ringed_kinetic(tmp_path):
         assert emt["raw/flowed_noise_norm_pervec"].shape == (4, 2, 2, 3)
         assert "raw/source_index" not in emt
         np.testing.assert_array_equal(emt["raw/base_noise_index"][()], [0, 0, 1, 1])
-        np.testing.assert_array_equal(emt["raw/hp_index"][()], [0, 1, 0, 1])
+        np.testing.assert_array_equal(emt["raw/probe_index"][()], [0, 1, 0, 1])
         raw_derivative = emt["raw/derivative_bilinear_pervec"][()]
         raw_t = emt_tensor_from_derivative_bilinear(raw_derivative)
         expected_k = ringed_kinetic_pervec_from_derivative(raw_derivative, 0, 8)
@@ -251,7 +251,7 @@ def test_raw_finalizer_accepts_shards_with_additional_means(tmp_path):
         with h5py.File(path, "r+") as h5:
             h5.attrs["raw_per_vector_stored"] = True
             h5.attrs["shard_mean_stored"] = True
-            h5.attrs["shard_mean_vector_count"] = h5["raw/hp_index"].shape[0]
+            h5.attrs["shard_mean_vector_count"] = h5["raw/probe_index"].shape[0]
             means = h5.require_group("shard_mean")
             for raw_name in (
                 "local_bilinear_pervec",
@@ -322,7 +322,7 @@ def test_emt_finalizer_rejects_old_tmunu_only_shard_schema(tmp_path):
             "CHI_pervec": np.zeros((1, 2, 2, 2, 3), dtype=np.complex128),
         },
         attrs,
-        {"base_noise_index": [0], "hp_index": [0]},
+        {"base_noise_index": [0], "probe_index": [0]},
     )
     with pytest.raises(ValueError, match="missing metadata dataset|missing raw"):
         finalize_emt_quark_1pt_shards(shard_dir, tag, 1)
@@ -352,8 +352,8 @@ def _write_synthetic_qtmd_base(shard_dir, tag, base_idx, legacy=False):
         "noise_generator": "splitmix64_global_coordinate_v1",
         "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
         "noise_scheme": "zn",
-        "hp_num_vectors": 1,
-        "hp_ordering": "global_xyzt_gray_projected_to_evenodd",
+        "vectors_per_base": 1,
+        "hp_ordering": "nested_xyzt_checkerboard_v1",
         "gi_qtmd_staple_mode": "link_cache",
         "schema_version": 1 if legacy else QTMD_SCHEMA_VERSION,
         "loop_convention": "eta_dagger_Gamma_O_b_xi" if legacy else QTMD_LOOP_CONVENTION,
@@ -367,7 +367,7 @@ def _write_synthetic_qtmd_base(shard_dir, tag, base_idx, legacy=False):
     loop = np.full((1, 2, 2, 1, 3), base_idx + 1, dtype=np.complex128)
     write_raw_part_hdf5(
         path, {"loop_pervec": loop}, attrs,
-        {"base_noise_index": [base_idx], "hp_index": [0]},
+        {"base_noise_index": [base_idx], "probe_index": [0]},
         metadata_datasets=metadata,
     )
 
@@ -484,7 +484,7 @@ def test_qtmd_finalize_rejects_duplicate_part_interval(tmp_path):
     shard_dir = tmp_path / "qTMD1pt" / "shards"
     _write_synthetic_qtmd_base(shard_dir, tag, 0)
     duplicate = shard_dir / (
-        Path(tag).name + ".base000000.part0000.hp0000-0001.h5"
+        Path(tag).name + ".base000000.part0000.probe0000-0001.h5"
     )
     with h5py.File(duplicate, "w"):
         pass

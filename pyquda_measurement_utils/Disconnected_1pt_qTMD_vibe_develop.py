@@ -57,14 +57,16 @@ from pyquda_measurement_utils.tools import (
     mpi_print,
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
+    NESTED_HP_ORDERING,
+    validate_nested_hp_shape,
     COUNTER_NOISE_ALGORITHM,
     append_completed_base,
     base_part_ranges,
     canonical_temp_path,
     discover_shard_layout,
     effective_n_inversions,
-    hp_vectors_per_base,
-    iter_noise_base_hp_interval,
+    vectors_per_base,
+    iter_noise_base_probe_interval,
     iter_validated_shard_parts,
     normalize_noise_scheme,
     part_source_bookkeeping,
@@ -105,13 +107,18 @@ class DisconnectedQuarkqTMD1pt:
         self.qlist_PDF = parameters.get("qext_PDF", self.qlist)
 
         self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
-        self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
-        self.hp_ordering = parameters.get("hp_ordering", "global_xyzt_gray_projected_to_evenodd")
+        if self.noise_scheme == "multiplier_probing":
+            raise ValueError("qTMD supports Z_N and complete HP only")
+        self.hp_num_vectors = parameters.get("hp_num_vectors", 1)
+        self.hp_ordering = parameters.get("hp_ordering", NESTED_HP_ORDERING)
         if parameters.get("config_num") is None:
             raise ValueError("config_num is required for counter-based disconnected noise")
         self.config_num = int(parameters["config_num"])
         self.gauge_preprocessing = parameters.get("gauge_preprocessing", "unspecified")
-        validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
+        if self.noise_scheme == "hierarchical_probing":
+            validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
+        else:
+            self.hp_num_vectors = 1
 
     def _contract_one_operator_list(self, latt_info, gauge, eta, xi, phases, W_index_list, operator_kind, staple_links=None):
         xp = _get_xp_from_array(xi.data)
@@ -165,7 +172,7 @@ class DisconnectedQuarkqTMD1pt:
         block_interval_solves, sample_log_file, completed_bases,
     ):
         n_vec, n_zn, _ = randPara
-        hp_count = hp_vectors_per_base(self.noise_scheme, self.hp_num_vectors)
+        probe_count = vectors_per_base(self.noise_scheme, self.hp_num_vectors)
         shard_dir = Path(shard_dir) if shard_dir else Path(tag).parent / "shards"
         common_attrs = {
             key: value for key, value in attrs.items()
@@ -187,18 +194,18 @@ class DisconnectedQuarkqTMD1pt:
             if base_idx in completed_bases:
                 mpi_print(U.latt_info, f"qTMD base SKIP from sample log: base{base_idx:06d}")
                 continue
-            for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
-                count = hp_stop - hp_start
-                path = shard_part_path(shard_dir, tag, base_idx, part_idx, hp_start, hp_stop)
+            for part_idx, probe_start, probe_stop in base_part_ranges(probe_count, block_interval_solves):
+                count = probe_stop - probe_start
+                path = shard_part_path(shard_dir, tag, base_idx, part_idx, probe_start, probe_stop)
                 write_attrs = shard_part_attrs(
-                    common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
+                    common_attrs, base_idx, part_idx, probe_start, probe_stop, probe_count
                 )
                 bookkeeping = part_source_bookkeeping(
-                    base_idx, hp_start, hp_stop, hp_count
+                    base_idx, probe_start, probe_stop, probe_count
                 )
                 loop_part = np.zeros((count,) + loop_shape, dtype=np.complex128)
-                for _, _, hp_idx, xi in iter_noise_base_hp_interval(
-                    U.latt_info, base_idx, hp_start, hp_stop, n_zn,
+                for _, _, probe_idx, xi, _, _ in iter_noise_base_probe_interval(
+                    U.latt_info, base_idx, probe_start, probe_stop, n_zn,
                     self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
                     config_num=int(attrs["config_num"]),
                     noise_stream=int(attrs["noise_stream"]),
@@ -208,7 +215,7 @@ class DisconnectedQuarkqTMD1pt:
                         U.latt_info, U, eta, xi, phases_q, W_index_list,
                         operator_kind, staple_links=staple_links,
                     )
-                    loop_part[hp_idx - hp_start] = comm.bcast(loops, root=0)
+                    loop_part[probe_idx - probe_start] = comm.bcast(loops, root=0)
                 if U.latt_info.mpi_rank == 0:
                     write_raw_part_hdf5(
                         path, {"loop_pervec": loop_part}, write_attrs,
@@ -279,7 +286,6 @@ class DisconnectedQuarkqTMD1pt:
             "csw": csw,
             "gauge_preprocessing": self.gauge_preprocessing,
             "t_boundary": latt_info.t_boundary,
-            "n_vec": n_vec,
             "n_base_noise": n_vec,
             "effective_n_inversions": n_eff,
             "n_zn": n_zn,
@@ -288,13 +294,16 @@ class DisconnectedQuarkqTMD1pt:
             "noise_generator": COUNTER_NOISE_ALGORITHM,
             "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
             "noise_scheme": self.noise_scheme,
-            "hp_num_vectors": self.hp_num_vectors,
-            "hp_ordering": self.hp_ordering,
+            "vectors_per_base": vectors_per_base(self.noise_scheme, self.hp_num_vectors),
+            "spin_color_dilution": "none",
             "gi_qtmd_staple_mode": "link_cache",
             "schema_version": QTMD_SCHEMA_VERSION,
             "loop_convention": QTMD_LOOP_CONVENTION,
             "trace_target": QTMD_TRACE_TARGET,
         }
+        if self.noise_scheme == "hierarchical_probing":
+            validate_nested_hp_shape(latt_info.global_size, self.hp_num_vectors)
+            attrs["hp_ordering"] = self.hp_ordering
         if sample_log_file is None:
             raise ValueError("sample_log_file is required for base-level resume")
         common_attrs = {
@@ -374,11 +383,11 @@ def finalize_disconnected_qtmd_1pt_shards(shard_dir, canonical_tag, n_base_noise
     total_sources = manifest["total_sources"]
     canonical_attrs = {
         key: value for key, value in reference_attrs.items()
-        if key not in {"shard_schema", "output_kind", "block_interval_solves", "hp_vectors_per_base"}
+        if key not in {"output_kind", "block_interval_solves"}
     }
     canonical_attrs.update({
         "measurement": "disconnected_qTMD_1pt",
-        "n_vec": n_base_noise,
+
         "n_base_noise": n_base_noise,
         "effective_n_inversions": total_sources,
     })
@@ -392,7 +401,7 @@ def finalize_disconnected_qtmd_1pt_shards(shard_dir, canonical_tag, n_base_noise
         raw_loop = raw.create_dataset("loop_pervec", shape=(total_sources,) + loop_shape, dtype=np.complex128)
         bookkeeping_datasets = {
             name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
-            for name in ("base_noise_index", "hp_index")
+            for name in ("base_noise_index", "probe_index")
         }
         loop_sum = np.zeros(loop_shape, dtype=np.complex128)
         for part_info, part in iter_validated_shard_parts(manifest):

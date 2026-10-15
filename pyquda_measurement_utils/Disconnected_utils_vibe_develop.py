@@ -5,7 +5,10 @@ import fcntl
 import hashlib
 import json
 import os
+import operator
 import re
+from functools import lru_cache
+from itertools import product
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,16 +18,18 @@ import numpy as np
 from pyquda_measurement_utils.tools import _asarray_on_queue, _get_xp_from_array
 
 
-VALID_NOISE_SCHEMES = {"zn", "hierarchical_probing"}
+VALID_NOISE_SCHEMES = {"zn", "hierarchical_probing", "multiplier_probing"}
+VALID_SPIN_COLOR_DILUTIONS = {"none", "point"}
+SPIN_COLOR_POINT_FACTOR = 12
 COUNTER_NOISE_ALGORITHM = "splitmix64_global_coordinate_v1"
-SHARD_SCHEMA = "disconnected_1pt_base_parts_v3"
-SAMPLE_LOG_SCHEMA = "disconnected_sample_log_v1"
-SOURCE_BOOKKEEPING_SCHEMA = "base_hp_v1"
+SHARD_SCHEMA = "disconnected_1pt_base_parts_v4"
+SAMPLE_LOG_SCHEMA = "disconnected_sample_log_v2"
+SOURCE_BOOKKEEPING_SCHEMA = "base_probe_v2"
+SOURCE_BOOKKEEPING_DILUTED_SCHEMA = "base_probe_spin_color_v3"
+NESTED_HP_ORDERING = "nested_xyzt_checkerboard_v1"
+COMPLETE_HP_LEVELS = {2: 1, 32: 2, 512: 4}
 VALID_HP_ORDERINGS = {
-    "global_xyzt_gray_projected_to_evenodd",
-    "interleaved_xyzt_binary_projected_to_evenodd",
-    "interleaved_xyz_binary_projected_to_evenodd",
-    "spatial_xyz_then_t_gray_projected_to_evenodd",
+    NESTED_HP_ORDERING,
 }
 
 _UINT64_MASK = np.uint64(0xFFFFFFFFFFFFFFFF)
@@ -47,8 +52,8 @@ _FINGERPRINT_EXCLUDED = {
 _PART_ATTRS = {
     "base_noise_index",
     "part_index",
-    "hp_start",
-    "hp_stop_exclusive",
+    "probe_start",
+    "probe_stop_exclusive",
     "shard_mean_vector_count",
 }
 
@@ -61,30 +66,183 @@ def normalize_noise_scheme(noise_scheme: str) -> str:
     return scheme
 
 
-def is_power_of_two(value: int) -> bool:
-    """Return whether value is a positive power of two."""
-    return value > 0 and (value & (value - 1)) == 0
+def normalize_spin_color_dilution(spin_color_dilution: str) -> str:
+    """Normalize and validate the spin-color dilution mode."""
+    mode = str(spin_color_dilution).strip().lower()
+    if mode not in VALID_SPIN_COLOR_DILUTIONS:
+        raise ValueError(
+            "spin_color_dilution should be one of "
+            f"{VALID_SPIN_COLOR_DILUTIONS}, got {spin_color_dilution!r}"
+        )
+    return mode
 
 
-def ceil_log2(value: int) -> int:
-    """Return ceil(log2(value)) for positive integers, with ceil_log2(1)=0."""
-    if value <= 1:
-        return 0
-    return int(value - 1).bit_length()
+def spin_color_dilution_factor(spin_color_dilution="none"):
+    """Return the solve multiplier for a complete spin-color dilution basis."""
+    mode = normalize_spin_color_dilution(spin_color_dilution)
+    return SPIN_COLOR_POINT_FACTOR if mode == "point" else 1
 
 
 def validate_hierarchical_probing_options(hp_num_vectors: int, hp_ordering: str):
     """Validate common hierarchical probing options."""
     if hp_ordering not in VALID_HP_ORDERINGS:
         raise ValueError(f"hp_ordering should be one of {VALID_HP_ORDERINGS}, got {hp_ordering!r}")
-    if not is_power_of_two(hp_num_vectors):
-        raise ValueError(f"hp_num_vectors should be a positive power of two, got {hp_num_vectors}")
+    count = _integer(hp_num_vectors, "hp_num_vectors")
+    if count not in COMPLETE_HP_LEVELS:
+        raise ValueError("complete HP requires hp_num_vectors in {2, 32, 512}")
 
 
-def effective_n_inversions(n_vec: int, noise_scheme: str, hp_num_vectors: int) -> int:
+def _integer(value, name):
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be an integer, not bool")
+    try:
+        return operator.index(value)
+    except TypeError as error:
+        raise TypeError(f"{name} must be an integer") from error
+
+
+def validate_nested_hp_shape(shape, count):
+    """Validate the three complete four-dimensional checkerboard HP levels."""
+    validate_hierarchical_probing_options(count, NESTED_HP_ORDERING)
+    shape = tuple(_integer(L, "extent") for L in shape)
+    if len(shape) != 4 or any(L < 2 for L in shape):
+        raise ValueError("nested HP requires four extents >= 2")
+    q = COMPLETE_HP_LEVELS[count]
+    if any(L % (2 * q) for L in shape):
+        raise ValueError(f"HP{count} requires each extent divisible by {2*q}")
+    return shape
+
+
+def hierarchical_nested_index(latt_info):
+    """Encode the supported complete HP layers using at most nine label bits."""
+    shape = validate_nested_hp_shape(latt_info.global_size, 2)
+    coords = tuple(np.asarray(c, dtype=np.int64) for c in latt_info.coordinate())
+    if len(coords) != 4 or any(c.shape != coords[0].shape for c in coords):
+        raise ValueError("nested HP requires matching global XYZT coordinate arrays")
+    label = np.bitwise_xor.reduce([c & 1 for c in coords])
+    out_bit = 1
+    for r in range(min(2, min(L.bit_length() - 1 for L in shape) - 1)):
+        for c in coords[:3]:
+            label |= ((c >> r) & 1) << out_bit
+            out_bit += 1
+        parity = np.bitwise_xor.reduce([(c >> (r + 1)) & 1 for c in coords])
+        label |= parity << out_bit
+        out_bit += 1
+    return label
+
+
+def effective_n_inversions(
+    n_vec: int,
+    noise_scheme: str,
+    hp_num_vectors: int,
+    multiplier_plan=None,
+    spin_color_dilution="none",
+) -> int:
     """Return the number of effective stochastic inversions."""
-    hp_factor = hp_num_vectors if noise_scheme == "hierarchical_probing" else 1
-    return n_vec * hp_factor
+    hp_factor = vectors_per_base(noise_scheme, hp_num_vectors, multiplier_plan)
+    return n_vec * hp_factor * spin_color_dilution_factor(spin_color_dilution)
+
+
+@lru_cache(maxsize=64)
+def _check_multiplier_torus(shape, distance, colors, sigma):
+    """Check all realizable wrapped coordinate differences, not only origin pairs."""
+    ranges = [range(-min(distance, L // 2), min(distance, L // 2) + 1) for L in shape]
+    for delta in product(*ranges):
+        if not 0 < sum(abs(dx) for dx in delta) <= distance:
+            continue
+        choices = [
+            (0,) if dx == 0 else (dx, dx - L if dx > 0 else dx + L)
+            for dx, L in zip(delta, shape)
+        ]
+        for actual in product(*choices):
+            if sum(s * dx for s, dx in zip(sigma, actual)) % colors == 0:
+                raise ValueError(f"invalid periodic multiplier plan: same-color displacement {actual}")
+
+
+def validate_multiplier_plan(plan, shape=None):
+    """Return a canonical, independently distance-checked linear coloring plan."""
+    if not isinstance(plan, dict):
+        raise ValueError("multiplier_plan must be a dictionary")
+    required = {"shape", "distance", "colors", "sigma", "version"}
+    if not required <= plan.keys():
+        raise ValueError(f"multiplier_plan requires {sorted(required)}")
+    extents = tuple(_integer(L, "extent") for L in plan["shape"])
+    sigma = tuple(_integer(s, "sigma") for s in plan["sigma"])
+    distance = _integer(plan["distance"], "distance")
+    colors = _integer(plan["colors"], "colors")
+    version = _integer(plan["version"], "version")
+    if version != 1 or len(extents) != 4 or len(sigma) != 4:
+        raise ValueError("multiplier requires version=1 and four XYZT extents/coefficients")
+    if any(L < 2 for L in extents) or distance < 1 or not 1 <= colors <= np.iinfo(np.int32).max:
+        raise ValueError("multiplier extents must be >=2; distance/colors must be positive")
+    if shape is not None and tuple(shape) != extents:
+        raise ValueError("multiplier plan shape does not match the lattice")
+    sigma = tuple(s % colors for s in sigma)
+    _check_multiplier_torus(extents, distance, colors, sigma)
+    return dict(shape=list(extents), distance=distance, colors=colors, sigma=list(sigma), version=version)
+
+
+def broadcast_multiplier_plan(plan_or_path, comm):
+    """Read and validate on rank zero, broadcasting failures as well as the plan."""
+    payload = None
+    if comm.Get_rank() == 0:
+        try:
+            plan = plan_or_path
+            if isinstance(plan, (str, Path)):
+                with Path(plan).open(encoding="utf-8") as handle:
+                    plan = json.load(handle)
+            payload = (None, validate_multiplier_plan(plan))
+        except (OSError, ValueError, TypeError) as error:
+            payload = (str(error), None)
+    error, plan = comm.bcast(payload, root=0)
+    if error is not None:
+        raise ValueError(f"multiplier plan initialization failed: {error}")
+    return plan
+
+
+def multiplier_probe_pattern(latt_info, probe_idx, plan):
+    """Build one unit-modulus Fourier pattern from a verified periodic coloring."""
+    plan = validate_multiplier_plan(plan, latt_info.global_size)
+    probe_idx = _integer(probe_idx, "probe_idx")
+    colors = plan["colors"]
+    if not 0 <= probe_idx < colors:
+        raise ValueError(f"probe_idx must be in [0, {colors})")
+    coords = tuple(np.asarray(c, dtype=np.int64) for c in latt_info.coordinate())
+    if len(coords) != 4 or any(c.shape != coords[0].shape for c in coords):
+        raise ValueError("multiplier requires matching global XYZT coordinate arrays")
+    site_colors = np.zeros_like(coords[0])
+    for s, c in zip(plan["sigma"], coords):
+        site_colors = (site_colors + (s * (c % colors)) % colors) % colors
+    table = np.exp(2j * np.pi * ((probe_idx * np.arange(colors)) % colors) / colors)
+    return table[site_colors]
+
+
+def apply_multiplier_probe(xi, probe_idx, plan):
+    """Apply a complete-basis Fourier character without changing the base noise."""
+    pattern = multiplier_probe_pattern(xi.latt_info, probe_idx, plan)
+    probed = xi.copy()
+    pattern = _asarray_on_queue(pattern, _get_xp_from_array(xi.data), xi.data)
+    probed.data[:] *= pattern[..., None, None]
+    return probed
+
+
+def apply_spin_color_point_dilution(xi, spin_idx, color_idx):
+    """Project a fermion source onto one exact spin-color channel."""
+    spin_idx = _integer(spin_idx, "spin_idx")
+    color_idx = _integer(color_idx, "color_idx")
+    diluted = xi.copy()
+    if not 0 <= spin_idx < diluted.data.shape[-2]:
+        raise ValueError(
+            f"spin_idx {spin_idx} outside spin dimension {diluted.data.shape[-2]}"
+        )
+    if not 0 <= color_idx < diluted.data.shape[-1]:
+        raise ValueError(
+            f"color_idx {color_idx} outside color dimension {diluted.data.shape[-1]}"
+        )
+    selected = xi.data[..., spin_idx, color_idx].copy()
+    diluted.data[:] = 0
+    diluted.data[..., spin_idx, color_idx] = selected
+    return diluted
 
 
 def _splitmix64(values):
@@ -167,70 +325,34 @@ def make_counter_zn_noise_fermion(
     return xi
 
 
-def hierarchical_gray_index(latt_info, hp_ordering: str):
-    """Return the Gray-code site index for a hierarchical probing ordering."""
-    coords = latt_info.coordinate()
-    x, y, z, t = [np.asarray(coords[mu], dtype=np.int64) for mu in range(4)]
-    Gx, Gy, Gz, Gt = latt_info.global_size
-
-    if hp_ordering == "global_xyzt_gray_projected_to_evenodd":
-        site_id = x + Gx * (y + Gy * (z + Gz * t))
-        return site_id ^ (site_id >> 1)
-
-    if hp_ordering == "interleaved_xyzt_binary_projected_to_evenodd":
-        site_id = np.zeros_like(x, dtype=np.int64)
-        out_bit = 0
-        for bit in range(max(ceil_log2(Gx), ceil_log2(Gy), ceil_log2(Gz), ceil_log2(Gt))):
-            for coord, extent in ((x, Gx), (y, Gy), (z, Gz), (t, Gt)):
-                if bit < ceil_log2(extent):
-                    site_id |= ((coord >> bit) & 1) << out_bit
-                    out_bit += 1
-        return site_id
-
-    if hp_ordering == "interleaved_xyz_binary_projected_to_evenodd":
-        site_id = np.zeros_like(x, dtype=np.int64)
-        out_bit = 0
-        for bit in range(max(ceil_log2(Gx), ceil_log2(Gy), ceil_log2(Gz))):
-            for coord, extent in ((x, Gx), (y, Gy), (z, Gz)):
-                if bit < ceil_log2(extent):
-                    site_id |= ((coord >> bit) & 1) << out_bit
-                    out_bit += 1
-        return site_id
-
-    if hp_ordering == "spatial_xyz_then_t_gray_projected_to_evenodd":
-        spatial_id = x + Gx * (y + Gy * z)
-        spatial_gray = spatial_id ^ (spatial_id >> 1)
-        time_gray = t ^ (t >> 1)
-        spatial_bits = ceil_log2(Gx * Gy * Gz)
-        return spatial_gray | (time_gray << spatial_bits)
-
-    raise ValueError(f"Unsupported hp_ordering {hp_ordering!r}")
-
-
-def hierarchical_probe_pattern(latt_info, hp_idx: int, hp_ordering: str):
+def hierarchical_probe_pattern(latt_info, probe_idx: int, hp_ordering: str):
     """Build a site-only Rademacher probing vector in even-odd layout."""
-    if hp_idx == 0:
+    validate_hierarchical_probing_options(2, hp_ordering)
+    probe_idx = _integer(probe_idx, "probe_idx")
+    shape = validate_nested_hp_shape(latt_info.global_size, 2)
+    max_count = max(n for n, q in COMPLETE_HP_LEVELS.items()
+                    if all(L % (2 * q) == 0 for L in shape))
+    if not 0 <= probe_idx < max_count:
+        raise ValueError(f"probe_idx must be in [0, {max_count})")
+    if probe_idx == 0:
         return np.ones_like(latt_info.coordinate(0), dtype=np.float64)
 
-    gray_id = hierarchical_gray_index(latt_info, hp_ordering)
-    parity = np.zeros_like(gray_id, dtype=bool)
-    mask = int(hp_idx)
+    label = hierarchical_nested_index(latt_info)
+    parity = np.zeros_like(label, dtype=bool)
+    mask = int(probe_idx)
     bit = 1
     while bit <= mask:
         if mask & bit:
-            parity ^= (gray_id & bit) != 0
+            parity ^= (label & bit) != 0
         bit <<= 1
     return np.where(parity, -1.0, 1.0)
 
 
-def apply_hierarchical_probe(xi, hp_idx: int, hp_ordering: str):
+def apply_hierarchical_probe(xi, probe_idx: int, hp_ordering: str):
     """Multiply a base stochastic source by one hierarchical probing vector."""
-    if hp_idx == 0:
-        return xi.copy()
-
     probed = xi.copy()
     xp = _get_xp_from_array(xi.data)
-    pattern = hierarchical_probe_pattern(xi.latt_info, hp_idx, hp_ordering)
+    pattern = hierarchical_probe_pattern(xi.latt_info, probe_idx, hp_ordering)
     pattern = _asarray_on_queue(pattern, xp, xi.data)
     probed.data[:] *= pattern[..., None, None]
     return probed
@@ -238,81 +360,112 @@ def apply_hierarchical_probe(xi, hp_idx: int, hp_ordering: str):
 
 def part_source_bookkeeping(
     base_idx: int,
-    hp_start: int,
-    hp_stop: int,
-    hp_count: int,
+    probe_start: int,
+    probe_stop: int,
+    probe_count: int,
+    spin_color_dilution="none",
 ):
     """Return deterministic global indices for one base/HP shard part."""
     base_idx = int(base_idx)
-    hp_start = int(hp_start)
-    hp_stop = int(hp_stop)
-    hp_count = int(hp_count)
-    if base_idx < 0 or hp_count <= 0 or not 0 <= hp_start < hp_stop <= hp_count:
+    probe_start = int(probe_start)
+    probe_stop = int(probe_stop)
+    probe_count = int(probe_count)
+    if base_idx < 0 or probe_count <= 0 or not 0 <= probe_start < probe_stop <= probe_count:
         raise ValueError(
-            f"invalid base/HP interval: base={base_idx}, hp=[{hp_start}, {hp_stop}), "
-            f"hp_count={hp_count}"
+            f"invalid base/HP interval: base={base_idx}, hp=[{probe_start}, {probe_stop}), "
+            f"probe_count={probe_count}"
         )
 
-    base_indices = []
-    hp_indices = []
-    for hp_idx in range(hp_start, hp_stop):
-        base_indices.append(base_idx)
-        hp_indices.append(hp_idx)
+    mode = normalize_spin_color_dilution(spin_color_dilution)
+    base_indices, hp_indices, spin_indices, color_indices = [], [], [], []
+    for probe_idx in range(probe_start, probe_stop):
+        channels = product(range(4), range(3)) if mode == "point" else [(-1, -1)]
+        for spin_idx, color_idx in channels:
+            base_indices.append(base_idx)
+            hp_indices.append(probe_idx)
+            spin_indices.append(spin_idx)
+            color_indices.append(color_idx)
 
     bookkeeping = {
         "base_noise_index": np.asarray(base_indices, dtype=np.int32),
-        "hp_index": np.asarray(hp_indices, dtype=np.int32),
+        "probe_index": np.asarray(hp_indices, dtype=np.int32),
     }
+    if mode == "point":
+        bookkeeping["spin_index"] = np.asarray(spin_indices, dtype=np.int32)
+        bookkeeping["color_index"] = np.asarray(color_indices, dtype=np.int32)
     return bookkeeping
 
 
-def reconstruct_source_indices(base_noise_index, hp_index, hp_count):
+def reconstruct_source_indices(base_noise_index, probe_index, probe_count):
     """Reconstruct the effective source index from base and HP indices."""
     base = np.asarray(base_noise_index, dtype=np.int64)
-    hp = np.asarray(hp_index, dtype=np.int64)
-    hp_count = int(hp_count)
+    hp = np.asarray(probe_index, dtype=np.int64)
+    probe_count = int(probe_count)
     if base.shape != hp.shape:
-        raise ValueError("base_noise_index and hp_index should have the same shape")
-    if hp_count <= 0 or np.any(base < 0) or np.any(hp < 0) or np.any(hp >= hp_count):
+        raise ValueError("base_noise_index and probe_index should have the same shape")
+    if probe_count <= 0 or np.any(base < 0) or np.any(hp < 0) or np.any(hp >= probe_count):
         raise ValueError("invalid base/HP bookkeeping")
-    return (base * hp_count + hp).astype(np.int64, copy=False)
+    return (base * probe_count + hp).astype(np.int64, copy=False)
 
 
-def iter_noise_base_hp_interval(
+def iter_noise_base_probe_interval(
     latt_info,
     base_idx: int,
-    hp_start: int,
-    hp_stop: int,
+    probe_start: int,
+    probe_stop: int,
     n_zn: int,
     noise_scheme: str,
     hp_num_vectors: int,
     hp_ordering: str,
     config_num: int,
     noise_stream: int = 0,
+    multiplier_plan=None,
+    spin_color_dilution="none",
 ):
     """Yield only the requested HP interval of one deterministic base noise."""
     if config_num is None:
         raise ValueError("config_num is required for decomposition-independent stochastic sources")
     noise_scheme = normalize_noise_scheme(noise_scheme)
-    hp_count = int(hp_num_vectors) if noise_scheme == "hierarchical_probing" else 1
+    probe_count = vectors_per_base(noise_scheme, hp_num_vectors, multiplier_plan)
+    if noise_scheme == "hierarchical_probing" and hp_ordering == NESTED_HP_ORDERING:
+        validate_nested_hp_shape(latt_info.global_size, hp_num_vectors)
+    if noise_scheme == "multiplier_probing":
+        multiplier_plan = validate_multiplier_plan(multiplier_plan, latt_info.global_size)
+    dilution = normalize_spin_color_dilution(spin_color_dilution)
+    factor = spin_color_dilution_factor(dilution)
+    base_idx, probe_start, probe_stop = int(base_idx), int(probe_start), int(probe_stop)
+    source_offset = base_idx * probe_count * factor
+    channels = tuple(product(range(4), range(3))) if dilution == "point" else ((-1, -1),)
+    part_source_bookkeeping(
+        base_idx, probe_start, probe_stop, probe_count, dilution
+    )
     base_noise = make_counter_zn_noise_fermion(
-        latt_info, int(config_num), int(base_idx),
+        latt_info, int(config_num), base_idx,
         stream_seed=int(noise_stream), n=n_zn,
     )
 
-    for hp_idx in range(int(hp_start), int(hp_stop)):
-        source = (
-            apply_hierarchical_probe(base_noise, hp_idx, hp_ordering)
-            if noise_scheme == "hierarchical_probing"
-            else base_noise.copy()
-        )
-        fields = (
-            int(base_idx) * hp_count + int(hp_idx),
-            int(base_idx),
-            int(hp_idx),
-            source,
-        )
-        yield fields
+    for probe_idx in range(probe_start, probe_stop):
+        if noise_scheme == "hierarchical_probing":
+            source = apply_hierarchical_probe(base_noise, probe_idx, hp_ordering)
+        elif noise_scheme == "multiplier_probing":
+            source = apply_multiplier_probe(base_noise, probe_idx, multiplier_plan)
+        else:
+            source = base_noise.copy()
+        for spin_idx, color_idx in channels:
+            selected = (
+                apply_spin_color_point_dilution(source, spin_idx, color_idx)
+                if dilution == "point" else source
+            )
+            channel = spin_idx * 3 + color_idx if dilution == "point" else 0
+            fields = (
+                source_offset + probe_idx * factor + channel,
+                base_idx,
+                probe_idx,
+                selected,
+                spin_idx,
+                color_idx,
+            )
+            yield fields
 
 
 def _lock_sample_log(handle):
@@ -346,33 +499,42 @@ def selected_base_range(n_base_noise, base_start=0, base_stop=None):
     return range(start, stop)
 
 
-def hp_vectors_per_base(noise_scheme, hp_num_vectors):
-    return (
-        int(hp_num_vectors)
-        if str(noise_scheme).strip().lower() == "hierarchical_probing"
-        else 1
-    )
+def vectors_per_base(noise_scheme, hp_num_vectors, multiplier_plan=None):
+    scheme = normalize_noise_scheme(noise_scheme)
+    if scheme == "multiplier_probing":
+        return validate_multiplier_plan(multiplier_plan)["colors"]
+    if scheme == "hierarchical_probing":
+        validate_hierarchical_probing_options(hp_num_vectors, NESTED_HP_ORDERING)
+        return int(hp_num_vectors)
+    return 1
 
 
-def base_part_ranges(hp_count, block_interval_solves):
-    hp_count = int(hp_count)
+def base_part_ranges(probe_count, block_interval_solves, solve_multiplier=1):
+    probe_count = int(probe_count)
     interval = int(block_interval_solves)
-    if hp_count <= 0 or interval <= 0:
+    solve_multiplier = int(solve_multiplier)
+    if probe_count <= 0 or interval <= 0 or solve_multiplier <= 0:
         raise ValueError(
-            "hp_count and block_interval_solves should be positive, "
-            f"got {hp_count}, {interval}"
+            "probe_count, block_interval_solves, and solve_multiplier should be positive, "
+            f"got {probe_count}, {interval}, {solve_multiplier}"
         )
+    if interval % solve_multiplier:
+        raise ValueError(
+            "block_interval_solves should contain complete dilution bases; "
+            f"got {interval} solves for multiplier {solve_multiplier}"
+        )
+    vector_interval = interval // solve_multiplier
     return [
-        (part_index, hp_start, min(hp_start + interval, hp_count))
-        for part_index, hp_start in enumerate(range(0, hp_count, interval))
+        (part_index, probe_start, min(probe_start + vector_interval, probe_count))
+        for part_index, probe_start in enumerate(range(0, probe_count, vector_interval))
     ]
 
 
-def shard_part_path(shard_dir, canonical_tag, base_idx, part_idx, hp_start, hp_stop):
+def shard_part_path(shard_dir, canonical_tag, base_idx, part_idx, probe_start, probe_stop):
     stem = Path(canonical_tag).name
     name = (
         f"{stem}.base{int(base_idx):06d}.part{int(part_idx):04d}"
-        f".hp{int(hp_start):04d}-{int(hp_stop) - 1:04d}.h5"
+        f".probe{int(probe_start):04d}-{int(probe_stop) - 1:04d}.h5"
     )
     return Path(shard_dir) / name
 
@@ -415,6 +577,8 @@ def write_shard_part_hdf5(
     tmp = _temporary_path(path)
     with h5py.File(tmp, "w") as h5:
         _write_attrs(h5, attrs)
+        h5.attrs["raw_per_vector_stored"] = raw_datasets is not None
+        h5.attrs["shard_mean_stored"] = shard_mean_datasets is not None
         if raw_datasets is not None:
             raw = h5.require_group("raw")
             for name, values in raw_datasets.items():
@@ -448,20 +612,26 @@ def shard_part_attrs(
     base_attrs,
     base_idx,
     part_idx,
-    hp_start,
-    hp_stop,
-    hp_count,
+    probe_start,
+    probe_stop,
+    probe_count,
+    spin_color_dilution="none",
 ):
+    dilution = normalize_spin_color_dilution(spin_color_dilution)
     attrs = dict(base_attrs)
     attrs.update(
         {
             "shard_schema": SHARD_SCHEMA,
             "base_noise_index": int(base_idx),
             "part_index": int(part_idx),
-            "hp_start": int(hp_start),
-            "hp_stop_exclusive": int(hp_stop),
-            "hp_vectors_per_base": int(hp_count),
-            "source_bookkeeping_schema": SOURCE_BOOKKEEPING_SCHEMA,
+            "probe_start": int(probe_start),
+            "probe_stop_exclusive": int(probe_stop),
+            "vectors_per_base": int(probe_count),
+            "spin_color_dilution": dilution,
+            "source_bookkeeping_schema": (
+                SOURCE_BOOKKEEPING_DILUTED_SCHEMA
+                if dilution == "point" else SOURCE_BOOKKEEPING_SCHEMA
+            ),
         }
     )
     return attrs
@@ -488,9 +658,16 @@ def _jsonable(value):
 
 
 def sample_log_fingerprint(attrs, metadata=None):
+    attrs = dict(attrs or {})
+    dilution = normalize_spin_color_dilution(
+        attrs.get("spin_color_dilution", "none")
+    )
     identity = {
-        "source_bookkeeping_schema": SOURCE_BOOKKEEPING_SCHEMA,
-        "attrs": _jsonable(dict(attrs or {})),
+        "source_bookkeeping_schema": (
+            SOURCE_BOOKKEEPING_DILUTED_SCHEMA
+            if dilution == "point" else SOURCE_BOOKKEEPING_SCHEMA
+        ),
+        "attrs": _jsonable(attrs),
         "metadata": _jsonable(dict(metadata or {})),
     }
     payload = json.dumps(
@@ -581,6 +758,7 @@ def discover_shard_layout(
     n_base_noise,
     raw_dataset_names,
     metadata_dataset_names=(),
+    base_means=False,
 ):
     """Inspect base-0 part-0 and construct the expected streaming layout."""
     shard_dir = Path(shard_dir)
@@ -593,7 +771,7 @@ def discover_shard_layout(
         raise ValueError("raw_dataset_names should not be empty")
 
     stem = Path(canonical_tag).name
-    first_matches = sorted(shard_dir.glob(f"{stem}.base000000.part0000.hp*.h5"))
+    first_matches = sorted(shard_dir.glob(f"{stem}.base000000.part0000.probe*.h5"))
     if len(first_matches) != 1:
         raise ValueError(
             f"expected exactly one base-0 part-0 shard for {stem}, found {len(first_matches)}"
@@ -603,13 +781,19 @@ def discover_shard_layout(
         with h5py.File(first_path, "r") as first:
             if first.attrs.get("shard_schema") != SHARD_SCHEMA:
                 raise ValueError(f"shard {first_path} has incompatible schema")
-            if not bool(first.attrs.get("raw_per_vector_stored", True)):
+            if not base_means and not bool(first.attrs["raw_per_vector_stored"]):
                 raise ValueError(
                     "mean-only shards cannot be finalized as per-vector raw data"
                 )
-            hp_count = int(first.attrs["hp_vectors_per_base"])
+            probe_count = int(first.attrs["vectors_per_base"])
             interval = int(first.attrs["block_interval_solves"])
-            if first.attrs.get("source_bookkeeping_schema") != SOURCE_BOOKKEEPING_SCHEMA:
+            dilution = normalize_spin_color_dilution(first.attrs["spin_color_dilution"])
+            solve_multiplier = spin_color_dilution_factor(dilution)
+            expected_bookkeeping_schema = (
+                SOURCE_BOOKKEEPING_DILUTED_SCHEMA
+                if dilution == "point" else SOURCE_BOOKKEEPING_SCHEMA
+            )
+            if first.attrs.get("source_bookkeeping_schema") != expected_bookkeeping_schema:
                 raise ValueError(f"shard {first_path} has incompatible bookkeeping schema")
             if "raw/source_index" in first:
                 raise ValueError(f"shard {first_path} contains obsolete raw/source_index")
@@ -628,6 +812,12 @@ def discover_shard_layout(
             raw_tails = {}
             for name in raw_dataset_names:
                 dataset = f"raw/{name}"
+                mean_dataset = f"shard_mean/{name.removesuffix('_pervec')}"
+                if base_means:
+                    if not first.attrs["shard_mean_stored"] or mean_dataset not in first:
+                        raise ValueError(f"shard {first_path} requires {mean_dataset}")
+                    raw_tails[name] = tuple(first[mean_dataset].shape)
+                    continue
                 if dataset not in first:
                     raise ValueError(f"shard {first_path} is missing {dataset}")
                 raw_tails[name] = tuple(first[dataset].shape[1:])
@@ -640,7 +830,7 @@ def discover_shard_layout(
         0,
         0,
         0,
-        min(interval, hp_count),
+        min(interval // solve_multiplier, probe_count),
     )
     if first_path != expected_first:
         raise ValueError(
@@ -650,36 +840,41 @@ def discover_shard_layout(
     parts = []
     output_offset = 0
     for base_idx in range(n_base_noise):
-        for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, interval):
+        for part_idx, probe_start, probe_stop in base_part_ranges(
+            probe_count, interval, solve_multiplier
+        ):
             bookkeeping = part_source_bookkeeping(
-                base_idx, hp_start, hp_stop, hp_count
+                base_idx, probe_start, probe_stop, probe_count, dilution
             )
-            count = hp_stop - hp_start
+            vector_count = probe_stop - probe_start
+            source_count = vector_count * solve_multiplier
             parts.append(
                 {
                     "base_idx": base_idx,
                     "part_idx": part_idx,
-                    "hp_start": hp_start,
-                    "hp_stop": hp_stop,
+                    "probe_start": probe_start,
+                    "probe_stop": probe_stop,
                     "path": shard_part_path(
                         shard_dir,
                         canonical_tag,
                         base_idx,
                         part_idx,
-                        hp_start,
-                        hp_stop,
+                        probe_start,
+                        probe_stop,
                     ),
                     "output_start": output_offset,
-                    "output_stop": output_offset + count,
+                    "output_stop": output_offset + source_count,
+                    "vector_count": vector_count,
+                    "source_count": source_count,
                     "bookkeeping": bookkeeping,
                 }
             )
-            output_offset += count
+            output_offset += source_count
 
     for base_idx in range(n_base_noise):
         expected = {info["path"] for info in parts if info["base_idx"] == base_idx}
         actual = set(
-            shard_dir.glob(f"{stem}.base{base_idx:06d}.part*.hp*.h5")
+            shard_dir.glob(f"{stem}.base{base_idx:06d}.part*.probe*.h5")
         )
         if actual != expected:
             missing = sorted(str(path) for path in expected - actual)
@@ -690,11 +885,14 @@ def discover_shard_layout(
             )
 
     return {
+        "base_means": base_means,
         "reference_attrs": reference_attrs,
         "metadata": reference_metadata,
         "raw_tails": raw_tails,
         "parts": parts,
-        "hp_count": hp_count,
+        "probe_count": probe_count,
+        "spin_color_dilution": dilution,
+        "solve_multiplier": solve_multiplier,
         "block_interval_solves": interval,
         "total_sources": output_offset,
         "raw_dataset_names": raw_dataset_names,
@@ -715,12 +913,18 @@ def iter_validated_shard_parts(layout):
                     "shard_schema": SHARD_SCHEMA,
                     "base_noise_index": info["base_idx"],
                     "part_index": info["part_idx"],
-                    "hp_start": info["hp_start"],
-                    "hp_stop_exclusive": info["hp_stop"],
-                    "hp_vectors_per_base": layout["hp_count"],
+                    "probe_start": info["probe_start"],
+                    "probe_stop_exclusive": info["probe_stop"],
+                    "vectors_per_base": layout["probe_count"],
                     "block_interval_solves": layout["block_interval_solves"],
-                    "source_bookkeeping_schema": SOURCE_BOOKKEEPING_SCHEMA,
+                    "source_bookkeeping_schema": (
+                        SOURCE_BOOKKEEPING_DILUTED_SCHEMA
+                        if layout["spin_color_dilution"] == "point"
+                        else SOURCE_BOOKKEEPING_SCHEMA
+                    ),
                 }
+                base_means = layout["base_means"]
+                has_raw = bool(part.attrs["raw_per_vector_stored"])
                 for key, expected in part_fields.items():
                     if key not in part.attrs or not _attr_equal(
                         part.attrs[key], expected
@@ -745,16 +949,30 @@ def iter_validated_shard_parts(layout):
                         raise ValueError(
                             f"shard {path} has incompatible metadata {name}"
                         )
-                count = info["output_stop"] - info["output_start"]
+                source_count = info["source_count"]
+                vector_count = info["vector_count"]
+                if base_means:
+                    if part.attrs.get("shard_mean_vector_count") != vector_count:
+                        raise ValueError(f"shard {path} has incompatible mean count")
+                    for name, tail in raw_tails.items():
+                        dataset = f"shard_mean/{name.removesuffix('_pervec')}"
+                        if dataset not in part or part[dataset].shape != tail:
+                            raise ValueError(f"shard {path} has incompatible {dataset} shape")
+                        if not np.all(np.isfinite(part[dataset][()])):
+                            raise ValueError(f"shard {path} contains non-finite means")
                 for name, tail in raw_tails.items():
+                    if base_means and not has_raw:
+                        continue
                     dataset = f"raw/{name}"
                     if dataset not in part or tuple(part[dataset].shape) != (
-                        count,
+                        source_count,
                     ) + tail:
                         raise ValueError(
                             f"shard {path} has incompatible {dataset} shape"
                         )
                 for name, expected in info["bookkeeping"].items():
+                    if base_means and not has_raw:
+                        continue
                     dataset = f"raw/{name}"
                     if dataset not in part or not np.array_equal(
                         part[dataset][()], expected
@@ -772,29 +990,38 @@ def canonical_temp_path(tag):
 
 
 __all__ = [
+    "NESTED_HP_ORDERING",
+    "COMPLETE_HP_LEVELS",
+    "hierarchical_nested_index",
+    "validate_nested_hp_shape",
+    "validate_multiplier_plan",
+    "broadcast_multiplier_plan",
+    "multiplier_probe_pattern",
+    "apply_multiplier_probe",
     "COUNTER_NOISE_ALGORITHM",
     "SAMPLE_LOG_SCHEMA",
     "SHARD_SCHEMA",
     "SOURCE_BOOKKEEPING_SCHEMA",
+    "SOURCE_BOOKKEEPING_DILUTED_SCHEMA",
+    "SPIN_COLOR_POINT_FACTOR",
     "VALID_HP_ORDERINGS",
     "VALID_NOISE_SCHEMES",
     "append_completed_base",
     "apply_hierarchical_probe",
+    "apply_spin_color_point_dilution",
     "base_part_ranges",
     "canonical_temp_path",
-    "ceil_log2",
     "counter_zn_phase_indices",
     "disconnected_sample_log_path",
     "discover_shard_layout",
     "effective_n_inversions",
-    "hierarchical_gray_index",
     "hierarchical_probe_pattern",
-    "hp_vectors_per_base",
-    "is_power_of_two",
-    "iter_noise_base_hp_interval",
+    "vectors_per_base",
+    "iter_noise_base_probe_interval",
     "iter_validated_shard_parts",
     "make_counter_zn_noise_fermion",
     "normalize_noise_scheme",
+    "normalize_spin_color_dilution",
     "part_source_bookkeeping",
     "prepare_sample_log",
     "reconstruct_source_indices",
@@ -803,6 +1030,7 @@ __all__ = [
     "selected_base_range",
     "shard_part_attrs",
     "shard_part_path",
+    "spin_color_dilution_factor",
     "validate_hierarchical_probing_options",
     "write_raw_part_hdf5",
     "write_shard_part_hdf5",

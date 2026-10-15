@@ -142,17 +142,32 @@ def test_shared_emt_quark_and_gluon_flow_defaults_match():
     assert "EMT_1PT_SRC_T" not in gluon
 
 
-def test_emt_quark_hp_defaults_to_isotropic_four_dimensional_ordering():
-    quark = _source(
-        "application/EMT_disconnected_1pt/perlmutter/"
-        "Pyquda_EMT_disconnected_quark_1pt.py"
+def test_disconnected_hp_ordering_is_defaulted_only_by_python_measurement():
+    entries = (
+        ("EMT_disconnected_1pt/perlmutter", "Pyquda_EMT_disconnected_quark_1pt.py", "run_quark_1pt.sh", "EMT_1PT"),
+        ("qTMD_disconnected_1pt/perlmutter", "Pyquda_Disconnected_qTMD_1pt.py", "run_qTMD_1pt.sh", "QTMD_1PT"),
+        ("flowed_quark_ringed_norm/Aurora", "Pyquda_flowed_quark_ringed_norm.py", "run_flowed_quark_ringed_norm.sh", "FLOWED_RINGED"),
+        ("flowed_quark_ringed_norm/perlmutter", "Pyquda_flowed_quark_ringed_norm.py", "run_flowed_quark_ringed_norm.sh", "FLOWED_RINGED"),
     )
-    wrapper = _source(
-        "application/EMT_disconnected_1pt/perlmutter/run_quark_1pt.sh"
-    )
-    ordering = "interleaved_xyzt_binary_projected_to_evenodd"
-    assert f'os.environ.get("EMT_1PT_HP_ORDERING", "{ordering}")' in quark
-    assert f'EMT_1PT_HP_ORDERING:-{ordering}' in wrapper
+    for directory, driver, wrapper, prefix in entries:
+        path = f"application/{directory}/{driver}"
+        source = _source(path)
+        env = prefix + "_HP_ORDERING"
+        assert f'if "{env}" in os.environ:' in source
+        assert f'parameters["hp_ordering"] = os.environ["{env}"]' in source
+        assert "hp_ordering" not in _dict_keys(_literal_dict_assignment(path, "parameters"))
+        assert env not in _exported_env_names(f"application/{directory}/{wrapper}")
+
+
+def test_emt_finalize_defaults_to_bases_with_optional_raw_diagnostics():
+    path = "application/EMT_disconnected_1pt/perlmutter/Pyquda_EMT_disconnected_finalize_quark_1pt.py"
+    arguments = _parser_arguments(path)
+    assert "--base-statistics" not in arguments
+    assert _keyword_constant(arguments["--raw-output"], "action") == "store_true"
+    assert "path = aggregate_emt_quark_1pt_bases(" in _source(path)
+    build = _source("application/EMT_disconnected_1pt/perlmutter/Pyquda_EMT_disconnected_build_3pt.py")
+    assert 'source_bookkeeping["probe_index"]' in build
+    assert '"hp_index"' not in build
 
 
 def test_emt_quark_flow_batch_size_is_positive_cli_only():

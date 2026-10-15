@@ -9,8 +9,9 @@ config_num="$2"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 software_root="${SOFTWARE_ROOT:-/global/cfs/cdirs/m4559/xgao/software_gradientflow}"
-measurement_root="${MEASUREMENT_ROOT:-$software_root/Pyquda_Measurement}"
+measurement_root="${MEASUREMENT_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
 
+export PYQUDA_ROOT="$measurement_root"
 source "$measurement_root/systems/perlmutter/activate-venv-quda.sh"
 python3 -u "$script_dir/Pyquda_EMT_disconnected_finalize_quark_1pt.py" \
   --config_num "$config_num"

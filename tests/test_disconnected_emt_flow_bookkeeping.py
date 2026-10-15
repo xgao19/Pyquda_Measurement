@@ -87,6 +87,22 @@ def test_flow_batch_size_and_interval_validation():
             _positive_flow_batch_size(invalid)
 
 
+def test_point_spin_color_shard_normalization_and_part_ranges():
+    measurement = make_measurement(spin_color_dilution="point")
+    raw = {
+        "local_bilinear_pervec": np.ones((24, 2), dtype=np.complex128),
+        "derivative_bilinear_pervec": np.full((24, 3), 2.0, dtype=np.complex128),
+    }
+    means = measurement._shard_means_from_raw(raw, vector_count=2)
+    np.testing.assert_array_equal(means["local_bilinear"], np.full(2, 12.0))
+    np.testing.assert_array_equal(means["derivative_bilinear"], np.full(3, 24.0))
+    assert emt_module.base_part_ranges(32, 96, 12) == [
+        (0, 0, 8), (1, 8, 16), (2, 16, 24), (3, 24, 32)
+    ]
+    with pytest.raises(ValueError, match="complete dilution bases"):
+        emt_module.base_part_ranges(32, 100, 12)
+
+
 def test_hp_part_batches_never_cross_part_boundaries():
     hp16 = [
         _interval_batches(start, stop, 6)
@@ -204,8 +220,8 @@ def test_ringed_zero_momentum_should_be_unique():
 
 
 def test_emt_default_hp_ordering_is_isotropic_four_dimensional():
-    measurement = make_measurement(flow_steps=1)
-    assert measurement.hp_ordering == "interleaved_xyzt_binary_projected_to_evenodd"
+    measurement = make_measurement(flow_steps=1, noise_scheme="hierarchical_probing", hp_num_vectors=2)
+    assert measurement.hp_ordering == "nested_xyzt_checkerboard_v1"
 
 
 def test_ringed_zero_momentum_validation_precedes_inverter_setup():
@@ -474,9 +490,9 @@ def test_plain_noise_batches_across_bases_and_logs_only_successful_batches(
     monkeypatch.setattr(emt_module, "getMPIComm", lambda: FakeComm())
     monkeypatch.setattr(
         emt_module,
-        "iter_noise_base_hp_interval",
-        lambda _info, base, hp_start, hp_stop, *_args, **_kwargs: iter(
-            [(base, base, hp_start, object())]
+        "iter_noise_base_probe_interval",
+        lambda _info, base, probe_start, probe_stop, *_args, **_kwargs: iter(
+            [(base, base, probe_start, object())]
         ),
     )
 
@@ -526,7 +542,7 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
     measurement = make_measurement(
         config_num=4,
         noise_scheme="hierarchical_probing",
-        hp_num_vectors=16,
+        hp_num_vectors=32,
     )
     batches = []
     completed = []
@@ -534,9 +550,9 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
     monkeypatch.setattr(emt_module, "getMPIComm", lambda: FakeComm())
     monkeypatch.setattr(
         emt_module,
-        "iter_noise_base_hp_interval",
-        lambda _info, base, hp_start, hp_stop, *_args, **_kwargs: iter(
-            [(base * 16 + hp, base, hp, object()) for hp in range(hp_start, hp_stop)]
+        "iter_noise_base_probe_interval",
+        lambda _info, base, probe_start, probe_stop, *_args, **_kwargs: iter(
+            [(base * 32 + hp, base, hp, object()) for hp in range(probe_start, probe_stop)]
         ),
     )
 
@@ -562,7 +578,7 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
         "noise_stream": 0,
         "n_vec": 1,
         "n_base_noise": 1,
-        "effective_n_inversions": 16,
+        "effective_n_inversions": 32,
     }
     measurement._measure_base_shards(
         gauge, object(), [1, 4, 0],
@@ -571,7 +587,8 @@ def test_hp_batching_stays_within_one_base_and_part(tmp_path, monkeypatch):
         set(), 6,
     )
     assert [[hp for _, hp in batch] for batch in batches] == [
-        list(range(0, 6)), list(range(6, 12)), list(range(12, 16))
+        list(range(0, 6)), list(range(6, 12)), list(range(12, 18)),
+        list(range(18, 24)), list(range(24, 30)), list(range(30, 32))
     ]
     assert all({base for base, _ in batch} == {0} for batch in batches)
     assert completed == [0]
@@ -586,15 +603,15 @@ def test_hp_shard_mean_accumulates_across_flow_batches(
     measurement = make_measurement(
         config_num=8,
         noise_scheme="hierarchical_probing",
-        hp_num_vectors=4,
+        hp_num_vectors=2,
     )
     writes = []
     monkeypatch.setattr(emt_module, "getMPIComm", lambda: FakeComm())
     monkeypatch.setattr(
         emt_module,
-        "iter_noise_base_hp_interval",
-        lambda _info, base, hp_start, hp_stop, *_args, **_kwargs: iter(
-            [(base * 4 + hp, base, hp, object()) for hp in range(hp_start, hp_stop)]
+        "iter_noise_base_probe_interval",
+        lambda _info, base, probe_start, probe_stop, *_args, **_kwargs: iter(
+            [(base * 2 + hp, base, hp, object()) for hp in range(probe_start, probe_stop)]
         ),
     )
 
@@ -622,7 +639,7 @@ def test_hp_shard_mean_accumulates_across_flow_batches(
         "noise_stream": 0,
         "n_vec": 1,
         "n_base_noise": 1,
-        "effective_n_inversions": 4,
+        "effective_n_inversions": 2,
         "raw_per_vector_stored": save_raw_per_vector,
         "shard_mean_stored": True,
     }
@@ -630,24 +647,105 @@ def test_hp_shard_mean_accumulates_across_flow_batches(
         gauge, object(), [1, 4, 0],
         str(tmp_path / "test.h5"), [None], attrs,
         tmp_path / "shards", tmp_path / "sample.log", 0, 1, 64,
-        set(), 2, save_raw_per_vector,
+        set(), 1, save_raw_per_vector,
     )
 
     assert len(writes) == 1
     _, write_attrs, payload = writes[0]
-    assert int(write_attrs["shard_mean_vector_count"]) == 4
+    assert int(write_attrs["shard_mean_vector_count"]) == 2
     for values in payload["shard_mean_datasets"].values():
-        np.testing.assert_allclose(values, 2.5)
+        np.testing.assert_allclose(values, 1.5)
     if save_raw_per_vector:
         assert payload["raw_datasets"] is not None
         np.testing.assert_array_equal(
             payload["raw_datasets"]["flowed_noise_norm_pervec"][:, 0, 0, 0],
-            [1, 2, 3, 4],
+            [1, 2],
         )
         assert payload["source_bookkeeping"] is not None
     else:
         assert payload["raw_datasets"] is None
         assert payload["source_bookkeeping"] is None
+
+
+def test_point_spin_color_shard_sums_projectors_and_averages_probes(
+    tmp_path, monkeypatch
+):
+    gauge = FakeGauge()
+    measurement = make_measurement(
+        config_num=9,
+        noise_scheme="hierarchical_probing",
+        hp_num_vectors=2,
+        spin_color_dilution="point",
+    )
+    writes = []
+    batches = []
+    monkeypatch.setattr(emt_module, "getMPIComm", lambda: FakeComm())
+
+    def fake_sources(_info, base, probe_start, probe_stop, *_args, **_kwargs):
+        for hp in range(probe_start, probe_stop):
+            for spin in range(4):
+                for color in range(3):
+                    yield ((base * 2 + hp) * 12 + spin * 3 + color,
+                           base, hp, object(), spin, color)
+
+    monkeypatch.setattr(emt_module, "iter_noise_base_probe_interval", fake_sources)
+
+    def fake_measure(
+        _gauge, _dirac, records, _phases, timers=None,
+        restore_original_gauge=True,
+    ):
+        records = list(records)
+        batches.append(records)
+        output = zero_batch_output(len(records))
+        for source_idx, record in enumerate(records):
+            for values in output.values():
+                values[source_idx].fill(record[2] + 1)
+        return output
+
+    monkeypatch.setattr(measurement, "_invert_and_measure_batch", fake_measure)
+    monkeypatch.setattr(
+        emt_module, "write_shard_part_hdf5",
+        lambda path, attrs, **kwargs: writes.append((path, attrs, kwargs)),
+    )
+    monkeypatch.setattr(
+        emt_module, "append_completed_base", lambda *_args, **_kwargs: None
+    )
+    attrs = {
+        "config_num": 9,
+        "noise_stream": 0,
+        "n_vec": 1,
+        "n_base_noise": 1,
+        "effective_n_inversions": 24,
+        "spin_color_dilution": "point",
+        "spin_color_dilution_factor": 12,
+        "raw_per_vector_stored": True,
+        "shard_mean_stored": True,
+    }
+    measurement._measure_base_shards(
+        gauge, object(), [1, 4, 0],
+        str(tmp_path / "test.h5"), [None], attrs,
+        tmp_path / "shards", tmp_path / "sample.log", 0, 1, 24,
+        set(), 8, True,
+    )
+
+    assert [len(batch) for batch in batches] == [8, 8, 8]
+    assert len(writes) == 1
+    _, write_attrs, payload = writes[0]
+    assert write_attrs["shard_mean_vector_count"] == 2
+    assert len(payload["source_bookkeeping"]["probe_index"]) == 24
+    assert write_attrs["source_bookkeeping_schema"] == "base_probe_spin_color_v3"
+    for values in payload["shard_mean_datasets"].values():
+        np.testing.assert_allclose(values, 18.0)
+    assert payload["raw_datasets"]["flowed_noise_norm_pervec"].shape[0] == 24
+    np.testing.assert_array_equal(
+        payload["source_bookkeeping"]["probe_index"], np.repeat([0, 1], 12)
+    )
+    np.testing.assert_array_equal(
+        payload["source_bookkeeping"]["spin_index"], np.tile(np.repeat(range(4), 3), 2)
+    )
+    np.testing.assert_array_equal(
+        payload["source_bookkeeping"]["color_index"], np.tile(range(3), 8)
+    )
 
 
 def test_source_loop_uses_one_full_mg_setup_then_thin_restores(tmp_path, monkeypatch):
@@ -678,9 +776,9 @@ def test_source_loop_uses_one_full_mg_setup_then_thin_restores(tmp_path, monkeyp
     monkeypatch.setattr(emt_module.phase, "MomentumPhase", FakeMomentumPhase)
     monkeypatch.setattr(
         emt_module,
-        "iter_noise_base_hp_interval",
-        lambda _info, base, hp_start, hp_stop, *_args, **_kwargs: iter(
-            [(base, base, hp_start, object())]
+        "iter_noise_base_probe_interval",
+        lambda _info, base, probe_start, probe_stop, *_args, **_kwargs: iter(
+            [(base, base, probe_start, object())]
         ),
     )
     monkeypatch.setattr(

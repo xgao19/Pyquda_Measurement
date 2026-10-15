@@ -25,13 +25,13 @@ def _write_quark(path, derivative, volume=2):
         h5.attrs["qext"] = [[0, 0, 0, 0]]
         h5.attrs["flow_times"] = [0.0]
         h5.attrs["noise_scheme"] = "zn"
-        h5.attrs["hp_num_vectors"] = 1
-        h5.attrs["source_bookkeeping_schema"] = "base_hp_v1"
+        h5.attrs["vectors_per_base"] = 1
+        h5.attrs["source_bookkeeping_schema"] = "base_probe_v2"
         _write_provenance(h5, [1, 1, 1, derivative.shape[-1]])
         raw = h5.require_group("raw")
         raw.create_dataset("derivative_bilinear_pervec", data=derivative)
         raw.create_dataset("base_noise_index", data=np.arange(derivative.shape[0]))
-        raw.create_dataset("hp_index", data=np.zeros(derivative.shape[0], dtype=np.int32))
+        raw.create_dataset("probe_index", data=np.zeros(derivative.shape[0], dtype=np.int32))
 
 
 def _write_provenance(h5, lattice_size):
@@ -104,8 +104,8 @@ def test_quark_reader_never_requests_nonvector_gamma(monkeypatch):
             "qext": [[0, 0, 0, 0]],
             "flow_times": [0.0],
             "noise_scheme": "zn",
-            "hp_num_vectors": 1,
-            "source_bookkeeping_schema": "base_hp_v1",
+            "vectors_per_base": 1,
+            "source_bookkeeping_schema": "base_probe_v2",
             "loop_provenance_schema": "emt_disconnected_loop_provenance_v2",
             "global_lattice_size": [1, 1, 1, 2],
             "momentum_phase_origin": [0, 0, 0, 0],
@@ -125,7 +125,7 @@ def test_quark_reader_never_requests_nonvector_gamma(monkeypatch):
         def __getitem__(self, key):
             if key == "raw/derivative_bilinear_pervec":
                 return Dataset()
-            if key == "raw/hp_index":
+            if key == "raw/probe_index":
                 return np.zeros(2, dtype=np.int32)
             return np.asarray([0, 1], dtype=np.int32)
 

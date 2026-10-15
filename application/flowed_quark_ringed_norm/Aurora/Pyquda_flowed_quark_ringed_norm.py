@@ -56,7 +56,6 @@ parameters = {
     "flow_steps": int(os.environ.get("FLOWED_RINGED_FLOW_STEPS", "1")),
     "noise_scheme": os.environ.get("FLOWED_RINGED_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("FLOWED_RINGED_HP_NUM_VECTORS", "1")),
-    "hp_ordering": os.environ.get("FLOWED_RINGED_HP_ORDERING", "global_xyzt_gray_projected_to_evenodd"),
     "multigrid": parse_mg_block(os.environ.get("FLOWED_RINGED_MG_BLOCK", "8.8.4.4")),
     "gauge_preprocessing": gauge_preprocessing,
     "flavor_convention": os.environ.get(
@@ -64,6 +63,9 @@ parameters = {
         "single_flavor_trace_for_this_dirac_operator",
     ),
 }
+if "FLOWED_RINGED_HP_ORDERING" in os.environ:
+    parameters["hp_ordering"] = os.environ["FLOWED_RINGED_HP_ORDERING"]
+
 
 init(
     mpi_geometry,

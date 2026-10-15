@@ -13,16 +13,13 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from application.analysis_helper.emt_base_data import validate_base_file
+
 from application.analysis_helper.emt_disconnected_analysis import source_relative_loops
 
 from pyquda_measurement_utils.fermion_bilinear_basis import (
     GAMMA_LABELS,
-    VECTOR_GAMMA_POSITIONS,
 )
-
-
-T_GAMMA_POSITION = VECTOR_GAMMA_POSITIONS[3]
-T_DERIVATIVE_POSITION = 3
 
 
 @dataclass(frozen=True)
@@ -30,7 +27,7 @@ class T44BaseLoops:
     path: Path
     qext: np.ndarray
     flow_times: np.ndarray
-    hp_count: int
+    solves_per_base: int
     base_values: np.ndarray
 
 
@@ -99,44 +96,19 @@ def read_pplus_c2(path, momenta):
 
 
 def load_t44_base_loops(path):
-    """Load only T44 and group every complete randomized HP base."""
+    """Read normalized T44 from finalized independent bases."""
     path = Path(path)
     with h5py.File(path, "r") as h5:
-        if int(h5.attrs.get("emt_operator_schema_version", -1)) != 5:
-            raise ValueError(f"{path} is not EMT operator schema 5")
-        derivative = h5["raw/derivative_bilinear_pervec"]
-        if derivative.ndim != 6 or derivative.shape[1:3] != (16, 4):
-            raise ValueError(f"invalid derivative primitive shape {derivative.shape}")
-        source_t44 = np.asarray(
-            derivative[:, T_GAMMA_POSITION, T_DERIVATIVE_POSITION],
-            dtype=np.complex128,
-        ) / float(h5.attrs["volume_norm"])
-        base_index = np.asarray(h5["raw/base_noise_index"], dtype=np.int64)
-        hp_index = np.asarray(h5["raw/hp_index"], dtype=np.int64)
-        scheme = h5.attrs["noise_scheme"]
-        if isinstance(scheme, bytes):
-            scheme = scheme.decode("utf-8")
-        hp_count = (
-            int(h5.attrs["hp_num_vectors"])
-            if str(scheme) == "hierarchical_probing"
-            else 1
-        )
+        bases, cost = validate_base_file(h5)
         qext = np.asarray(h5.attrs["qext"], dtype=np.int32)
-        flow_times = np.asarray(h5.attrs["flow_times"], dtype=np.float64)
-
-    bases = np.unique(base_index)
-    if not np.array_equal(bases, np.arange(len(bases), dtype=np.int64)):
-        raise ValueError("base indices should be contiguous from zero")
-    expected_hp = np.arange(hp_count, dtype=np.int64)
-    base_values = np.empty((len(bases),) + source_t44.shape[1:], np.complex128)
-    for base in bases:
-        rows = np.flatnonzero(base_index == base)
-        if not np.array_equal(np.sort(hp_index[rows]), expected_hp):
-            raise ValueError(f"base {base} is not a complete HP estimator")
-        base_values[base] = np.mean(source_t44[rows], axis=0)
-    if len(source_t44) != len(bases) * hp_count:
-        raise ValueError("source axis contains duplicated or incomplete HP vectors")
-    return T44BaseLoops(path, qext, flow_times, hp_count, base_values)
+        flow_times = np.asarray(h5.attrs["flow_times"], dtype=float)
+        values = h5["base/Tmunu/T44"][()]
+        nt = int(h5.attrs["global_lattice_size"][3])
+        if values.shape != (len(bases), len(qext), len(flow_times), nt):
+            raise ValueError("T44 complete-base axes do not match metadata")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("non-finite T44 base values")
+    return T44BaseLoops(path, qext, flow_times, cost, values)
 
 
 def optimized_ratio(c3_qtau, c2_pf_t, c2_pi_qt, t_sep, taus=None):
@@ -289,8 +261,6 @@ def two_way_bootstrap_disconnected(
 
 __all__ = [
     "T44BaseLoops",
-    "T_DERIVATIVE_POSITION",
-    "T_GAMMA_POSITION",
     "delete_one_jackknife",
     "deterministic_stratified_sources",
     "disconnected_ratio",

@@ -69,11 +69,14 @@ parameters = {
     "flow_steps": int(os.environ.get("EMT_1PT_FLOW_STEPS", "1")),
     "noise_scheme": os.environ.get("EMT_1PT_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("EMT_1PT_HP_NUM_VECTORS", "1")),
-    "hp_ordering": os.environ.get("EMT_1PT_HP_ORDERING", "interleaved_xyzt_binary_projected_to_evenodd"),
+    "spin_color_dilution": os.environ.get("EMT_1PT_SPIN_COLOR_DILUTION", "none"),
+    "multiplier_plan": os.environ.get("EMT_1PT_MULTIPLIER_PLAN"),
     "gauge_preprocessing": "HYP(1,0.75,0.6,0.3,dir_ignore=-1)",
     "multigrid": parse_multigrid_blocks(args.mg_block),
 }
 quark_1pt_tag = get_emt_quark_loop_file_tag(data_dir, lat_tag, conf, 0, setup_tag)
+if "EMT_1PT_HP_ORDERING" in os.environ:
+    parameters["hp_ordering"] = os.environ["EMT_1PT_HP_ORDERING"]
 
 init(mpi_geometry, enable_mps=True)
 
@@ -88,7 +91,7 @@ invPara = [
     float(os.environ.get("EMT_1PT_TOL", "1e-10")),
     int(os.environ.get("EMT_1PT_MAXITER", "300")),
 ]
-# Stochastic-source knobs: number of vectors, Z_n, counter-noise stream salt.
+# Stochastic-source knobs: independent bases, Z_n, counter-noise stream salt.
 randPara = [
     int(os.environ.get("EMT_1PT_N_VEC", "1")),
     int(os.environ.get("EMT_1PT_N_ZN", "4")),

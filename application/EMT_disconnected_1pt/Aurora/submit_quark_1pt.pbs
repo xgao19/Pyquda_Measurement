@@ -1,0 +1,16 @@
+#!/bin/bash -l
+#PBS -N a076_strange_hp512
+#PBS -A StructNGB
+#PBS -q debug-scaling
+#PBS -l select=8:ngpus=6
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=flare
+#PBS -o log/pbs.o
+#PBS -e log/pbs.e
+set -euo pipefail
+
+benchmark_dir="${PBS_O_WORKDIR:?submit from the Aurora application directory}"
+cd "$benchmark_dir"
+echo "job_id=$PBS_JOBID start_utc=$(date -u +%FT%TZ)"
+exec bash "$benchmark_dir/run_quark_1pt.sh"

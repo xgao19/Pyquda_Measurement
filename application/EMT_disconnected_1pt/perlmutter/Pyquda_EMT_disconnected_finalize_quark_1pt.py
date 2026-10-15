@@ -1,7 +1,9 @@
 import argparse
 import os
 
-from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import finalize_emt_quark_1pt_shards
+from pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop import (
+    finalize_emt_quark_1pt_shards, aggregate_emt_quark_1pt_bases,
+)
 from pyquda_measurement_utils.io_corr import (
     get_emt_quark_loop_file_tag,
 )
@@ -9,6 +11,7 @@ from pyquda_measurement_utils.io_corr import (
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config_num", type=int, required=True)
+parser.add_argument("--raw-output", action="store_true", help="also finalize per-source diagnostics; requires raw shards")
 args = parser.parse_args()
 
 conf = args.config_num
@@ -22,5 +25,8 @@ canonical_tag = os.environ.get(
 )
 shard_dir = os.environ.get("EMT_1PT_SHARD_DIR", os.path.join(data_dir, "EMTquarkLoop", "shards"))
 
-path = finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_vec)
-print("Finalized EMT quark 1pt with embedded ringed kinetic:", path, flush=True)
+path = aggregate_emt_quark_1pt_bases(shard_dir, canonical_tag, n_vec)
+print("Finalized EMT independent bases:", path, flush=True)
+if args.raw_output:
+    path = finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_vec)
+    print("Finalized EMT per-source diagnostics:", path, flush=True)

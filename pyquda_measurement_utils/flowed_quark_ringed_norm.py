@@ -20,6 +20,8 @@ from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     canonical_temp_path,
     discover_shard_layout,
     iter_validated_shard_parts,
+    normalize_noise_scheme,
+    normalize_spin_color_dilution,
 )
 
 
@@ -28,6 +30,10 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
 
     def __init__(self, parameters):
         parameters = dict(parameters)
+        if normalize_spin_color_dilution(parameters.get("spin_color_dilution", "none")) != "none":
+            raise ValueError("standalone ringed does not support spin-color dilution")
+        if normalize_noise_scheme(parameters.get("noise_scheme", "zn")) == "multiplier_probing":
+            raise ValueError("standalone ringed supports Z_N and complete HP only")
         if parameters.get("config_num") is None:
             raise ValueError(
                 "config_num is required for counter-based stochastic sources"
@@ -111,7 +117,7 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
     ):
         n_vec, n_zn, _ = randPara
         mass, csw, _, _ = invPara
-        return {
+        attrs = {
             "measurement": "flowed_quark_ringed_norm",
             "content": "kinetic_only",
             "producer": "standalone_ringed_shared_emt_runner",
@@ -136,7 +142,6 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
             "gauge_preprocessing": self.gauge_preprocessing,
             "t_boundary": latt_info.t_boundary,
             "flavor_convention": self.flavor_convention,
-            "n_vec": n_vec,
             "n_base_noise": n_vec,
             "effective_n_inversions": n_eff,
             "n_zn": n_zn,
@@ -144,11 +149,10 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
             "noise_stream": int(counter_stream),
             "noise_generator": COUNTER_NOISE_ALGORITHM,
             "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
-            "noise_scheme": self.noise_scheme,
-            "hp_num_vectors": self.hp_num_vectors,
-            "hp_ordering": self.hp_ordering,
             "ringed_factors_stored": False,
         }
+        attrs.update(self._probing_attrs())
+        return attrs
 
     def measure(
         self,
@@ -164,7 +168,7 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
         block_interval_solves=64,
         flow_batch_size=1,
     ):
-        """Run the kinetic-only standalone measurement into base/HP shards."""
+        """Run kinetic-only shards with the raw data required by its finalizer."""
         return self._run_sharded_measurement(
             gauge,
             invPara,
@@ -176,6 +180,7 @@ class RingedQuark1pt(EMTDisconnectedQuark1pt):
             base_stop=base_stop,
             block_interval_solves=block_interval_solves,
             flow_batch_size=flow_batch_size,
+            save_raw_per_vector=True,
         )
 
 
@@ -191,17 +196,15 @@ def finalize_ringed_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
         key: value
         for key, value in manifest["reference_attrs"].items()
         if key not in {
-            "shard_schema",
             "output_kind",
             "block_interval_solves",
-            "hp_vectors_per_base",
         }
     }
     total_sources = int(manifest["total_sources"])
     attrs.update({
         "measurement": "flowed_quark_ringed_norm",
         "content": "kinetic_only",
-        "n_vec": int(n_base_noise),
+
         "n_base_noise": int(n_base_noise),
         "effective_n_inversions": total_sources,
         "ringed_factors_stored": False,
@@ -228,7 +231,7 @@ def finalize_ringed_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
         )
         bookkeeping = {
             name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
-            for name in ("base_noise_index", "hp_index")
+            for name in ("base_noise_index", "probe_index")
         }
         kinetic_sum = np.zeros(kinetic_tail[:-1], dtype=np.complex128)
         for info, part in iter_validated_shard_parts(manifest):

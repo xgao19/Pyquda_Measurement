@@ -9,7 +9,9 @@ disconnected diagrams in analysis:
 
 import os
 import operator
+import json
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 from time import perf_counter
 
@@ -52,20 +54,26 @@ from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import (
 )
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     COUNTER_NOISE_ALGORITHM,
+    NESTED_HP_ORDERING,
+    validate_nested_hp_shape,
+    validate_multiplier_plan,
+    broadcast_multiplier_plan,
     append_completed_base,
     base_part_ranges,
     canonical_temp_path,
     discover_shard_layout,
     effective_n_inversions,
-    hp_vectors_per_base,
-    iter_noise_base_hp_interval,
+    vectors_per_base,
+    iter_noise_base_probe_interval,
     iter_validated_shard_parts,
     normalize_noise_scheme,
+    normalize_spin_color_dilution,
     part_source_bookkeeping,
     prepare_sample_log,
     selected_base_range,
     shard_part_attrs,
     shard_part_path,
+    spin_color_dilution_factor,
     validate_hierarchical_probing_options,
     write_shard_part_hdf5,
 )
@@ -266,10 +274,19 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
             "gauge_preprocessing", "unspecified"
         )
         self.noise_scheme = normalize_noise_scheme(parameters.get("noise_scheme", "zn"))
-        self.hp_num_vectors = int(parameters.get("hp_num_vectors", 1))
-        self.hp_ordering = parameters.get(
-            "hp_ordering", "interleaved_xyzt_binary_projected_to_evenodd"
+        self.spin_color_dilution = normalize_spin_color_dilution(
+            parameters.get("spin_color_dilution", "none")
         )
+        self.spin_color_dilution_factor = spin_color_dilution_factor(
+            self.spin_color_dilution
+        )
+        self.multiplier_plan = None
+        if self.noise_scheme == "multiplier_probing":
+            self.multiplier_plan = broadcast_multiplier_plan(parameters.get("multiplier_plan"), getMPIComm())
+        elif parameters.get("multiplier_plan") is not None:
+            raise ValueError("multiplier_plan requires noise_scheme=multiplier_probing")
+        self.hp_num_vectors = parameters.get("hp_num_vectors", 1)
+        self.hp_ordering = parameters.get("hp_ordering", NESTED_HP_ORDERING)
         self.flavor_convention = parameters.get(
             "flavor_convention",
             "single_flavor_trace_for_this_dirac_operator",
@@ -278,7 +295,10 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
         self.multigrid_blocks = (
             None if multigrid is None else parse_multigrid_blocks(multigrid)
         )
-        validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
+        if self.noise_scheme == "hierarchical_probing":
+            validate_hierarchical_probing_options(self.hp_num_vectors, self.hp_ordering)
+        else:
+            self.hp_num_vectors = 1
 
     @staticmethod
     def _impose_P_Breit_slice(complex_field, phases_3pt):
@@ -399,13 +419,14 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
             for name, tail in self._raw_step_tail_shapes(latt_info).items()
         }
 
-    @staticmethod
-    def _shard_storage_attrs(save_raw_per_vector):
+    def _shard_storage_attrs(self, save_raw_per_vector):
         return {
             "raw_per_vector_stored": bool(save_raw_per_vector),
             "shard_mean_stored": True,
             "shard_mean_definition": (
-                "arithmetic_mean_over_hp_interval_complex128"
+                "sum_over_spin_color_then_arithmetic_mean_over_hp_interval_complex128"
+                if self.spin_color_dilution == "point"
+                else "arithmetic_mean_over_hp_interval_complex128"
             ),
             "shard_mean_local_axes": "gamma,q,flow,t",
             "shard_mean_derivative_axes": "gamma,derivative,q,flow,t",
@@ -436,11 +457,24 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
             shard_sums[mean_name] += np.sum(values, axis=0, dtype=np.complex128)
         return source_count
 
-    def _shard_means_from_raw(self, raw_datasets):
+    def _shard_means_from_raw(self, raw_datasets, vector_count=None):
+        source_counts = {int(values.shape[0]) for values in raw_datasets.values()}
+        if len(source_counts) != 1:
+            raise ValueError("raw shard datasets have inconsistent source counts")
+        source_count = source_counts.pop()
+        if vector_count is None:
+            if source_count % self.spin_color_dilution_factor:
+                raise ValueError("raw source count is not a complete dilution basis")
+            vector_count = source_count // self.spin_color_dilution_factor
+        vector_count = int(vector_count)
+        if vector_count <= 0:
+            raise ValueError("vector_count should be positive")
+        if source_count != vector_count * self.spin_color_dilution_factor:
+            raise ValueError("raw source count does not match spatial vector count")
         return {
-            self._shard_mean_name(name): np.mean(
+            self._shard_mean_name(name): np.sum(
                 values, axis=0, dtype=np.complex128
-            )
+            ) / vector_count
             for name, values in raw_datasets.items()
         }
 
@@ -633,7 +667,6 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
             "csw": csw,
             "gauge_preprocessing": self.gauge_preprocessing,
             "t_boundary": latt_info.t_boundary,
-            "n_vec": n_vec,
             "n_base_noise": n_vec,
             "effective_n_inversions": n_eff,
             "n_zn": n_zn,
@@ -641,11 +674,21 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
             "noise_stream": counter_stream,
             "noise_generator": COUNTER_NOISE_ALGORITHM,
             "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
-            "noise_scheme": self.noise_scheme,
-            "hp_num_vectors": self.hp_num_vectors,
-            "hp_ordering": self.hp_ordering,
         }
+        attrs.update(self._probing_attrs())
         attrs.update(basis_attrs())
+        return attrs
+
+    def _probing_attrs(self):
+        attrs = {
+            "noise_scheme": self.noise_scheme,
+            "vectors_per_base": vectors_per_base(self.noise_scheme, self.hp_num_vectors, self.multiplier_plan),
+            "spin_color_dilution": self.spin_color_dilution,
+        }
+        if self.noise_scheme == "hierarchical_probing":
+            attrs["hp_ordering"] = self.hp_ordering
+        if self.multiplier_plan is not None:
+            attrs["multiplier_plan_json"] = json.dumps(self.multiplier_plan, sort_keys=True)
         return attrs
 
     def _measure_base_shards(
@@ -654,7 +697,8 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
         completed_bases, flow_batch_size, save_raw_per_vector=False,
     ):
         n_vec, n_zn, _ = randPara
-        hp_count = hp_vectors_per_base(self.noise_scheme, self.hp_num_vectors)
+        probe_count = vectors_per_base(self.noise_scheme, self.hp_num_vectors, self.multiplier_plan)
+        solve_multiplier = self.spin_color_dilution_factor
         shard_dir = Path(shard_dir) if shard_dir else Path(tag).parent / "shards"
         common_attrs = {
             key: value for key, value in attrs.items()
@@ -680,23 +724,23 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
                 pending_bases.append(base_idx)
 
         def write_part(
-            base_idx, part_idx, hp_start, hp_stop,
+            base_idx, part_idx, probe_start, probe_stop,
             raw_datasets, shard_mean_datasets,
         ):
             path = shard_part_path(
-                shard_dir, tag, base_idx, part_idx, hp_start, hp_stop
+                shard_dir, tag, base_idx, part_idx, probe_start, probe_stop
             )
             write_attrs = shard_part_attrs(
-                common_attrs, base_idx, part_idx, hp_start, hp_stop, hp_count
+                common_attrs, base_idx, part_idx, probe_start, probe_stop, probe_count,
+                self.spin_color_dilution,
             )
-            write_attrs["shard_mean_vector_count"] = int(hp_stop - hp_start)
+            write_attrs["shard_mean_vector_count"] = int(probe_stop - probe_start)
             bookkeeping = None
             if raw_datasets is not None:
                 bookkeeping = part_source_bookkeeping(
-                    base_idx, hp_start, hp_stop, hp_count
+                    base_idx, probe_start, probe_stop, probe_count,
+                    self.spin_color_dilution,
                 )
-            else:
-                write_attrs.pop("source_bookkeeping_schema", None)
             if U.latt_info.mpi_rank == 0:
                 write_shard_part_hdf5(
                     path,
@@ -718,7 +762,7 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
                 )
             comm.Barrier()
 
-        if self.noise_scheme != "hierarchical_probing":
+        if self.noise_scheme == "zn" and self.spin_color_dilution == "none":
             # A plain-noise base contains one source, so batching across pending
             # bases is required for pure Z_N to benefit from source batching.
             for batch_index, (batch_start, batch_stop) in enumerate(_interval_batches(
@@ -727,11 +771,12 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
                 batch_bases = pending_bases[batch_start:batch_stop]
                 source_records = []
                 for base_idx in batch_bases:
-                    records = list(iter_noise_base_hp_interval(
+                    records = list(iter_noise_base_probe_interval(
                         U.latt_info, base_idx, 0, 1, n_zn,
                         self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
                         config_num=int(attrs["config_num"]),
                         noise_stream=int(attrs["noise_stream"]),
+                        spin_color_dilution=self.spin_color_dilution,
                     ))
                     if len(records) != 1:
                         raise RuntimeError(
@@ -755,7 +800,7 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
                     write_part(
                         base_idx, 0, 0, 1,
                         raw_source if save_raw_per_vector else None,
-                        self._shard_means_from_raw(raw_source),
+                        self._shard_means_from_raw(raw_source, 1),
                     )
                     complete_base(base_idx)
                 timers["write"] += _timer_stop(write_t0)
@@ -766,15 +811,18 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
             return None, None
 
         for base_idx in pending_bases:
-            for part_idx, hp_start, hp_stop in base_part_ranges(hp_count, block_interval_solves):
-                count = hp_stop - hp_start
+            for part_idx, probe_start, probe_stop in base_part_ranges(
+                probe_count, block_interval_solves, solve_multiplier
+            ):
+                count = probe_stop - probe_start
+                source_count = count * solve_multiplier
                 raw_part = None
                 shard_sums = None
                 if save_raw_per_vector:
                     raw_part = {
                         name: np.zeros(shape, dtype=np.complex128)
                         for name, shape in self._raw_batch_shapes(
-                            U.latt_info, count
+                            U.latt_info, source_count
                         ).items()
                     }
                 else:
@@ -782,15 +830,18 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
                 accumulated_count = 0
                 timers = self._new_batch_timers()
                 part_t0 = _timer_start()
-                for batch_hp_start, batch_hp_stop in _interval_batches(
-                    hp_start, hp_stop, flow_batch_size
-                ):
-                    source_records = list(iter_noise_base_hp_interval(
-                        U.latt_info, base_idx, batch_hp_start, batch_hp_stop, n_zn,
-                        self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
-                        config_num=int(attrs["config_num"]),
-                        noise_stream=int(attrs["noise_stream"]),
-                    ))
+                source_iterator = iter_noise_base_probe_interval(
+                    U.latt_info, base_idx, probe_start, probe_stop, n_zn,
+                    self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
+                    config_num=int(attrs["config_num"]),
+                    noise_stream=int(attrs["noise_stream"]),
+                    multiplier_plan=self.multiplier_plan,
+                    spin_color_dilution=self.spin_color_dilution,
+                )
+                while True:
+                    source_records = list(islice(source_iterator, flow_batch_size))
+                    if not source_records:
+                        break
                     raw = self._invert_and_measure_batch(
                         U, dirac, source_records, momentum_projectors, timers=timers,
                         restore_original_gauge=not first_inversion_batch,
@@ -798,32 +849,33 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
                     first_inversion_batch = False
                     if save_raw_per_vector:
                         destination = slice(
-                            batch_hp_start - hp_start, batch_hp_stop - hp_start
+                            accumulated_count,
+                            accumulated_count + len(source_records),
                         )
                         for name, values in raw.items():
                             raw_part[name][destination] = values
                     else:
-                        accumulated_count += self._accumulate_shard_sums(
-                            shard_sums, raw
-                        )
+                        self._accumulate_shard_sums(shard_sums, raw)
+                    accumulated_count += len(source_records)
                     del raw
-                if not save_raw_per_vector and accumulated_count != count:
+                if accumulated_count != source_count:
                     raise RuntimeError(
-                        f"measured {accumulated_count} vectors for a {count}-vector part"
+                        f"measured {accumulated_count} sources for a "
+                        f"{source_count}-source part"
                     )
                 if save_raw_per_vector:
-                    shard_means = self._shard_means_from_raw(raw_part)
+                    shard_means = self._shard_means_from_raw(raw_part, count)
                 else:
                     shard_means = self._shard_means_from_sums(shard_sums, count)
                 write_t0 = _timer_start()
                 write_part(
-                    base_idx, part_idx, hp_start, hp_stop,
+                    base_idx, part_idx, probe_start, probe_stop,
                     raw_part, shard_means,
                 )
                 timers["write"] += _timer_stop(write_t0)
                 total = _timer_stop(part_t0)
                 self._print_batch_timers(
-                    U.latt_info, part_idx, count, timers, total
+                    U.latt_info, part_idx, source_count, timers, total
                 )
             complete_base(base_idx)
         return None, None
@@ -883,6 +935,11 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
         U = gauge
         latt_info = U.latt_info
 
+        if self.noise_scheme == "hierarchical_probing" and self.hp_ordering == NESTED_HP_ORDERING:
+            validate_nested_hp_shape(latt_info.global_size, self.hp_num_vectors)
+        if self.multiplier_plan is not None:
+            validate_multiplier_plan(self.multiplier_plan, latt_info.global_size)
+
         global_size = latt_info.global_size
         Ns3 = global_size[0] * global_size[1] * global_size[2]
 
@@ -893,7 +950,13 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
         counter_config = int(self.config_num)
         counter_stream = int(randseed)
 
-        n_eff = effective_n_inversions(n_vec, self.noise_scheme, self.hp_num_vectors)
+        n_eff = effective_n_inversions(
+            n_vec,
+            self.noise_scheme,
+            self.hp_num_vectors,
+            self.multiplier_plan,
+            self.spin_color_dilution,
+        )
         attrs = self._measurement_attrs(
             latt_info, invPara, randPara,
             counter_config, counter_stream, n_eff, Ns3,
@@ -955,6 +1018,113 @@ def _copy_h5_attrs(obj, attrs):
             obj.attrs[key] = value
 
 
+def aggregate_emt_quark_1pt_bases(shard_dir, canonical_tag, n_base_noise):
+    """Write complete independent bases and SEM to a separate .bases.h5 file."""
+    names = ("local_bilinear_pervec", "derivative_bilinear_pervec", "flowed_noise_norm_pervec")
+    layout = discover_shard_layout(
+        shard_dir, canonical_tag, n_base_noise, names,
+        metadata_dataset_names=tuple(basis_metadata()), base_means=True,
+    )
+    attrs = layout["reference_attrs"]
+    if int(attrs.get("emt_operator_schema_version", -1)) != EMT_OPERATOR_SCHEMA_VERSION:
+        raise ValueError("incompatible EMT operator schema for base aggregation")
+    probe_count = layout["probe_count"]
+    solve_multiplier = layout["solve_multiplier"]
+    scheme = attrs["noise_scheme"]
+    plan = json.loads(attrs["multiplier_plan_json"]) if scheme == "multiplier_probing" else None
+    if vectors_per_base(scheme, probe_count, plan) != probe_count:
+        raise ValueError("inconsistent vectors per base")
+    if scheme == "hierarchical_probing":
+        validate_hierarchical_probing_options(probe_count, attrs["hp_ordering"])
+        validate_nested_hp_shape(attrs["global_lattice_size"], probe_count)
+    if plan is not None:
+        validate_multiplier_plan(plan, attrs["global_lattice_size"])
+    q0 = _unique_zero_momentum_index(attrs["qext"])
+    volume = int(attrs["volume_norm"])
+    if volume <= 0:
+        raise ValueError("volume_norm must be positive")
+    local_tail = layout["raw_tails"][names[0]]
+    derivative_tail = layout["raw_tails"][names[1]]
+    if len(local_tail) != 4 or local_tail[0] != 16 or derivative_tail != (16, 4) + local_tail[1:]:
+        raise ValueError("invalid EMT primitive base axes")
+    if layout["raw_tails"][names[2]] != local_tail[1:]:
+        raise ValueError("invalid flowed noise norm axes")
+    n_base_noise = int(n_base_noise)
+    final_path, temp_path = canonical_temp_path(str(canonical_tag) + ".bases")
+    means, m2_real, m2_imag, datasets = {}, {}, {}, {}
+    try:
+        with h5py.File(temp_path, "w") as out:
+            _copy_h5_attrs(out, attrs)
+            out.attrs.update({
+                "output_kind": "emt_complete_base_statistics_v2",
+                "n_base_noise": n_base_noise,
+                "effective_n_inversions": n_base_noise * probe_count * solve_multiplier,
+                "independent_sample_unit": "complete_base_noise",
+                "sem_defined": n_base_noise > 1,
+                "base_axis": "independent_base_noise_index",
+                "base_values_volume_normalized": True,
+                "raw_per_vector_stored": False,
+            })
+            for name, values in layout["metadata"].items():
+                out.create_dataset(name, data=values)
+            out.create_dataset("base/base_noise_index", data=np.arange(n_base_noise))
+            sums = None
+            count = 0
+            for info, part in iter_validated_shard_parts(layout):
+                if info["probe_start"] == 0:
+                    sums = {name: np.zeros(tail, complex) for name, tail in layout["raw_tails"].items()}
+                    count = 0
+                part_count = info["probe_stop"] - info["probe_start"]
+                for name in names:
+                    mean_path = f"shard_mean/{name.removesuffix('_pervec')}"
+                    raw_path = f"raw/{name}"
+                    value = part[mean_path][()]
+                    if not np.all(np.isfinite(value)):
+                        raise ValueError("non-finite base contribution")
+                    if raw_path in part:
+                        raw_value = np.sum(part[raw_path][()], axis=0) / part_count
+                        if not np.allclose(value, raw_value, rtol=1e-12, atol=1e-14):
+                            raise ValueError("raw and shard mean disagree")
+                    sums[name] += value * part_count
+                count += part_count
+                if info["probe_stop"] != probe_count:
+                    continue
+                if count != probe_count:
+                    raise ValueError("incomplete base")
+                values = {name.removesuffix('_pervec'): value / count / volume for name, value in sums.items()}
+                derivative = sums[names[1]][None, ...] / count
+                tensor = emt_tensor_from_derivative_bilinear(derivative)[0] / volume
+                for mu in range(4):
+                    for nu in range(mu, 4):
+                        values[f"Tmunu/T{mu+1}{nu+1}"] = tensor[mu, nu]
+                kinetic = ringed_kinetic_pervec_from_derivative(derivative, q0, volume)[0]
+                values["ringed/kinetic"] = kinetic
+                values["ringed/kinetic_spacetime"] = np.mean(kinetic, axis=-1)
+                base = info["base_idx"]
+                for name, value in values.items():
+                    if base == 0:
+                        datasets[name] = out.create_dataset("base/" + name, shape=(n_base_noise,) + value.shape, dtype=np.complex128)
+                        means[name] = np.zeros_like(value)
+                        m2_real[name] = np.zeros(value.shape)
+                        m2_imag[name] = np.zeros(value.shape)
+                    datasets[name][base] = value
+                    delta = value - means[name]
+                    means[name] += delta / (base + 1)
+                    m2_real[name] += delta.real * (value.real - means[name].real)
+                    m2_imag[name] += delta.imag * (value.imag - means[name].imag)
+            for name, mean in means.items():
+                out.create_dataset("avg/" + name, data=mean)
+                for component, m2 in (("real", m2_real), ("imag", m2_imag)):
+                    sem = np.sqrt(np.maximum(m2[name], 0) / (n_base_noise * (n_base_noise - 1))) if n_base_noise > 1 else np.full(mean.shape, np.nan)
+                    out.create_dataset(f"sem_{component}/{name}", data=sem)
+            out.flush()
+        os.replace(temp_path, final_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+    return str(final_path)
+
+
 def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
     """Validate complete EMT base shards and atomically build one EMTquarkLoop output."""
     n_base_noise = int(n_base_noise)
@@ -978,13 +1148,14 @@ def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
     derivative_shape = manifest["raw_tails"]["derivative_bilinear_pervec"]
     norm_shape = manifest["raw_tails"]["flowed_noise_norm_pervec"]
     total_sources = manifest["total_sources"]
+    estimator_terms = n_base_noise * manifest["probe_count"]
     canonical_attrs = {
         key: value for key, value in reference_attrs.items()
-        if key not in {"shard_schema", "output_kind", "block_interval_solves", "hp_vectors_per_base"}
+        if key not in {"output_kind", "block_interval_solves"}
     }
     canonical_attrs.update({
         "measurement": "quark_1pt",
-        "n_vec": n_base_noise,
+
         "n_base_noise": n_base_noise,
         "effective_n_inversions": total_sources,
     })
@@ -1018,9 +1189,12 @@ def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
             shape=(total_sources,) + norm_shape,
             dtype=np.complex128,
         )
+        bookkeeping_names = ["base_noise_index", "probe_index"]
+        if manifest["spin_color_dilution"] == "point":
+            bookkeeping_names.extend(["spin_index", "color_index"])
         bookkeeping_datasets = {
             name: raw.create_dataset(name, shape=(total_sources,), dtype=np.int32)
-            for name in ("base_noise_index", "hp_index")
+            for name in bookkeeping_names
         }
         local_sum = np.zeros(local_shape, dtype=np.complex128)
         derivative_sum = np.zeros(derivative_shape, dtype=np.complex128)
@@ -1069,24 +1243,24 @@ def finalize_emt_quark_1pt_shards(shard_dir, canonical_tag, n_base_noise):
 
         avg = out.require_group("avg")
         avg.create_dataset(
-            "local_bilinear", data=local_sum / total_sources / spatial_volume
+            "local_bilinear", data=local_sum / estimator_terms / spatial_volume
         )
         avg.create_dataset(
             "derivative_bilinear",
-            data=derivative_sum / total_sources / spatial_volume,
+            data=derivative_sum / estimator_terms / spatial_volume,
         )
         avg.create_dataset(
             "flowed_noise_norm",
-            data=norm_sum / total_sources / spatial_volume,
+            data=norm_sum / estimator_terms / spatial_volume,
         )
         avg_t = avg.require_group("Tmunu")
         avg_t.attrs["upper_triangle_only"] = True
-        t_avg = t_sum / total_sources / spatial_volume
+        t_avg = t_sum / estimator_terms / spatial_volume
         for mu in range(4):
             for nu in range(mu, 4):
                 avg_t.create_dataset(f"T{mu+1}{nu+1}", data=t_avg[mu, nu])
         ringed.create_dataset(
-            "kinetic_spacetime", data=kinetic_sum / total_sources / nt
+            "kinetic_spacetime", data=kinetic_sum / estimator_terms / nt
         )
         out.flush()
 
@@ -1237,6 +1411,8 @@ class EMTDisconnectedGluon1pt:
 
 
 __all__ = [
+    "aggregate_emt_quark_1pt_bases",
+    "finalize_emt_quark_1pt_shards",
     "EMTDisconnectedQuark1pt",
     "EMTDisconnectedGluon1pt",
     "EMT_OPERATOR_SCHEMA_VERSION",

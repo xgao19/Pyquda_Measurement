@@ -35,7 +35,7 @@ def _parameters(**overrides):
         "flow_steps": 2,
         "noise_scheme": "hierarchical_probing",
         "hp_num_vectors": 2,
-        "hp_ordering": "interleaved_xyzt_binary_projected_to_evenodd",
+        "hp_ordering": "nested_xyzt_checkerboard_v1",
         "gauge_preprocessing": "test",
     }
     values.update(overrides)
@@ -57,6 +57,18 @@ def test_ringed_is_kinetic_only_emt_runner_subclass():
     assert not hasattr(ringed_module, "flowed_kinetic_norm")
     assert not hasattr(ringed_module, "analyze_ringed_ensemble")
     assert not hasattr(ringed_module, "compute_ringed_factors")
+
+
+def test_ringed_measure_keeps_raw_data_for_its_finalizer(monkeypatch):
+    measurement = RingedQuark1pt(_parameters())
+    captured = {}
+
+    def run(*args, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(measurement, "_run_sharded_measurement", run)
+    measurement.measure(None, None, None, "test")
+    assert captured["save_raw_per_vector"] is True
 
 
 def test_ringed_requires_configuration_and_unique_zero_momentum():
@@ -90,6 +102,7 @@ def test_ringed_contraction_matches_emt_vector_diagonal(monkeypatch):
     eta = Field(rng.normal(size=shape) + 1j * rng.normal(size=shape))
     emt = EMTDisconnectedQuark1pt({
         **_parameters(), "qext": [[0, 0, 0, 0]],
+        "hp_ordering": "nested_xyzt_checkerboard_v1",
     })
     ringed = RingedQuark1pt(_parameters())
 
@@ -154,8 +167,8 @@ def _ringed_attrs(config_num):
         "noise_generator": "splitmix64_global_coordinate_v1",
         "noise_counter_order": "global_xyzt_spin_color_config_base_stream",
         "noise_scheme": "hierarchical_probing",
-        "hp_num_vectors": 2,
-        "hp_ordering": "interleaved_xyzt_binary_projected_to_evenodd",
+        "vectors_per_base": 2,
+        "hp_ordering": "nested_xyzt_checkerboard_v1",
         "volume_norm": 8,
         "ringed_factors_stored": False,
     }
@@ -181,13 +194,13 @@ def test_ringed_finalize_stores_only_kinetic_and_base_hp_bookkeeping(tmp_path):
         assert h5.attrs["content"] == "kinetic_only"
         assert set(h5) == {"flow_times", "raw", "avg"}
         assert set(h5["raw"]) == {
-            "kinetic_pervec", "base_noise_index", "hp_index"
+            "kinetic_pervec", "base_noise_index", "probe_index"
         }
         assert set(h5["avg"]) == {"kinetic_spacetime"}
         assert h5["raw/kinetic_pervec"].shape == (2, 3, 4)
         np.testing.assert_array_equal(h5["raw/base_noise_index"], [0, 0])
         np.testing.assert_allclose(h5["avg/kinetic_spacetime"], -10.0)
-        assert "spin_color_dilution" not in h5.attrs
+        assert h5.attrs["spin_color_dilution"] == "none"
         assert "spin_index" not in h5["raw"]
         assert "color_index" not in h5["raw"]
 

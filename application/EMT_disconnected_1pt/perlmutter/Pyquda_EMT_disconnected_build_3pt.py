@@ -203,7 +203,7 @@ quark_loops = []
 gluon_loops = []
 source_counts = []
 base_noise_indices = []
-hp_indices = []
+probe_indices = []
 qext_list = []
 quark_flow_time_list = []
 gluon_qext_list = []
@@ -226,7 +226,7 @@ for config_index, (c2_path, quark_path) in enumerate(zip(c2_paths, quark_paths))
     quark_loops.append(quark_loop)
     source_counts.append(source_count)
     base_noise_indices.append(source_bookkeeping["base_noise_index"])
-    hp_indices.append(source_bookkeeping["hp_index"])
+    probe_indices.append(source_bookkeeping["probe_index"])
     qext_list.append(qext)
     quark_flow_time_list.append(quark_flow_times)
     source_positions.append(c2_source_position)
@@ -246,7 +246,7 @@ if args.include_gluon:
 source_counts = np.asarray(source_counts)
 source_indices = np.asarray(source_indices)
 base_noise_indices = np.asarray(base_noise_indices)
-hp_indices = np.asarray(hp_indices)
+probe_indices = np.asarray(probe_indices)
 
 source_count = source_counts[0]
 if not np.all(source_counts == source_count):
@@ -330,7 +330,7 @@ with h5py.File(output, "w") as h5:
     qgrp.create_dataset("loop_cumulative", data=quark_loops)
     qgrp.create_dataset("C3_unsubtracted_cumulative", data=quark_c3_unsub)
     qgrp.create_dataset("base_noise_index", data=base_noise_indices)
-    qgrp.create_dataset("hp_index", data=hp_indices)
+    qgrp.create_dataset("probe_index", data=probe_indices)
     if quark_c3_disc is not None:
         qgrp.create_dataset("C3_disc_cumulative", data=quark_c3_disc)
         qgrp.create_dataset("R_disc_cumulative", data=quark_ratio)

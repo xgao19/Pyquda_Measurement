@@ -5,8 +5,10 @@
 \usepackage{hyperref}
 \usepackage[margin=2.5cm]{geometry}
 \usepackage{booktabs}
+\usepackage{tabularx}
+\setlength{\emergencystretch}{3em}
 
-\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\code}[1]{\texttt{\begingroup\def\_{\textunderscore\allowbreak}#1\endgroup}}
 \newcommand{\Trsc}{\operatorname{Tr}_{sc}}
 \newcommand{\Trc}{\operatorname{Tr}_{c}}
 \newcommand{\Vthree}{V_3}
@@ -43,6 +45,13 @@ They measure vacuum loop building blocks.  A disconnected hadron matrix element
 is formed later by correlating these one-point loops with hadron two-point
 functions on the same gauge ensemble.
 
+This document describes the current \code{Pyquda\_Measurement\_develop}
+checkout. Operational examples and probing plans are in
+\code{application/EMT\_disconnected\_1pt/PROBING.md}. Old data must be read
+with their matching original checkout; they are not migrated by develop.
+Historical numerical checks below are identified explicitly and are not GPU/MPI
+validation of the new probing implementation.
+
 \section{Conventions}
 
 We work in Euclidean spacetime with four directions.  Mathematical formulas use
@@ -51,8 +60,8 @@ We work in Euclidean spacetime with four directions.  Mathematical formulas use
 direction.  PyQUDA stores local lattice fields in even-odd layout; the displayed
 formulas suppress this storage detail.
 
-For a spatial momentum transfer \(q\), the code constructs spatial phases with
-\code{MomentumPhase.getPhases}.  In this note the phase is written as
+Spatial phases use \code{MomentumPhase.getPhases}. For spatial momentum
+transfer \(q\), this note writes the phase as
 \begin{equation}
   \Phi_q(x) = e^{i\mathbf{q}\cdot\mathbf{x}},
 \end{equation}
@@ -63,8 +72,10 @@ The spatial volume normalization used in the averaged HDF5 datasets is
 \begin{equation}
   \Vthree = L_x L_y L_z.
 \end{equation}
-The raw per-source quark datasets are stored before this \(\Vthree\)
-normalization.  The averaged quark and gluon datasets are volume-normalized.
+Optional raw per-source quark datasets and production shard means are stored
+before this \(\Vthree\) normalization. Finalized quark complete-base values,
+their averages and SEM, and averaged gluon datasets are volume-normalized.
+Do not divide finalized complete-base values by \(\Vthree\) again.
 
 \section{Quark One-Point Workflow}
 
@@ -214,7 +225,10 @@ contraction and I/O cost but does not add inversions, fermion-flow updates, or
 covariant-derivative applications.
 
 All EMT programs import this basis from
-\code{pyquda\_measurement\_utils/fermion\_bilinear\_basis.py}.  In the
+\begin{center}
+\code{pyquda\_measurement\_utils/fermion\_bilinear\_basis.py}.
+\end{center}
+In the
 DeGrand--Rossi representation returned by the current PyQUDA implementation,
 the four Euclidean generators are
 \begin{align}
@@ -371,7 +385,9 @@ Their difference is zero-mean stochastic noise.  A finite-noise validation
 must therefore compare the paired ensemble difference with its statistical
 uncertainty; elementwise per-source equality is not a valid criterion.
 
-This was checked on S8T8 with 256 counter-based \(Z_4\) sources, all 16 Gamma
+The following is a historical check from the original implementation, not a
+validation of the new HP/multiplier sources or SC12. This was checked on S8T8
+with 256 counter-based \(Z_4\) sources, all 16 Gamma
 channels, all four derivative directions, every time slice, and
 \(q=0,\pm\hat x,\pm\hat y,\pm\hat z\).  For Wilson--clover solutions at
 tolerance \(10^{-15}\), the global paired difference was \(0.981\) standard
@@ -437,8 +453,11 @@ For \(N_{\mathrm{eff}}\) effective sources, the averaged quark one-point loop is
   L^{q,(r)}_{\mu\nu}(q,t;\Tf).
   \label{eq:noise_volume_avg}
 \end{equation}
-The code stores the raw primitive data and their volume-normalized averages;
-the symmetric EMT is saved only as a small averaged derived view:
+This per-source averaging formula applies to undiluted sources. For SC12,
+channels are summed and probes averaged as described below. Production stores
+part means; raw primitive data are optional. The complete-base finalizer stores
+the primitive and symmetric EMT for each independent base, together with
+volume-normalized averages and SEM. In optional raw canonical output:
 \begin{align}
   \code{raw/derivative\_bilinear\_pervec}
   &\leftrightarrow
@@ -473,10 +492,12 @@ scalar_trace = local_bilinear[gamma_list.index("I")]
 dot_xi_xi = contract("etzyxbc,etzyxbc->etzyx", xi.data.conj(), xi.data)
 flowed_noise_norm = impose_P_Breit_slice(dot_xi_xi, phases_3pt)
 \end{verbatim}
-Operator schema version 5 stores only the latter separately as
-\code{raw/flowed\_noise\_norm\_pervec} and
-\code{avg/flowed\_noise\_norm}; both averages use the same \(\Vthree\)
-normalization as the primitive bilinears.
+Operator schema version 5 stores the latter separately. Production uses
+\code{shard\_mean/flowed\_noise\_norm}; complete-base output uses
+\code{base/flowed\_noise\_norm} and \code{avg/flowed\_noise\_norm}.
+Optional raw output also has \code{raw/flowed\_noise\_norm\_pervec}.
+Finalized base values and averages use the same \(\Vthree\) normalization
+as the primitive bilinears.
 
 \subsection{Ringed-Fermion Kinetic Normalization}
 
@@ -502,17 +523,22 @@ four diagonal vector channels of
 \code{raw/derivative\_bilinear\_pervec}.  The momentum list must contain
 exactly one \(q=0\) entry for every EMT quark measurement.
 
-Every EMTquarkLoop stores this data in \code{derived/ringed/kinetic\_pervec} and
-\code{derived/ringed/kinetic\_spacetime}.  Publishing one HDF5 path with one
-atomic rename removes the former two-file failure window.  No ringed factor is
-stored: a factor computed from one configuration is not the final ensemble
-normalization.
+The complete-base file stores \code{base/ringed/kinetic},
+\code{base/ringed/kinetic\_spacetime} and corresponding \code{avg/} and
+\code{sem\_real/}, \code{sem\_imag/} views. Optional raw canonical output
+stores \code{derived/ringed/kinetic\_pervec} and
+\code{derived/ringed/kinetic\_spacetime}. Each file is published with one
+atomic rename. No nonlinear ringed factor is stored: a factor computed from
+one configuration is not the final ensemble normalization.
 
 For configuration \(c\), the stored spacetime average is
 \begin{equation}
-  K_c(\Tf)=\frac{1}{N_{\mathrm{eff}}N_t}
-  \sum_{r,\tau}K_{r,c}(\Tf,\tau).
+  K_c(\Tf)=\frac{1}{N_{\mathrm{base}}N_pN_t}
+  \sum_{b,k,\alpha,\tau}K_{b,k,\alpha,c}(\Tf,\tau),
 \end{equation}
+where \(N_p\) is the number of probes per base and \(\alpha\) labels one
+undiluted channel or all 12 point spin--color channels. There is no division
+by the number of dilution channels.
 The analysis must first form the gauge-ensemble mean
 \begin{equation}
   K_{\mathrm{code}}(\Tf)=\left\langle K_c(\Tf)\right\rangle_{\mathrm{cfg}},
@@ -565,9 +591,9 @@ for step in range(Nsteps + 1):
 \end{verbatim}
 The stochastic source \(\xi\) and solution \(\eta\) are flowed together as one
 \code{MultiField}.  This keeps both fields on the same flowed gauge background.
-After all flow steps are measured, the code extracts
-\code{derived/ringed/kinetic\_pervec} algebraically from the stored \(q=0\)
-vector derivative diagonals in the same EMTquarkLoop.
+After all flow steps are measured, finalization derives the ringed kinetic
+algebraically from the \(q=0\) vector derivative diagonals: per independent
+base in \code{.bases.h5}, or per source in optional raw canonical output.
 
 \subsection{Four-Dimensional Fermion Flow and the Time-Slice Projector}
 \label{sec:full_volume_flow_source}
@@ -674,105 +700,136 @@ absolute insertion times.  In the unflowed limit \(\Tf=0\), where
 exact-time projector; this special case does not justify dropping the other
 projectors for the finite-flow measurements stored in the same file.
 
-\section{Hierarchical Probing and Source Bookkeeping}
+\section{Probing, Dilution, and Source Bookkeeping}
 
-The quark one-point workflow supports
+EMT supports \code{zn}, \code{hierarchical\_probing}, and
+\code{multiplier\_probing}. Each method starts from a full-volume counter-based
+random base \(\xi_b\). Probe and dilution channels within a base are correlated;
+only independently randomized complete bases are statistical samples.
+
+\subsection{Complete Nested Hierarchical Probing}
+
+HP multiplies the same base by deterministic site-only signs,
 \begin{equation}
-  \code{noise\_scheme}\in
-  \{\code{zn},\code{hierarchical\_probing}\}.
-\end{equation}
-Hierarchical probing starts from a full-volume base noise vector \(\xi_b\) and multiplies it
-by deterministic site-only Rademacher vectors \(h_k(x)=\pm 1\):
-\begin{equation}
-  \xi_{b,k}(x) = h_k(x)\,\xi_b(x).
+  \xi_{b,k}(x)=h_k(x)\xi_b(x),\qquad h_k(x)\in\{-1,+1\}.
   \label{eq:hp_source}
 \end{equation}
-The probing vectors are designed to reduce near-diagonal contributions to the
-stochastic trace variance.  In the current implementation the number of HP
-vectors must be a positive power of two:
-\begin{equation}
-  \code{hp\_num\_vectors}=1,2,4,8,\ldots .
-\end{equation}
+The only supported ordering is
+\begin{verbatim}
+nested_xyzt_checkerboard_v1
+\end{verbatim}
+It is defaulted in shared Python code; shell wrappers only forward explicit
+ordering overrides. Old Gray/interleaved generators and arbitrary power-of-two
+HP counts are not supported. Complete levels are:
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+HP count & \(q\) in \(N_p=2q^4\) & Cancellation distance & Extent divisor \\
+\midrule
+2 & 1 & 1 & 2 \\
+32 & 2 & 3 & 4 \\
+512 & 4 & 7 & 8 \\
+\bottomrule
+\end{tabular}
+\end{center}
+Every global extent must be divisible by the indicated divisor; it need not
+be a power of two. A partial HP prefix is a checkpoint, not another independent
+base. The source remains full-volume; HP is not time dilution.
 
-The effective number of inversions is
+\subsection{Multiplier Fourier Probing}
+
+EMT accepts a shape-specific \code{multiplier\_plan} dictionary or JSON path;
+the application forwards \code{EMT\_1PT\_MULTIPLIER\_PLAN}. The plan records
+version, four global extents, distance, number of colors \(M\), and four integer
+coefficients \(\sigma\). Rank zero reads and validates it, then broadcasts the
+canonical plan or an error. The actual lattice shape must match the plan.
+For a site color
 \begin{equation}
-  N_{\mathrm{eff}}
-  =
-  \begin{cases}
-    \code{n\_vec}, &
-    \code{noise\_scheme=zn},\\
-    \code{n\_vec}\times\code{hp\_num\_vectors}, &
-    \code{noise\_scheme=hierarchical\_probing}.
-  \end{cases}
+  c(x)=\sigma\cdot x\pmod M,
+\end{equation}
+the complete Fourier basis is
+\begin{equation}
+  \xi_{b,k}(x)=e^{2\pi i k c(x)/M}\xi_b(x),\qquad 0\leq k<M.
+\end{equation}
+All \(M\) probes reuse the same random base and their estimates are averaged
+with weight \(1/M\). These are unit-modulus Fourier sources, not unscaled
+color masks; a mask estimator would instead require summation.
+There is no runtime plan search or automatic change of the color count.
+Supplied plans and their search evidence are in
+\code{application/EMT\_disconnected\_1pt/probing\_plans}. Color-count search
+results do not establish minimum wall time or estimator variance.
+
+\subsection{Point Spin--Color Dilution and Cost}
+
+EMT optionally accepts \code{spin\_color\_dilution=point} through its Python
+measurement API. The production CLI does not expose an SC12 switch.
+For orthogonal spin--color projectors \(P_\alpha\), \(\alpha=0,\ldots,11\),
+\begin{equation}
+  \xi_{b,k,\alpha}=P_\alpha\xi_{b,k},\qquad
+  L_b=\frac{1}{N_p}\sum_{k=0}^{N_p-1}\sum_\alpha L_{b,k,\alpha}.
+\end{equation}
+The channels are summed, not averaged. The default \code{none} uses one
+undiluted channel. Thus
+\begin{equation}
+  N_{\mathrm{eff}}=N_{\mathrm{base}}N_p d,\qquad
+  d=\begin{cases}1&\text{undiluted},\\12&\text{point dilution}.\end{cases}
   \label{eq:n_eff}
 \end{equation}
-This value is stored as \code{effective\_n\_inversions}.
+Here \(N_p=1\) for \(Z_n\), the complete HP count for HP, or \(M\) for
+multiplier. \code{EMT\_1PT\_N\_VEC} counts bases, not solves.
+Standalone ringed and qTMD retain only \(Z_n\)/complete HP without SC12 or
+multiplier; the EMT options must not be assumed available there.
 
-\subsection{Ordering Choices}
+\subsection{Stored Metadata and Raw Bookkeeping}
 
-Four HP orderings are currently implemented:
-\begin{center}
-\begin{tabular}{ll}
-\toprule
-Ordering & Meaning \\
-\midrule
-\code{global\_xyzt\_gray\_projected\_to\_evenodd}
-& Gray-code the full \(x,y,z,t\) site id. \\
-\code{interleaved\_xyzt\_binary\_projected\_to\_evenodd}
-& Interleave binary bits from \(x,y,z,t\). \\
-\code{interleaved\_xyz\_binary\_projected\_to\_evenodd}
-& Interleave only spatial bits; the HP sign is time independent. \\
-\code{spatial\_xyz\_then\_t\_gray\_projected\_to\_evenodd}
-& Gray-code spatial sites first, then append time bits. \\
-\bottomrule
-\end{tabular}
-\end{center}
-For the spatial ordering,
+The single stored probe count is \code{vectors\_per\_base}. Metadata also
+records \code{noise\_scheme} and explicit \code{spin\_color\_dilution}; HP
+stores \code{hp\_ordering}, while multiplier stores
+\code{multiplier\_plan\_json}. \code{hp\_num\_vectors} remains an HP-only
+input, not a second stored count. The total independent count is
+\code{n\_base\_noise}; the solve count is \code{effective\_n\_inversions}.
+Optional raw bookkeeping uses
+\begin{verbatim}
+raw/base_noise_index
+raw/probe_index
+raw/spin_index       # point dilution only
+raw/color_index      # point dilution only
+\end{verbatim}
+The effective source index is reconstructed as
 \begin{equation}
-  h_k(x,y,z,t)=h_k(x,y,z),
+ r=(bN_p+k)d+\alpha,
 \end{equation}
-whereas a four-dimensional ordering has signs that also vary with \(t\).  Both
-cases multiply the same full-volume base noise and remain nonzero on every time
-slice; neither is time dilution.  Spatial HP devotes all available probing bits
-to spatial locality, while isotropic 4D HP can suppress temporal off-diagonal
-noise at the cost of allocating fewer early bits to space.  Their efficiency is
-observable dependent and should be compared at fixed inversion cost.
-
-\subsection{Bookkeeping Datasets}
-
-For each effective source, the output persists only the irreducible
-bookkeeping coordinates:
-\begin{center}
-\begin{tabular}{ll}
-\toprule
-Dataset & Meaning \\
-\midrule
-\code{raw/base\_noise\_index}
-& Original base noise index. \\
-\code{raw/hp\_index}
-& HP vector index used for that base noise. \\
-\bottomrule
-\end{tabular}
-\end{center}
-The effective source index is reconstructed in analysis as
-\begin{equation}
-  r=bN_{\mathrm{HP}}+h,
-\end{equation}
-and is therefore not stored as a third dataset. For example, with
-\(\code{n\_vec}=1\) and \(\code{hp\_num\_vectors}=2\), the persisted
-bookkeeping and reconstructed coordinate are
-\begin{equation}
-  \code{base\_noise\_index}=[0,0],
-  \qquad
-  \code{hp\_index}=[0,1],
-  \qquad
-  r=[0,1].
-\end{equation}
+with \(\alpha=3s+c\) for SC12 and zero for undiluted sources. It is not stored
+as another dataset. For one undiluted HP2 base the base indices are \([0,0]\),
+probe indices \([0,1]\), and source indices \([0,1]\).
 
 \section{Quark HDF5 Layout}
 
-The production measurement writes validated base/HP shards and the explicit
-finalizer streams them into the canonical file.  The main raw datasets are
+Production writes complex128 part means, with raw per-source data optional.
+Default finalization requires those means and writes
+\code{<canonical-tag>.bases.h5}. Its volume-normalized datasets include
+\begin{verbatim}
+base/base_noise_index
+base/local_bilinear          [Nb,16,Nq,Nflow,Nt]
+base/derivative_bilinear     [Nb,16,4,Nq,Nflow,Nt]
+base/flowed_noise_norm       [Nb,Nq,Nflow,Nt]
+base/Tmunu/T11 ... T44       [Nb,Nq,Nflow,Nt]
+base/ringed/kinetic          [Nb,Nflow,Nt]
+base/ringed/kinetic_spacetime [Nb,Nflow]
+avg/...
+sem_real/...
+sem_imag/...
+\end{verbatim}
+Here \(N_b=N_{\mathrm{base}}\) and \(N_{\rm flow}=N_{\rm steps}+1\).
+SEM is computed across independent complete bases, separately for real and
+imaginary parts; it is NaN for one base. These are fixed-configuration
+stochastic errors, not gauge-ensemble uncertainties.
+
+For optional raw diagnostics, measure with \code{--save-raw-per-vector}.
+Then use the Python finalizer's \code{--raw-output} option to also write
+\code{<canonical-tag>.h5}.
+The latter is an optional diagnostic file, not the default statistical input.
+Its raw datasets are
 \begin{align}
   \code{raw/local\_bilinear\_pervec}
   &:
@@ -805,7 +862,7 @@ The averaged datasets are
 Only \(\mu\leq\nu\) tensor components are written in the averaged
 \code{avg/Tmunu} group.
 
-The canonical loop file is source independent:
+Both canonical outputs are source independent. The optional raw name is:
 \begin{center}
   \code{EMTquarkLoop/<lat>.EMTquarkLoop.<cfg>.<ama>.<sm>.h5}.
 \end{center}
@@ -821,7 +878,9 @@ The embedded kinetic-only schema is
 derived/ringed/kinetic_pervec
 derived/ringed/kinetic_spacetime
 \end{verbatim}
-EMT uses full spin--color noise rather than point spin--color dilution.
+These \code{derived/ringed} paths belong to optional raw output; the default
+base file uses \code{base/ringed}, \code{avg/ringed} and SEM groups.
+EMT defaults to undiluted spin--color noise and optionally supports SC12.
 The group attributes record the unique zero-momentum index, the
 \(-2/\Vthree\) relation, and that ringed factors are not stored.
 \code{ringed\_factors\_stored=False} states that nonlinear normalization is an
@@ -852,11 +911,12 @@ with h5py.File(path, "r") as h5:
 \end{verbatim}
 Here \code{T[mu,nu]} has axes \code{[q,flow,t\_abs]} after the two tensor
 indices.  The division by \code{volume\_norm} must not be repeated because it
-is already included in \code{avg/derivative\_bilinear}.  For stochastic-error
-analysis, read \code{raw/derivative\_bilinear\_pervec} in source blocks,
-construct the same symmetric tensor, and divide the accumulated mean by
-\code{volume\_norm}.  Complete HP vectors belonging to one base must be
-averaged before treating bases as independent samples.
+is already included in \code{avg/derivative\_bilinear}. For stochastic-error
+analysis, read the normalized \code{base/Tmunu} and \code{base/ringed} datasets
+from \code{.bases.h5} directly. The ringed comparison, convergence and proton
+T44 helpers do not regroup raw vectors or read old HP16/HP256 files. Their
+solve costs come from the stored probe count and dilution factor. Optional raw
+files remain useful for per-source diagnostics, not independent-probe SEM.
 
 The same raw basis also supports other observables.  First apply
 \code{physical\_from\_pyquda} on the Gamma axis.  Symmetrizing the physical
@@ -871,9 +931,13 @@ by $i$ only for the Hermitian $i[\gamma_\mu,\gamma_\nu]/2$ convention.  A
 complete portable example, including connected pion and proton axis orders, is
 in \code{docs/EMT\_gamma\_and\_raw\_bilinears.md}.
 
-\subsection{Storage Weight of One Canonical EMTquarkLoop}
+\subsection{Historical Raw-File Storage Example}
 
-All large arrays are uncompressed.  Ignoring the small averaged and metadata
+The following measured sizes describe the original raw-output implementation,
+not a new mean-only or complete-base run. The values are retained as a
+historical storage example. Default production storage now scales with parts,
+and finalized base observables with independent bases. For this raw example,
+all large arrays are uncompressed. Ignoring the small averaged and metadata
 datasets, the source-scaling payload has the ratio
 \begin{equation}
 \code{derivative:local:flowed\_noise\_norm}=64:16:1.
@@ -900,38 +964,59 @@ convenience \code{avg/Tmunu} datasets are negligible.
 
 \subsection{Base-Oriented Production, Checkpoints, and Finalization}
 
-The production wrapper has a single shard output path; there is no monolithic
-production mode.  A base
-noise and all of its hierarchical-probing vectors form the natural complete
-estimator unit,
-\begin{equation}
-  L_b=\frac{1}{N_{\mathrm{HP}}}\sum_{h=0}^{N_{\mathrm{HP}}-1}L_{b,h}.
-\end{equation}
-Inside one base the code writes fixed solve intervals, defaulting to 64
-inversions.  Thus HP256 normally produces four part files, while HP16 and plain
-\(\mathbb Z_4\) produce one.  A partial HP part limits memory and transfer size,
-but is neither a complete estimator nor an independent resume unit.
-
-Part names encode the base, part, and HP interval, for example
+Production has one shard path, with mandatory means and optional raw data:
 \begin{verbatim}
-<canonical-stem>.base000003.part0001.hp0064-0127.h5
+shard_mean/local_bilinear
+shard_mean/derivative_bilinear
+shard_mean/flowed_noise_norm
 \end{verbatim}
-Only MPI rank zero writes HDF5.  Each part is first written to a unique temporary
-path and then atomically renamed.  After every part of a base closes, rank zero
-appends one exact \code{baseXXXXXX} line to a fingerprinted text sample log.
-Resume reads only this log and performs no HDF5 probe, so a logged base may
-already have been transferred.  If a base is not logged, all of its parts are
-recomputed and atomically replaced.
+Parts contain at most \code{block\_interval\_solves} inversions (default 64),
+without splitting an SC12 group. Undiluted HP512 therefore produces eight
+64-probe parts; HP2, HP32 and plain noise each produce one part per base.
+A partial part is a storage/checkpoint unit, not an independent estimator.
+For example,
+\begin{verbatim}
+<stem>.base000003.part0001.probe0064-0127.h5
+\end{verbatim}
+Rank zero writes each part to a unique temporary path and atomically renames
+it. Only after all parts of a base close does rank zero append an exact
+\code{baseXXXXXX} line to the fingerprinted sample log. Resume trusts this
+log without probing HDF5; transferred logged parts need not remain locally.
+An unlogged base is recomputed in full. Jobs may own nonoverlapping base ranges;
+overlapping jobs are unsupported.
 
-Measurement jobs do not update the canonical file.  A separate serial
-finalizer runs where all parts have been collected and requires complete
-coverage of bases \(0,\ldots,N_{\mathrm{base}}-1\).  It checks each expected
-part once while streaming raw datasets into a temporary canonical EMTquarkLoop file, accumulates the
-averages without holding the complete source axis in memory, and derives the
-EMT and embedded kinetic data from the four vector derivative channels.  One
-atomic rename publishes the complete EMTquarkLoop, so downstream analysis cannot see a
-new loop without its matching kinetic data.  Non-overlapping base ranges may be
-scheduled independently; overlapping jobs are unsupported.
+New format identities are explicit:
+\begin{verbatim}
+shard_schema = disconnected_1pt_base_parts_v4
+sample-log header = disconnected_sample_log_v2
+source_bookkeeping_schema = base_probe_v2
+# For SC12 instead:
+source_bookkeeping_schema = base_probe_spin_color_v3
+\end{verbatim}
+Use a fresh output/setup identity for every new-format run, including \(Z_n\).
+Old files/logs are rejected, not migrated. Changing the probe count, plan,
+ordering, dilution or raw-storage mode also requires a new identity. Planned
+base counts may be extended; do not put that count in the setup tag.
+
+The default serial finalizer requires all requested bases and mandatory means.
+It validates complete coverage, metadata, finite means and optional raw/mean
+agreement. It weights parts by their actual probe counts, sums SC12 channels
+and averages only probes, then derives normalized base EMT and kinetic values.
+There is no raw-only fallback. Streaming mean/variance accumulation gives
+real/imaginary SEM; an atomic rename publishes the complete base file.
+
+From the application directory, after matching the data directory, lattice tag,
+setup tag, configuration and total base count to the measurement:
+\begin{verbatim}
+bash run_finalize_quark_1pt.sh --config_num 1000
+# Optional raw diagnostics, requiring raw measurement:
+python Pyquda_EMT_disconnected_finalize_quark_1pt.py \
+  --config_num 1000 --raw-output
+\end{verbatim}
+The shell wrapper performs default base finalization only. The Python
+\code{--raw-output} option writes both base statistics and raw diagnostics;
+there is no \code{--base-statistics} switch. Standalone ringed and qTMD keep
+their own raw finalizers and must not be described as mean-only EMT workflows.
 
 One runtime detail is essential: evaluating a flowed contraction loads the
 flowed gauge into QUDA's global resident gauge state.  Before inverting the next
@@ -961,7 +1046,7 @@ Thus source-relative analysis requires both spatial rephasing and periodic
 time rolling.  Old loops without this provenance are rejected rather than
 silently interpreted with an assumed origin.
 
-The exact quark dataset and attribute names used by downstream scripts are:
+For the optional raw canonical path, downstream diagnostic names include:
 \begin{verbatim}
 gamma_list
 gamma_pyquda_ids
@@ -974,7 +1059,7 @@ raw/local_bilinear_pervec
 raw/derivative_bilinear_pervec
 raw/flowed_noise_norm_pervec
 raw/base_noise_index
-raw/hp_index
+raw/probe_index
 avg/Tmunu/T11
 avg/Tmunu/T12
 avg/Tmunu/T22
@@ -986,13 +1071,14 @@ avg/flowed_noise_norm
 derived/ringed/kinetic_pervec
 derived/ringed/kinetic_spacetime
 noise_scheme
-hp_num_vectors
+vectors_per_base
+spin_color_dilution
 effective_n_inversions
 \end{verbatim}
 
 Important attributes include
 \begin{center}
-\begin{tabular}{ll}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}p{0.48\linewidth}X}
 \toprule
 Attribute & Meaning \\
 \midrule
@@ -1007,12 +1093,16 @@ Attribute & Meaning \\
 & \(\exp[+2\pi i\,\boldsymbol q\cdot(\boldsymbol x-\boldsymbol o)/\boldsymbol L]\). \\
 \code{volume\_norm}
 & \(\Vthree\), the spatial-volume normalization. \\
-\code{upper\_triangle\_only}
+\code{derived\_emt\_upper\_triangle\_only}
 & Whether only \(\mu\leq\nu\) components are written. \\
-\code{n\_vec}, \code{n\_base\_noise}, \code{effective\_n\_inversions}
+\code{n\_base\_noise}, \code{effective\_n\_inversions}
 & Stochastic source counts. \\
-\code{noise\_scheme}, \code{hp\_num\_vectors}, \code{hp\_ordering}
-& Source-generation scheme. \\
+\code{noise\_scheme}, \code{vectors\_per\_base}
+& Source scheme and probe count. \\
+\code{spin\_color\_dilution}
+& \code{none} or \code{point}. \\
+\code{hp\_ordering} / \code{multiplier\_plan\_json}
+& Present for HP / multiplier respectively. \\
 \code{n\_zn}, \code{config\_num}, \code{noise\_stream}
 & Counter-noise order, configuration key, and independent stream salt. \\
 \code{noise\_generator}, \code{noise\_counter\_order}
@@ -1023,7 +1113,7 @@ Attribute & Meaning \\
 \code{derivative\_closed\_fermion\_loop\_sign\_included}
 & The left derivative is reconstructed and the saved loop contains one Wick minus. \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \section{Gluon One-Point Workflow}
@@ -1148,7 +1238,7 @@ production default is (0.207936), so equal flow indices refer to equal flow
 times.
 Important attributes include
 \begin{center}
-\begin{tabular}{ll}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}p{0.48\linewidth}X}
 \toprule
 Attribute & Meaning \\
 \midrule
@@ -1163,7 +1253,7 @@ Attribute & Meaning \\
 \code{upper\_triangle\_only}
 & Whether only \(\mu\leq\nu\) components are written. \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \section{Disconnected Combination with Proton Two-Point Functions}
@@ -1213,14 +1303,16 @@ The application directory
 \begin{center}
   \code{application/EMT\_disconnected\_1pt/perlmutter}
 \end{center}
-contains a minimal four-step diagnostic workflow:
+contains a quark-only diagnostic workflow:
 \begin{enumerate}
-  \item measure the stochastic quark one-point loop;
-  \item measure the gluon one-point loop;
+  \item measure undiluted quark shards with \code{--save-raw-per-vector};
+  \item run the Python finalizer with \code{--raw-output};
   \item measure the proton two-point function \(C_2^p\);
-  \item combine \(C_2^p\) and the one-point loops into disconnected diagnostic
-        three-point objects.
+  \item combine \(C_2^p\) with the raw canonical quark loop.
 \end{enumerate}
+The builder reads neither \code{.bases.h5} nor SC12 raw files. A separate gluon
+measurement is optional and used only with \code{--include\_gluon}. Ordinary
+complete-base convergence analysis does not need raw data or this builder.
 
 For the quark loop, the builder reads
 \code{raw/derivative\_bilinear\_pervec}, reconstructs the symmetric vector EMT,
@@ -1238,7 +1330,8 @@ cumulative stochastic averages
   \label{eq:cumulative_loop}
 \end{equation}
 This is the quantity used to check whether the stochastic estimator changes
-smoothly as more random sources are included.
+as more sources are included. Partial HP/multiplier prefixes are diagnostics,
+not independent complete-base samples and not valid additional SEM units.
 
 For a single configuration, the builder can only form the unsubtracted proxy
 \begin{equation}
@@ -1305,28 +1398,36 @@ signals.  Useful smoke-test checks are:
   \item the code runs on the intended backend;
   \item \code{flow\_times} contains step \(0\) and the requested flow times;
   \item \code{derived\_emt\_upper\_triangle\_only=True};
-  \item quark raw datasets have the expected
+  \item default output has normalized \code{base/}, \code{avg/},
+        \code{sem\_real/}, and \code{sem\_imag/} datasets;
+  \item one complete base has NaN SEM; SC12 costs 12 solves per probe;
+  \item when raw diagnostics are requested, datasets have the expected
         \([N_{\mathrm{eff}},16,N_q,N_{\mathrm{steps}}+1,N_t]\),
         \([N_{\mathrm{eff}},16,4,N_q,N_{\mathrm{steps}}+1,N_t]\), and
         \([N_{\mathrm{eff}},N_q,N_{\mathrm{steps}}+1,N_t]\) shapes;
   \item HP runs have consistent \code{raw/base\_noise\_index} and
-        \code{raw/hp\_index}, from which the effective source coordinate is
+        \code{raw/probe\_index}, from which the effective source coordinate is
         reconstructed;
   \item gluon datasets contain \code{Tmunu/T11} through \code{T44} and no
         stochastic quark primitive datasets.
 \end{itemize}
 
-\section{Recommended Next Algorithmic Upgrade}
+\section{Validation Scope and Current Limitations}
 
-The current variance-reduction options are ordinary \(Z_n\) noise and
-hierarchical probing.  A planned future direction is multiplier-based graph
-coloring, motivated by
-\begin{center}
-  \href{https://arxiv.org/abs/2606.00394}{arXiv:2606.00394}.
-\end{center}
-The motivation is that standard HP naturally tests \(2^k\) source counts,
-whereas multiplier-based coloring can test intermediate coloring budgets.  A
-future scheme should be added as a separate optional source scheme, with HDF5
-metadata that clearly distinguishes it from \code{hierarchical\_probing}.
+CPU/mock regressions exercise nested HP cancellation, validated multiplier
+plans, SC12 normalization, resume, complete-base aggregation and analysis.
+They do not validate QUDA kernels, GPU queues or MPI communication. New probing
+GPU/MPI validation remains pending; the historical operator checks earlier in
+this note must not be presented as new probing validation.
+The dedicated \code{tests/check\_disconnected\_probing\_gpu.py} entry supports
+HIP/CuPy and SYCL/dpnp, requires a new output directory, and can check source
+hashes across decompositions and complete EMT outputs. It submits no job.
+See \code{PROBING.md} for commands and matching environment setup.
+
+Multiplier probing is implemented, not a future placeholder. The supplied
+plans are shape-specific, and their coloring/search evidence does not establish
+minimum estimator variance or optimal production wall time. Compare methods
+at matched total inversion cost and with enough independent complete bases.
+No automatic old-file migration or probing-layer extension is provided.
 
 \end{document}

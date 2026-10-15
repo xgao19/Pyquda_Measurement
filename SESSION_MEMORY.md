@@ -111,15 +111,34 @@ belong in `log.md` and Git history.
 - Flow contractions replace QUDA's resident gauge. Restore the original gauge
   before the next inversion; the initial inversion can use the original
   resident gauge directly.
-- Spatial and 4D hierarchical probing both multiply a full-volume base source.
-  Spatial HP is not time dilution. The standard flowed-EMT ordering is isotropic
-  4D `interleaved_xyzt_binary_projected_to_evenodd`.
-- Shards store base and HP indices; reconstruct the effective source index as
-  `base * N_HP + hp`. A base is complete only after every planned HP part
-  validates and the base-level sample log is written.
-- Mean-only mode always stores one complex128 part mean. Raw mode stores both
-  per-vector data and the same part mean. `block_interval_solves` controls part
-  size independently of `flow_batch_size`.
+- Develop EMT, standalone ringed and qTMD share the Python HP default
+  `nested_xyzt_checkerboard_v1`, with complete counts 2, 32 or 512. Shell
+  wrappers do not choose an ordering. Old HP generators are not supported.
+- EMT multiplier probing requires a validated shape-specific plan and a complete
+  Fourier basis using the same base noise. Average over all plan colors;
+  unscaled color masks would instead require summation. Standalone ringed and
+  qTMD support Z_N and complete HP only.
+- EMT point spin-color dilution applies all 12 projectors to each probe, sums
+  projector contributions, and averages only over probes. The complete base,
+  not its projector channels or probes, is one independent stochastic sample.
+- Develop shards use `disconnected_1pt_base_parts_v4`, sample logs use
+  `disconnected_sample_log_v2`. All new runs, including Z_N, require fresh
+  output/setup identities; old files are read with the original checkout.
+- Store one `vectors_per_base` count plus scheme, explicit dilution and relevant
+  ordering/plan. Raw source indices are reconstructed as
+  `(base_noise_index * vectors_per_base + probe_index) * factor + channel`,
+  where factor is 12 for point dilution and 1 otherwise.
+- EMT always stores complex128 part means; raw per-vector data are optional
+  diagnostics. Base aggregation requires means and complete validated parts,
+  and weights by actual probe count. A base is complete for resume only after
+  the base-level sample log is written. Overlapping job ranges are unsupported.
+- The EMT finalizer defaults to `.bases.h5`; `--raw-output` also writes raw
+  canonical diagnostics and requires raw shards. Standalone ringed/qTMD retain
+  raw data for their own finalizers. `block_interval_solves` controls part size
+  independently of `flow_batch_size`.
+- New EMT ringed/convergence/T44 analyses read `.bases.h5` directly. SEM uses
+  independent complete bases; one base has undefined (NaN) SEM. Derive cost
+  from `vectors_per_base` times the dilution factor, never a hardcoded HP table.
 - Only MPI rank 0 opens serial quark/gluon HDF5 output files.
 - Physical disconnected correlators require ensemble subtraction. If step1
   stores `L_avg=L_sum/Vs`, construct the hadron correlator as

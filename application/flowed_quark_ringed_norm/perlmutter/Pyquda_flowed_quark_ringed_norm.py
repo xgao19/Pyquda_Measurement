@@ -57,7 +57,6 @@ parameters = {
     "flow_steps": int(os.environ.get("FLOWED_RINGED_FLOW_STEPS", "1")),
     "noise_scheme": os.environ.get("FLOWED_RINGED_NOISE_SCHEME", "zn"),
     "hp_num_vectors": int(os.environ.get("FLOWED_RINGED_HP_NUM_VECTORS", "1")),
-    "hp_ordering": os.environ.get("FLOWED_RINGED_HP_ORDERING", "interleaved_xyzt_binary_projected_to_evenodd"),
     "multigrid": parse_mg_block(os.environ.get("FLOWED_RINGED_MG_BLOCK", "8.8.4.4")),
     "gauge_preprocessing": gauge_preprocessing,
     "flavor_convention": os.environ.get(
@@ -65,6 +64,9 @@ parameters = {
         "single_flavor_trace_for_this_dirac_operator",
     ),
 }
+if "FLOWED_RINGED_HP_ORDERING" in os.environ:
+    parameters["hp_ordering"] = os.environ["FLOWED_RINGED_HP_ORDERING"]
+
 
 init(mpi_geometry, enable_mps=True)
 
@@ -111,7 +113,6 @@ mpi_print(latt_info, f"--flow_epsilon {parameters['flow_epsilon']}")
 mpi_print(latt_info, f"--flow_steps {parameters['flow_steps']}")
 mpi_print(latt_info, f"--noise_scheme {parameters['noise_scheme']}")
 mpi_print(latt_info, f"--hp_num_vectors {parameters['hp_num_vectors']}")
-mpi_print(latt_info, f"--hp_ordering {parameters['hp_ordering']}")
 mpi_print(latt_info, f"--block_interval_solves {block_interval_solves}")
 mpi_print(latt_info, f"--gauge_preprocessing {gauge_preprocessing}")
 mpi_print(latt_info, f"--flow_batch_size {args.flow_batch_size}")

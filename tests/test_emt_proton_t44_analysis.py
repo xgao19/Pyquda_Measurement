@@ -4,8 +4,6 @@ import h5py
 import numpy as np
 
 from application.analysis_helper.emt_proton_t44_analysis import (
-    T_DERIVATIVE_POSITION,
-    T_GAMMA_POSITION,
     deterministic_stratified_sources,
     disconnected_ratio,
     load_t44_base_loops,
@@ -61,27 +59,18 @@ def test_translation_covariance_uses_unbiased_sample_factor():
     np.testing.assert_allclose(observed, expected)
 
 
-def _write_t44_file(path, hp_count=2, incomplete=False):
+def _write_t44_file(path, incomplete=False):
     n_base = 3
-    base_idx = np.repeat(np.arange(n_base), hp_count)
-    hp_idx = np.tile(np.arange(hp_count), n_base)
-    if incomplete:
-        base_idx = base_idx[:-1]
-        hp_idx = hp_idx[:-1]
-    derivative = np.zeros((len(base_idx), 16, 4, 2, 2, 8), np.complex128)
-    for row, base in enumerate(base_idx):
-        derivative[row, T_GAMMA_POSITION, T_DERIVATIVE_POSITION] = base + 1
+    values = np.broadcast_to(np.arange(1, 4)[:, None, None, None]/512, (3, 2, 2, 8))
     with h5py.File(path, "w") as h5:
-        h5.attrs["emt_operator_schema_version"] = 5
-        h5.attrs["volume_norm"] = 512
-        h5.attrs["noise_scheme"] = "hierarchical_probing"
-        h5.attrs["hp_num_vectors"] = hp_count
-        h5.attrs["qext"] = [[-1, 0, 0, 0], [0, 0, 0, 0]]
-        h5.attrs["flow_times"] = [0.0, 0.207936]
-        raw = h5.require_group("raw")
-        raw.create_dataset("derivative_bilinear_pervec", data=derivative)
-        raw.create_dataset("base_noise_index", data=base_idx)
-        raw.create_dataset("hp_index", data=hp_idx)
+        h5.attrs.update(dict(output_kind="emt_complete_base_statistics_v2",
+            shard_schema="disconnected_1pt_base_parts_v4", emt_operator_schema_version=5,
+            base_values_volume_normalized=True, n_base_noise=n_base, vectors_per_base=2,
+            spin_color_dilution="none", effective_n_inversions=6,
+            qext=[[-1, 0, 0, 0], [0, 0, 0, 0]], flow_times=[0., 0.207936],
+            global_lattice_size=[8, 8, 8, 8]))
+        h5.create_dataset("base/base_noise_index", data=np.arange(n_base))
+        h5.create_dataset("base/Tmunu/T44", data=values[:-1] if incomplete else values)
 
 
 def test_t44_loader_groups_only_complete_hp_bases(tmp_path):
@@ -96,7 +85,7 @@ def test_t44_loader_groups_only_complete_hp_bases(tmp_path):
     try:
         load_t44_base_loops(incomplete)
     except ValueError as err:
-        assert "complete HP" in str(err)
+        assert "complete-base axes" in str(err)
     else:
         raise AssertionError("partial HP base should be rejected")
 

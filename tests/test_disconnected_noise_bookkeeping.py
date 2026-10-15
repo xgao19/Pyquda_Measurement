@@ -1,16 +1,20 @@
 import numpy as np
 import pytest
 
+import pyquda_measurement_utils.Disconnected_utils_vibe_develop as noise_helpers
+
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     VALID_HP_ORDERINGS,
+    NESTED_HP_ORDERING,
+    SPIN_COLOR_POINT_FACTOR,
     apply_hierarchical_probe,
-    ceil_log2,
+    apply_spin_color_point_dilution,
     counter_zn_phase_indices,
     effective_n_inversions,
     hierarchical_probe_pattern,
-    is_power_of_two,
-    iter_noise_base_hp_interval,
+    iter_noise_base_probe_interval,
     normalize_noise_scheme,
+    normalize_spin_color_dilution,
     part_source_bookkeeping,
     reconstruct_source_indices,
     validate_hierarchical_probing_options,
@@ -55,31 +59,17 @@ class PartitionedTinyLatticeInfo(TinyLatticeInfo):
         return coords[mu]
 
 
-class S8LatticeInfo(TinyLatticeInfo):
-    global_size = [8, 8, 8, 8]
-
-
-def _hp_displacement_correlation(latt_info, hp_count, ordering, mu, distance):
-    patterns = np.asarray([
-        hierarchical_probe_pattern(latt_info, hp_idx, ordering)
-        for hp_idx in range(hp_count)
-    ])
-    shifted = np.roll(patterns, -int(distance), axis=int(mu) + 1)
-    return np.mean(patterns * shifted)
-
-
 def test_noise_scheme_and_hp_validation():
     assert normalize_noise_scheme(" ZN ") == "zn"
     assert normalize_noise_scheme("Hierarchical_Probing") == "hierarchical_probing"
-    assert is_power_of_two(1)
-    assert is_power_of_two(8)
-    assert not is_power_of_two(0)
-    assert not is_power_of_two(6)
-    assert ceil_log2(1) == 0
-    assert ceil_log2(9) == 4
 
     for ordering in VALID_HP_ORDERINGS:
-        validate_hierarchical_probing_options(4, ordering)
+        validate_hierarchical_probing_options(2 if ordering == NESTED_HP_ORDERING else 4, ordering)
+
+    assert normalize_spin_color_dilution(" POINT ") == "point"
+    assert SPIN_COLOR_POINT_FACTOR == 12
+    with pytest.raises(ValueError, match="spin_color_dilution"):
+        normalize_spin_color_dilution("interlace")
 
 def test_counter_z4_is_deterministic_and_uses_all_counter_fields():
     latt_info = TinyLatticeInfo()
@@ -125,7 +115,7 @@ def test_site_only_counter_z4_is_independent_of_lattice_partitioning():
 
 def test_noise_iterator_requires_counter_configuration():
     with pytest.raises(ValueError, match="config_num is required"):
-        next(iter_noise_base_hp_interval(
+        next(iter_noise_base_probe_interval(
             TinyLatticeInfo(), 0, 0, 1, 4, "zn", 1,
             next(iter(VALID_HP_ORDERINGS)), config_num=None,
         ))
@@ -147,21 +137,68 @@ def test_array_to_numpy_accepts_numpy_and_get_backends():
 def test_direct_part_bookkeeping_plain_and_hp():
     plain = part_source_bookkeeping(3, 2, 5, 8)
     np.testing.assert_array_equal(plain["base_noise_index"], [3, 3, 3])
-    np.testing.assert_array_equal(plain["hp_index"], [2, 3, 4])
+    np.testing.assert_array_equal(plain["probe_index"], [2, 3, 4])
     np.testing.assert_array_equal(
         reconstruct_source_indices(
-            plain["base_noise_index"], plain["hp_index"], 8
+            plain["base_noise_index"], plain["probe_index"], 8
         ),
         [26, 27, 28],
     )
+
+
+def test_point_spin_color_bookkeeping_is_complete_and_ordered():
+    bookkeeping = part_source_bookkeeping(2, 3, 5, 8, "point")
+    assert len(bookkeeping["probe_index"]) == 24
+    np.testing.assert_array_equal(bookkeeping["base_noise_index"], np.full(24, 2))
+    np.testing.assert_array_equal(bookkeeping["probe_index"], np.repeat([3, 4], 12))
+    np.testing.assert_array_equal(bookkeeping["spin_index"], np.tile(np.repeat(range(4), 3), 2))
+    np.testing.assert_array_equal(bookkeeping["color_index"], np.tile(range(3), 8))
+
+
+def test_point_spin_color_projectors_partition_a_source():
+    values = np.arange(16 * 4 * 3).reshape(2, 2, 2, 2, 4, 3) + 1j
+    source = FakeFermion(values)
+    pieces = [
+        apply_spin_color_point_dilution(source, spin, color).data
+        for spin in range(4) for color in range(3)
+    ]
+    np.testing.assert_array_equal(np.sum(pieces, axis=0), source.data)
+    assert all(np.count_nonzero(piece) == 16 for piece in pieces)
+
+
+def test_point_spin_color_iterator_reuses_each_spatial_probe(monkeypatch):
+    latt_info = TinyLatticeInfo()
+    values = np.arange(16 * 4 * 3).reshape(2, 2, 2, 2, 4, 3) + 1j
+    base = FakeFermion(values, latt_info)
+    monkeypatch.setattr(
+        noise_helpers,
+        "make_counter_zn_noise_fermion",
+        lambda *_args, **_kwargs: base.copy(),
+    )
+    records = list(iter_noise_base_probe_interval(
+        latt_info, 1, 0, 2, 4, "hierarchical_probing", 2,
+        NESTED_HP_ORDERING, config_num=7, spin_color_dilution="point",
+    ))
+    assert len(records) == 24
+    assert [record[0] for record in records] == list(range(24, 48))
+    for probe_idx in range(2):
+        selected = records[probe_idx * 12:(probe_idx + 1) * 12]
+        assert [(record[4], record[5]) for record in selected] == [
+            (spin, color) for spin in range(4) for color in range(3)
+        ]
+        expected = apply_hierarchical_probe(base, probe_idx, NESTED_HP_ORDERING)
+        np.testing.assert_array_equal(
+            np.sum([record[3].data for record in selected], axis=0),
+            expected.data,
+        )
 
 def test_hierarchical_probes_reuse_one_counter_base_source():
     latt_info = TinyLatticeInfo()
     indices = counter_zn_phase_indices(latt_info, 31, 6, stream_seed=4, n=4)
     base = FakeFermion(np.asarray([1.0, 1.0j, -1.0, -1.0j])[indices], latt_info)
-    hp0 = apply_hierarchical_probe(base, 0, "interleaved_xyzt_binary_projected_to_evenodd")
-    hp1 = apply_hierarchical_probe(base, 1, "interleaved_xyzt_binary_projected_to_evenodd")
-    pattern = hierarchical_probe_pattern(latt_info, 1, "interleaved_xyzt_binary_projected_to_evenodd")
+    hp0 = apply_hierarchical_probe(base, 0, NESTED_HP_ORDERING)
+    hp1 = apply_hierarchical_probe(base, 1, NESTED_HP_ORDERING)
+    pattern = hierarchical_probe_pattern(latt_info, 1, NESTED_HP_ORDERING)
 
     np.testing.assert_array_equal(hp0.data, base.data)
     np.testing.assert_array_equal(hp1.data, base.data * pattern[..., None, None])
@@ -169,7 +206,10 @@ def test_hierarchical_probes_reuse_one_counter_base_source():
 
 def test_effective_inversions_and_reconstructed_source_indices():
     assert effective_n_inversions(3, "zn", 8) == 3
-    assert effective_n_inversions(3, "hierarchical_probing", 8) == 24
+    assert effective_n_inversions(3, "hierarchical_probing", 32) == 96
+    assert effective_n_inversions(
+        3, "hierarchical_probing", 32, spin_color_dilution="point"
+    ) == 1152
     np.testing.assert_array_equal(
         reconstruct_source_indices([0, 0, 1, 1], [0, 1, 0, 1], 2),
         [0, 1, 2, 3],
@@ -188,43 +228,13 @@ def test_hierarchical_probe_patterns_are_rademacher():
         assert np.any(pattern1 == 1.0)
 
 
-def test_interleaved_xyz_hp_pattern_is_time_independent():
-    latt_info = TinyLatticeInfo()
-    for hp_idx in range(8):
-        pattern = hierarchical_probe_pattern(latt_info, hp_idx, "interleaved_xyz_binary_projected_to_evenodd")
-        np.testing.assert_array_equal(pattern[:, :, :, 0], pattern[:, :, :, 1])
 
-
-def test_interleaved_xyz_hp_pattern_resolves_spatial_bits_first():
-    latt_info = TinyLatticeInfo()
-
-    pattern_x = hierarchical_probe_pattern(latt_info, 1, "interleaved_xyz_binary_projected_to_evenodd")
-    pattern_y = hierarchical_probe_pattern(latt_info, 2, "interleaved_xyz_binary_projected_to_evenodd")
-    pattern_z = hierarchical_probe_pattern(latt_info, 4, "interleaved_xyz_binary_projected_to_evenodd")
-
-    np.testing.assert_array_equal(pattern_x[0, :, :, :], -pattern_x[1, :, :, :])
-    np.testing.assert_array_equal(pattern_y[:, 0, :, :], -pattern_y[:, 1, :, :])
-    np.testing.assert_array_equal(pattern_z[:, :, 0, :], -pattern_z[:, :, 1, :])
-
-
-@pytest.mark.parametrize("hp_count,max_cancelled_distance", [(16, 1), (256, 3)])
-def test_interleaved_xyzt_complete_shell_cancels_four_dimensional_neighbors(
-    hp_count, max_cancelled_distance
-):
-    latt_info = S8LatticeInfo()
-    ordering = "interleaved_xyzt_binary_projected_to_evenodd"
-    for mu in range(4):
-        for distance in range(1, max_cancelled_distance + 1):
-            assert _hp_displacement_correlation(
-                latt_info, hp_count, ordering, mu, distance
-            ) == pytest.approx(0.0, abs=1e-15)
-
-
-@pytest.mark.parametrize("hp_count", [16, 256])
-def test_interleaved_xyz_leaves_all_temporal_displacements_uncancelled(hp_count):
-    latt_info = S8LatticeInfo()
-    ordering = "interleaved_xyz_binary_projected_to_evenodd"
-    for distance in range(1, 5):
-        assert _hp_displacement_correlation(
-            latt_info, hp_count, ordering, 3, distance
-        ) == pytest.approx(1.0, abs=1e-15)
+@pytest.mark.parametrize("ordering", [
+    "global_xyzt_gray_projected_to_evenodd",
+    "interleaved_xyzt_binary_projected_to_evenodd",
+    "interleaved_xyz_binary_projected_to_evenodd",
+    "spatial_xyz_then_t_gray_projected_to_evenodd",
+])
+def test_retired_orderings_are_rejected_even_for_probe_zero(ordering):
+    with pytest.raises(ValueError):
+        hierarchical_probe_pattern(TinyLatticeInfo(), 0, ordering)

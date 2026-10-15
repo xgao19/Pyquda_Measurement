@@ -9,31 +9,19 @@ from application.analysis_helper.emt_quark_1pt_convergence import (
     cumulative_statistics,
     load_quark_1pt_base_series,
 )
-from pyquda_measurement_utils.fermion_bilinear_basis import GAMMA_LABELS
 
 
-def _write_emt(path, hp_index=(0, 1, 0, 1)):
-    n_source = len(hp_index)
-    volume = 8
-    target_t44 = np.arange(1, n_source + 1, dtype=np.float64)
-    kinetic = (10 * target_t44)[:, None, None] * np.ones((n_source, 2, 3))
-    derivative = np.zeros((n_source, 16, 4, 1, 2, 3), dtype=np.complex128)
-    gamma_t = GAMMA_LABELS.index("T")
-    derivative[:, gamma_t, 3, 0, 1, :] = target_t44[:, None] * volume
+def _write_emt(path, incomplete=False):
+    values = np.asarray([1.5, 3.5])
     with h5py.File(path, "w") as h5:
-        h5.attrs["emt_operator_schema_version"] = 5
-        h5.attrs["qext"] = [[0, 0, 0, 0]]
-        h5.attrs["flow_times"] = [0.0, 0.2]
-        h5.attrs["noise_scheme"] = "hierarchical_probing"
-        h5.attrs["hp_num_vectors"] = 2
-        h5.attrs["volume_norm"] = volume
-        h5.create_dataset("gamma_list", data=np.asarray(GAMMA_LABELS, dtype="S"))
-        raw = h5.require_group("raw")
-        raw.create_dataset("derivative_bilinear_pervec", data=derivative)
-        raw.create_dataset("base_noise_index", data=np.repeat(np.arange(n_source // 2), 2))
-        raw.create_dataset("hp_index", data=np.asarray(hp_index, dtype=np.int32))
-        ringed = h5.require_group("derived/ringed")
-        ringed.create_dataset("kinetic_pervec", data=kinetic)
+        h5.attrs.update(dict(output_kind="emt_complete_base_statistics_v2",
+            shard_schema="disconnected_1pt_base_parts_v4", emt_operator_schema_version=5,
+            base_values_volume_normalized=True, n_base_noise=2, vectors_per_base=2,
+            spin_color_dilution="none", effective_n_inversions=4,
+            qext=[[0, 0, 0, 0]], flow_times=[0., 0.2], global_lattice_size=[2, 2, 2, 3]))
+        h5.create_dataset("base/base_noise_index", data=[0, 0] if incomplete else [0, 1])
+        h5.create_dataset("base/Tmunu/T44", data=np.broadcast_to(values[:, None, None, None], (2, 1, 2, 3)))
+        h5.create_dataset("base/ringed/kinetic_spacetime", data=np.broadcast_to(10*values[:, None], (2, 2)))
 
 
 def test_loads_complete_base_ringed_and_t44(tmp_path):
@@ -42,11 +30,11 @@ def test_loads_complete_base_ringed_and_t44(tmp_path):
     series = load_quark_1pt_base_series(path, label="HP2", flow_index=1)
     np.testing.assert_allclose(series.ringed_base_values, [15, 35])
     np.testing.assert_allclose(series.emt_base_values, [1.5, 3.5])
-    assert series.hp_count == 2
+    assert series.solves_per_base == 2
     assert series.qext == (0, 0, 0, 0)
     assert series.component == "T44"
 
-    stats = cumulative_statistics(series.emt_base_values, series.hp_count)
+    stats = cumulative_statistics(series.emt_base_values, series.solves_per_base)
     np.testing.assert_array_equal(stats.solves, [2, 4])
     np.testing.assert_allclose(stats.mean, [1.5, 2.5])
     np.testing.assert_allclose(stats.sem_real[1], 1.0)
@@ -54,8 +42,8 @@ def test_loads_complete_base_ringed_and_t44(tmp_path):
 
 def test_rejects_partial_hp_base(tmp_path):
     path = tmp_path / "bad.h5"
-    _write_emt(path, hp_index=(0, 0, 0, 1))
-    with pytest.raises(ValueError, match="incomplete"):
+    _write_emt(path, incomplete=True)
+    with pytest.raises(ValueError, match="contiguous"):
         load_quark_1pt_base_series(path)
 
 

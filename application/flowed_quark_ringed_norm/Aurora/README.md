@@ -1,5 +1,13 @@
 # Aurora standalone ringed workflow
 
+Current develop HP uses the shared Python default
+`nested_xyzt_checkerboard_v1` and complete counts 2, 32 or 512; omit the shell
+ordering override. Old orderings are rejected. Use fresh output/setup
+identities for shard schema v4 and sample-log schema v2, including Z_N runs.
+Raw kinetic data are retained for the standalone finalizer. See
+[the probing contract](../../EMT_disconnected_1pt/PROBING.md); old files require
+the original checkout.
+
 Run `run_flowed_quark_ringed_norm.sh --config_num 1000` to produce base/HP
 shards. Configuration identity is required on the CLI and is not read from an
 environment variable. Use `FLOWED_RINGED_BASE_START/STOP`,

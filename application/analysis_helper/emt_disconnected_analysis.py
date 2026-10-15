@@ -6,7 +6,6 @@ import numpy as np
 from pyquda_measurement_utils.fermion_bilinear_basis import VECTOR_GAMMA_POSITIONS
 from pyquda_measurement_utils.Disconnected_utils_vibe_develop import (
     SOURCE_BOOKKEEPING_SCHEMA,
-    hp_vectors_per_base,
     reconstruct_source_indices,
 )
 
@@ -153,16 +152,14 @@ def read_quark_loop(path, source_position, source_chunk_size=8):
             del b_tensor, tensor
 
         base_indices = h5["raw/base_noise_index"][...]
-        hp_indices = h5["raw/hp_index"][...]
-        hp_count = hp_vectors_per_base(
-            h5.attrs["noise_scheme"], h5.attrs["hp_num_vectors"]
-        )
+        hp_indices = h5["raw/probe_index"][...]
+        probe_count = int(h5.attrs["vectors_per_base"])
         bookkeeping = {
             "source_index": reconstruct_source_indices(
-                base_indices, hp_indices, hp_count
+                base_indices, hp_indices, probe_count
             ),
             "base_noise_index": base_indices,
-            "hp_index": hp_indices,
+            "probe_index": hp_indices,
         }
         flow_times = np.asarray(h5.attrs["flow_times"], dtype=np.float64)
 

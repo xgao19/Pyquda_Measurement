@@ -56,15 +56,22 @@ QTMD_1PT_N_ZN=4
 QTMD_1PT_RAND_SEED=0
 QTMD_1PT_NOISE_SCHEME=zn
 QTMD_1PT_HP_NUM_VECTORS=1
-QTMD_1PT_HP_ORDERING=global_xyzt_gray_projected_to_evenodd
+QTMD_1PT_HP_ORDERING=nested_xyzt_checkerboard_v1
 QTMD_1PT_BASE_START=0
 QTMD_1PT_BASE_STOP=QTMD_1PT_N_VEC
 QTMD_1PT_BLOCK_INTERVAL_SOLVES=64
 QTMD_1PT_SHARD_DIR=<data>/qTMD1pt/shards
 ```
 
+The ordering above is the shared Python default; omit the environment override
+in normal use. When selecting HP, set `QTMD_1PT_HP_NUM_VECTORS` to 2, 32 or 512.
+Old orderings and counts are not supported. Use a fresh output/setup identity:
+new shards use `disconnected_1pt_base_parts_v4` and sample logs use
+`disconnected_sample_log_v2`; old results require the original checkout.
+See [the shared probing contract](../EMT_disconnected_1pt/PROBING.md).
+
 Parts are named
-`<stem>.baseXXXXXX.partXXXX.hpSTART-END.h5`. Rank 0 writes each part through an
+`<stem>.baseXXXXXX.partXXXX.probeSTART-END.h5`. Rank 0 writes each part through an
 atomic rename. After all parts of a base close, rank 0 appends one exact base
 line to `<data>/sample_log_disconnected/<canonical-stem>.log`. Resume trusts
 only that fingerprinted log and performs no HDF5 existence or metadata probes;
@@ -84,10 +91,10 @@ with raw layout
 ```text
 raw/loop_pervec  [source, Wilson_index, gamma, momentum, time]
 raw/base_noise_index
-raw/hp_index
+raw/probe_index
 ```
 
 The effective source index is reconstructed from
-`base_noise_index * hp_vectors_per_base + hp_index`; it is not stored.
+`base_noise_index * vectors_per_base + probe_index`; it is not stored.
 
 and the existing `avg/SS/...` hierarchy divided by the spatial volume.

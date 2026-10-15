@@ -5,8 +5,9 @@
 \usepackage{hyperref}
 \usepackage[margin=2.5cm]{geometry}
 \usepackage{booktabs}
+\setlength{\emergencystretch}{3em}
 
-\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\code}[1]{\texttt{\begingroup\def\_{\textunderscore\allowbreak}#1\endgroup}}
 \newcommand{\Trsc}{\operatorname{Tr}_{sc}}
 
 \title{\textbf{Disconnected qTMD/PDF One-Point Building Blocks}\\[4pt]
@@ -22,13 +23,23 @@
 
 This note documents the PyQUDA implementation of disconnected qTMD/PDF
 one-point quark loops.  The source file is
-\code{pyquda\_measurement\_utils/Disconnected\_1pt\_qTMD\_vibe\_develop.py},
-and the Perlmutter application is
+\begin{center}
+\code{pyquda\_measurement\_utils/Disconnected\_1pt\_qTMD\_vibe\_develop.py}.
+\end{center}
+The Perlmutter application is
+\begin{center}
 \code{application/qTMD\_disconnected\_1pt/perlmutter}.
+\end{center}
 
 The loops are hadron independent.  Pion and proton information enters later,
 when the loop is combined with the corresponding hadron two-point function in
 ensemble analysis.
+
+This note describes \code{Pyquda\_Measurement\_develop}. New runs, including
+\(Z_n\), require fresh output/setup identities for shard schema v4 and
+sample-log schema v2. Old files require the original checkout; there is no
+automatic migration. This storage change does not change the qTMD operator
+schema, which remains version 3.
 
 \section{Disconnected qTMD Loop}
 
@@ -112,7 +123,7 @@ The implementation supports four operator kinds:
 \end{tabular}
 \end{center}
 
-\subsection{Straight-\(z\) PDF Operators}
+\subsection{Straight-\texorpdfstring{\(z\)}{z} PDF Operators}
 
 For PDF operators,
 \begin{equation}
@@ -148,7 +159,7 @@ HDF5 output.
 \subsection{Gauge-Invariant qTMD Staple Operator}
 
 The production code also supports a fixed-length gauge-invariant staple
-operator, \(\code{operator\_kind=GI\_qTMD}\).  Its Wilson index is
+operator, \code{operator\_kind=GI\_qTMD}. Its Wilson index is
 \([b_T,b_z,\eta,\perp]\), with even physical \(b_z\), non-negative \(\eta\),
 and \(\eta\ge |b_z|/2\).
 
@@ -249,21 +260,34 @@ The number of effective inversions is
   N_{\mathrm{HP}}.
 \end{equation}
 
-The implemented HP ordering choices are
+The shared Python default and only supported ordering is
+\begin{verbatim}
+nested_xyzt_checkerboard_v1
+\end{verbatim}
+Shell wrappers do not set a separate ordering default; explicit environment
+overrides are forwarded and validated. Old Gray/interleaved orderings and
+arbitrary power-of-two counts are rejected. Set
+\code{QTMD\_1PT\_HP\_NUM\_VECTORS} to one of the complete levels:
 \begin{center}
-\begin{tabular}{ll}
+\begin{tabular}{rrr}
 \toprule
-Ordering & Meaning \\
+HP count & Cancellation distance & Required divisor of every global extent \\
 \midrule
-\code{global\_xyzt\_gray\_projected\_to\_evenodd}
-& Gray code the full \(x,y,z,t\) site id. \\
-\code{spatial\_xyz\_then\_t\_gray\_projected\_to\_evenodd}
-& Gray code spatial sites first, then append time bits. \\
+2 & 1 & 2 \\
+32 & 3 & 4 \\
+512 & 7 & 8 \\
 \bottomrule
 \end{tabular}
 \end{center}
+For \(Z_n\), the probe count is one and the HP count input is unused.
+\code{QTMD\_1PT\_N\_VEC} counts independent bases, not probes or inversions.
+Partial probing prefixes are not independent base samples.
 
-Spin-color dilution and time dilution are not currently implemented.
+qTMD supports only \(Z_n\) and complete HP. Multiplier probing is rejected;
+spin--color dilution and time dilution are not implemented. These restrictions
+are unchanged by EMT's additional multiplier/SC12 capabilities. qTMD retains
+raw per-source shards and raw canonical finalization, not EMT's mean-only
+production and \code{.bases.h5} analysis path.
 
 The default base field is decomposition-independent full-volume
 \(\mathbb Z_4\) noise.  Its fixed counter contains the global four-dimensional
@@ -299,6 +323,21 @@ source axis.  Only after successful writeout is the canonical file atomically
 replaced.  Non-overlapping base ranges can be scheduled independently;
 overlapping jobs are unsupported.
 
+Part filenames now use
+\begin{verbatim}
+<stem>.baseXXXXXX.partXXXX.probeSTART-END.h5
+\end{verbatim}
+The shared format identifiers are
+\begin{verbatim}
+shard_schema = disconnected_1pt_base_parts_v4
+sample-log header = disconnected_sample_log_v2
+source_bookkeeping_schema = base_probe_v2
+\end{verbatim}
+An old file or log is not guessed into the new layout. Use a fresh setup tag
+and output identity, and do not mix old/new shards or logs. Changing HP count
+or ordering also requires a new identity. Extending the number of independent
+bases is supported without changing the setup tag.
+
 \section{HDF5 Layout}
 
 New output uses the source-independent helper
@@ -307,11 +346,15 @@ New output uses the source-independent helper
 \code{qTMD1pt/<lat>.qTMD1pt.<cfg>.<ama>.<sm>.h5}.
 \end{center}
 The obsolete source-position helper has been removed because the full-volume
-loop has no hadron source position.  New shards and canonical files record
-\(\code{schema\_version=3}\),
-\(\code{loop\_convention=xi\_dagger\_Gamma\_O\_b\_eta}\), and
-\(\code{trace\_target=Tr[P\_qtau Gamma O\_b Dinv]}\).  The finalizer rejects
-any other convention before replacing a canonical file.  It stores:
+loop has no hadron source position. New shards and canonical files record
+\begin{verbatim}
+schema_version = 3
+loop_convention = xi_dagger_Gamma_O_b_eta
+trace_target = Tr[P_qtau Gamma O_b Dinv]
+\end{verbatim}
+The operator \code{schema\_version=3} is distinct from shard schema v4 and
+bookkeeping schema v2. The finalizer rejects an incompatible operator
+convention before replacing a canonical file. It stores:
 \begin{equation}
   \code{raw/loop\_pervec}
   \quad\mathrm{with\ shape}\quad
@@ -320,13 +363,18 @@ any other convention before replacing a canonical file.  It stores:
 The raw bookkeeping datasets are
 \begin{equation}
   \code{raw/base\_noise\_index},\quad
-  \code{raw/hp\_index}.
+  \code{raw/probe\_index}.
 \end{equation}
 The effective source coordinate is not persisted because it is exactly
 reconstructed as
 \begin{equation}
-  r=bN_{\mathrm{HP}}+h.
+  r=bN_p+k,\qquad N_p=\code{vectors\_per\_base}.
 \end{equation}
+Stored counts are \code{n\_base\_noise}, \code{vectors\_per\_base} and
+\code{effective\_n\_inversions}. There is no duplicate stored
+\code{hp\_num\_vectors} or \code{n\_vec}. Metadata records
+\code{noise\_scheme} and \code{spin\_color\_dilution=none};
+\code{hp\_ordering} is present only for HP.
 
 The averaged data are divided by the spatial volume and stored in a qTMD-like
 layout:
@@ -339,6 +387,13 @@ flow changes the resident gauge in this workflow, the Dirac gauge is loaded
 once before the source loop and reused.
 
 \section{Validation Strategy}
+
+The operator/trace checks below remain applicable, but they do not constitute
+GPU/MPI validation of the new nested HP implementation. The dedicated probing
+CPU/mock tests check source algebra, bookkeeping and qTMD loop wiring. New
+probing GPU/MPI validation remains pending; use a fresh output identity for
+such tests. See \code{application/EMT\_disconnected\_1pt/PROBING.md} for the
+shared source contract and backend-specific validation entry points.
 
 The trace direction is tested without precomputed stochastic HDF5 baselines.
 A complete basis of source vectors is applied to arbitrary complex matrices

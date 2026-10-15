@@ -1,5 +1,11 @@
 # Standalone flowed-quark ringed kinetic measurement
 
+The current develop probing contract is in
+[PROBING.md](../../application/EMT_disconnected_1pt/PROBING.md). Standalone
+ringed supports Z_N and complete nested HP2/HP32/HP512 only, retains raw kinetic
+data for its finalizer, and requires fresh output/setup identities for shard
+schema v4 and sample-log schema v2. Old data require the original checkout.
+
 The standalone workflow measures the per-configuration kinetic trace
 
 ```text
@@ -9,7 +15,7 @@ eta_r = D^-1 xi_r.
 ```
 
 It uses full-volume, global-coordinate counter-based `Z4` noise. Plain noise,
-4D HP16, and 4D HP256 are supported. Time and spin-color dilution are not part
+complete 4D HP2/HP32/HP512 are supported. Time and spin-color dilution are not part
 of this workflow.
 
 ## Relation to disconnected EMT
@@ -65,12 +71,12 @@ The canonical file contains only
 flow_times
 raw/kinetic_pervec
 raw/base_noise_index
-raw/hp_index
+raw/probe_index
 avg/kinetic_spacetime
 ```
 
 The effective source index is reconstructed as
-`base_noise_index * hp_vectors_per_base + hp_index` and is not stored.
+`base_noise_index * vectors_per_base + probe_index` and is not stored.
 
 It stores no ringed factor. Any nonlinear normalization must be constructed in
 downstream ensemble analysis after averaging `K` over gauge configurations;

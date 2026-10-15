@@ -1431,3 +1431,27 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   preserving the original default behavior and total flow time.
 - Verified syntax, diff hygiene, the l80 static validators, and default and
   three-substep schedules with a non-GPU mock.
+
+
+## 2026-10-15: Correct disconnected probing and refresh quark-loop examples
+
+- Replaced legacy HP orderings with complete nested 4D HP2/HP32/HP512, added
+  shape-validated multiplier plans and point spin-color dilution, and removed
+  obsolete probing compatibility paths. Included CPU tests, GPU-check tooling,
+  reference searches and historical design notes.
+- Updated disconnected shards and sample-log identities, complete-base
+  aggregation and independent-base statistics. Simplified EMT convergence,
+  ringed and T44 analysis around shared base-data loading; aligned qTMD and
+  standalone ringed interfaces with the supported HP and bookkeeping contracts.
+- Synchronized EMT/qTMD documentation and PDFs, probing guidance and existing
+  reusable session-memory conventions. Retained the working tree's executable
+  permission changes on application/system scripts without altering their scope.
+- Added the timed Aurora a076 strange-quark example using the live benchmark's
+  HP512/SC12, mass -0.015, 768-solve shards, rank-zero aggregation, tile binding
+  and output validation. Fixed Perlmutter dilution forwarding, the missing
+  base-count shell default and selection of the current measurement checkout.
+- Validation: 180 CPU/mock regression tests passed; the preceding example update
+  also passed 34 application checks, including four new example-wiring tests.
+  Syntax checks covered 34 Python files, 38 shell/PBS scripts and five JSON plans.
+  These checks do not establish full-base GPU/MPI or independent physics
+  validation. No production tasks were submitted for this commit.
