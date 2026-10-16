@@ -53,6 +53,7 @@ from pyquda_measurement_utils.qtmd_operator_utils import (
 from pyquda_measurement_utils.tools import (
     _asarray_on_queue,
     _get_xp_from_array,
+    _reduce_spatial_projected,
     array_to_numpy,
     mpi_print,
 )
@@ -161,10 +162,12 @@ class DisconnectedQuarkqTMD1pt:
                 xi.data, gamma_ls, shifted_eta.data
             )
             loop = xp.einsum("qwtzyx,gwtzyx->gqt", phases, local_loop, optimize=True)
-            loops.append(core.gatherLattice(array_to_numpy(loop), [2, -1, -1, -1]))
+            reduced = _reduce_spatial_projected(array_to_numpy(loop))
+            if latt_info.mpi_rank == 0:
+                loops.append(reduced)
             del local_loop, loop
 
-        return np.asarray(loops)
+        return np.asarray(loops) if latt_info.mpi_rank == 0 else None
 
     def _measure_base_shards(
         self, U, dirac, randPara, tag, operator_kind, phases_q, W_index_list,
@@ -203,7 +206,10 @@ class DisconnectedQuarkqTMD1pt:
                 bookkeeping = part_source_bookkeeping(
                     base_idx, probe_start, probe_stop, probe_count
                 )
-                loop_part = np.zeros((count,) + loop_shape, dtype=np.complex128)
+                loop_part = (
+                    np.zeros((count,) + loop_shape, dtype=np.complex128)
+                    if U.latt_info.mpi_rank == 0 else None
+                )
                 for _, _, probe_idx, xi, _, _ in iter_noise_base_probe_interval(
                     U.latt_info, base_idx, probe_start, probe_stop, n_zn,
                     self.noise_scheme, self.hp_num_vectors, self.hp_ordering,
@@ -215,7 +221,8 @@ class DisconnectedQuarkqTMD1pt:
                         U.latt_info, U, eta, xi, phases_q, W_index_list,
                         operator_kind, staple_links=staple_links,
                     )
-                    loop_part[probe_idx - probe_start] = comm.bcast(loops, root=0)
+                    if U.latt_info.mpi_rank == 0:
+                        loop_part[probe_idx - probe_start] = loops
                 if U.latt_info.mpi_rank == 0:
                     write_raw_part_hdf5(
                         path, {"loop_pervec": loop_part}, write_attrs,

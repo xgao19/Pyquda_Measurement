@@ -51,7 +51,7 @@ def test_complete_basis_estimator_targets_gamma_o_dinv_at_fixed_time_and_momentu
 
 
 class _FakeLatticeInfo:
-    mpi_rank = 1
+    mpi_rank = 0
 
 
 class _FakeFermion:
@@ -107,7 +107,7 @@ def test_operator_is_applied_to_eta_and_xi_remains_on_the_left(
     eta = _FakeFermion(eta_data, "eta", shift_log)
 
     monkeypatch.setattr(qtmd, "gamma_stack", lambda _data: np.eye(4)[None])
-    monkeypatch.setattr(qtmd.core, "gatherLattice", lambda values, _axes: values)
+    monkeypatch.setattr(qtmd, "_reduce_spatial_projected", lambda values: values)
     monkeypatch.setattr(
         qtmd,
         "apply_gi_qtmd_staple_to_fermion",

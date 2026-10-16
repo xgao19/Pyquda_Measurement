@@ -10,6 +10,7 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
 from pyquda_measurement_utils.tools import (
     _asarray_on_queue,
     _get_xp_from_array,
+    _reduce_spatial_projected,
     array_to_numpy,
 )
 
@@ -248,7 +249,7 @@ def contract_pion_gamma_scan_from_backward_line(
         del sink_inserted
 
     corr_by_src = {
-        src_gamma: core.gatherLattice(array_to_numpy(corr_local), [2, -1, -1, -1])
+        src_gamma: _reduce_spatial_projected(array_to_numpy(corr_local))
         for src_gamma, corr_local in corr_local_by_src.items()
     }
     del corr_local_by_src, source_gamma_ls_by_src

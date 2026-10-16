@@ -170,7 +170,6 @@ def _contract_operator_list(
     operator_kind,
 ):
     from pyquda import getMPIComm
-    from pyquda_utils import core
     from pyquda_measurement_utils.qtmd_operator_utils import (
         apply_gi_qtmd_staple_to_propagator,
         build_gi_qtmd_staple_links,
@@ -180,6 +179,7 @@ def _contract_operator_list(
     from pyquda_measurement_utils.tools import (
         _asarray_on_queue,
         _get_xp_from_array,
+        _reduce_spatial_projected,
         array_to_numpy,
         mpi_print,
     )
@@ -253,11 +253,9 @@ def _contract_operator_list(
             projected = xp.einsum(
                 "qwtzyx,pgwtzyx->pqgt", phases, scalar, optimize=True
             )
-            output.append(
-                core.gatherLattice(
-                    array_to_numpy(projected), [3, -1, -1, -1]
-                )
-            )
+            reduced = _reduce_spatial_projected(array_to_numpy(projected))
+            if latt_info.mpi_rank == 0:
+                output.append(reduced)
             _sync_backend_array(projected)
             del scalar, projected
 

@@ -67,6 +67,25 @@ def _sum_spatial_projected(projected):
     return result
 
 
+def _reduce_spatial_projected(projected):
+    """Sum spatial subdomains into global time order on rank zero only."""
+    from pyquda import MPI, getGridCoord, getGridSize, getMPIComm
+
+    projected = np.asarray(projected)
+    local_nt = projected.shape[-1]
+    time_start = local_nt * getGridCoord()[3]
+    result = np.zeros(
+        projected.shape[:-1] + (local_nt * getGridSize()[3],), dtype=projected.dtype
+    )
+    result[..., time_start:time_start + local_nt] = projected
+    comm = getMPIComm()
+    if comm.Get_rank() == 0:
+        comm.Reduce(MPI.IN_PLACE, result, op=MPI.SUM, root=0)
+        return result
+    comm.Reduce(result, None, op=MPI.SUM, root=0)
+    return None
+
+
 def read_sample_log_entries(path):
     """Read a lightweight sample log using exact non-empty lines."""
     path = Path(path)

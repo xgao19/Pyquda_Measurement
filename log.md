@@ -1519,3 +1519,38 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   algebra, projection, flow and HDF5 checks also passed 54 tests (overlapping
   with that suite). Diff hygiene passed. Reusable environment facts in
   SESSION_MEMORY.md did not change.
+
+
+## 2026-10-16: Use root-only Reduce for qTMD and shared pion contractions
+
+- Added a root-only spatial Reduce helper that preserves global time ordering
+  and returns None on non-root ranks. Replaced Gather in disconnected qTMD/PDF,
+  the shared pion Gamma-scan kernel, and the connected nucleon qTMD/PDF runner.
+  Kept existing root-only interfaces, normalization and output schemas.
+- Removed the disconnected per-probe loop-array broadcast and allocated the
+  complete shard array only on rank zero. Retained completion/sample-log
+  broadcasts and collective synchronization. Added CPU coverage for root and
+  non-root behavior, non-contiguous input, space/time decompositions including
+  the a050 grid, contraction wiring and shard allocation/broadcast behavior.
+- Aurora A/B validation job 8936324 completed with exit status zero on ten
+  nodes and 100 ranks. Actual original/develop code snapshots ran on the full
+  a050 geometry with the stream-b cfg600 gauge, identical deterministic input
+  fields and 125 momenta. Nine cases covered disconnected and nucleon CG/GI
+  PDF/qTMD plus the shared pion scan, each with warmup and one measured repeat.
+  All 28 datasets and metadata passed at rtol=1e-10, atol=1e-12; input hashes
+  matched, maximum absolute error was 1.63e-11 and relative L2 error 1.52e-16.
+- Representative second-repeat kernel times (original -> develop): disconnected
+  CG_PDF 0.192 -> 0.073 seconds; shared pion scan 1.258 -> 1.168 seconds;
+  nucleon CG_PDF 0.673 -> 0.440 seconds. These are contraction-kernel checks,
+  not physical propagator/inversion or complete HP production validation, and
+  one measured repeat does not establish a precise production speedup.
+- Initial test job 8936276 failed in the original GI_PDF path because the
+  independent benchmark omitted the resident gauge context. Adding gauge.use()
+  around its operator loops and staple construction fixed the harness; neither
+  measurement implementation needed an algorithm change for that failure.
+  Benchmark scripts, snapshots and results remain outside this repository at
+  `run/l80c80a050/develop/qtmd_reduce`. Original production data/cache are intact.
+- Pre-commit regression passed the 215-test CPU/mock suite and diff hygiene
+  checks. Targeted CPU checks passed 37 tests (overlapping with the suite), with
+  two GPU-backend tests deliberately deselected on the login node. Reusable
+  SESSION_MEMORY.md facts did not change.

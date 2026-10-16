@@ -132,7 +132,7 @@ def test_multi_source_c2_uses_local_time_extent_and_matches_reference(monkeypatc
         def __init__(self, data):
             self.data = data
 
-    monkeypatch.setattr(pion_utils.core, "gatherLattice", lambda values, axes: values)
+    monkeypatch.setattr(pion_utils, "_reduce_spatial_projected", lambda values: values)
     result = contract_pion_2pt_multi_src_gamma(
         FakeLatticeInfo(),
         FakePropagator(forward),
