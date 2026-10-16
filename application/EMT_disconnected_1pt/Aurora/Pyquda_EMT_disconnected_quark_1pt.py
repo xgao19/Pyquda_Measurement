@@ -108,7 +108,7 @@ def main():
     parser.add_argument("--mpi_geometry", default="2.2.4.4")
     parser.add_argument("--mg-block", default=DEFAULT_MG_BLOCK)
     parser.add_argument("--n-base-noise", type=int, default=1)
-    parser.add_argument("--flow-batch-size", type=int, default=1)
+    parser.add_argument("--flow-batch-size", type=int, default=24)
     parser.add_argument("--data-dir", type=Path)
     parser.add_argument("--resource-path", type=Path)
     args = parser.parse_args()

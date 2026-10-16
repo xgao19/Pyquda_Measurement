@@ -37,7 +37,8 @@ def install_stubs(pyquda_root):
         def __init__(self, *args, **kwargs):
             unavailable()
 
-    module("pyquda", getMPIComm=unavailable)
+    module("pyquda", getMPIComm=unavailable, getGridSize=unavailable,
+           getGridCoord=unavailable, MPI=types.SimpleNamespace(IN_PLACE=object(), SUM=object()))
     module("pyquda.field", LatticeFermion=Fermion, LatticeGauge=DeviceOnly,
            LatticeInfo=DeviceOnly, LatticeComplex=DeviceOnly,
            LatticeLink=DeviceOnly, LatticePropagator=DeviceOnly, MultiLatticeFermion=DeviceOnly)
@@ -75,6 +76,7 @@ def main():
         str(repo / "tests/test_disconnected_probing_workflow.py"),
         str(repo / "tests/test_disconnected_noise_bookkeeping.py"),
         str(repo / "tests/test_disconnected_emt_flow_bookkeeping.py"),
+        str(repo / "tests/test_emt_projected_allreduce.py"),
         str(repo / "tests/test_disconnected_shard_utils.py"), "-q",
         str(repo / "tests/test_flowed_quark_ringed_norm.py"),
         str(repo / "tests/test_emt_disconnected_analysis.py"),

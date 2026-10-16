@@ -135,6 +135,7 @@ def test_aurora_benchmark_settings_and_rank_zero_finalization(tmp_path):
     assert args[1] == [-0.015, 1.0372, 1e-10, 5000]
     assert args[2] == [1, 4, 0]
     assert kwargs["block_interval_solves"] == 768
+    assert kwargs["flow_batch_size"] == 24
     assert kwargs["save_raw_per_vector"] is False
     assert calls["aggregate"] == (kwargs["shard_dir"], kwargs["tag"], 1)
     nonroot = _run_driver("Aurora", tmp_path, rank=1)
@@ -184,6 +185,8 @@ def test_aurora_launcher_rejects_missing_allocation_before_writes(tmp_path):
     assert result.returncode == 2
     assert "8-node PBS allocation" in result.stderr
     source = (APP / "Aurora/run_quark_1pt.sh").read_text()
+    assert "flow_batch_size=24\n" in source
+    assert '--flow-batch-size "$flow_batch_size"' in source
     assert 'export PYQUDA_ROOT="$measurement_root"' in source
     assert '"$benchmark_dir/tile_flat_affinity.sh"' in source
     assert "/run/l64c64a076/" not in source

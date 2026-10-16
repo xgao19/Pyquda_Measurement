@@ -4,7 +4,7 @@ set -euo pipefail
 # Benchmark settings; run this script inside an existing PBS allocation.
 configuration=1050
 n_base_noise=1
-flow_batch_size=1
+flow_batch_size=24
 mpi_geometry="2.2.4.4"
 mg_block="4.4.4.4;4.4.2.2"
 

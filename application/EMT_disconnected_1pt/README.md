@@ -3,7 +3,8 @@
 Platform entry points:
 
 - [Aurora strange HP512/SC12 benchmark](Aurora/README.md): the a076 benchmark's
-  dpnp/SYCL driver, eight-node launcher, source timing and output validator.
+  dpnp/SYCL driver, eight-node launcher, recommended B24 flow batching,
+  source timing and output validator.
 - `perlmutter/`: configurable CUDA smoke/production examples described below.
 
 Both paths use the measurement checkout containing the launcher by default,
@@ -492,8 +493,11 @@ bash "$APP/run_quark_1pt.sh" \
   --flow-batch-size 8
 ```
 
-The default is `--flow-batch-size 1`, which preserves the lowest-memory
-execution path. A batch of size `B` packs the fields in the order
+Multi-source flow batching is recommended when GPU memory permits. The
+Perlmutter wrapper above retains `--flow-batch-size 1` as its lowest-memory
+default; the [Aurora example](Aurora/README.md) now defaults to **B24** in both
+its shell settings and Python driver, following the successful a076 benchmark.
+A batch of size `B` packs the fields in the order
 
 ```text
 xi_1, eta_1, xi_2, eta_2, ..., xi_B, eta_B
@@ -504,7 +508,15 @@ sources still use sequential inversions. The original gauge is restored once
 at the start of the batch, and all sources at one flow time share the same
 resident flowed-gauge context for their covariant derivatives.
 
-Use the largest batch that leaves a safe GPU-memory margin. The current
+Use the largest measured-efficient batch that leaves a safe GPU-memory margin.
+For Aurora's tested eight-node `2.2.4.4` geometry and MG `4.4.4.4;4.4.2.2`,
+B24 completed NP2/SC12 validation. With the current projection Allreduce it
+measured about 4.23 seconds per diluted source, versus 6.44 seconds for B24
+with gather/broadcast. This is a short performance test, not a complete HP512
+production validation. Each SC12 probe contributes 12 sources, so B24 means
+two probes, not 24 probes; inversions remain sequential.
+
+Perlmutter has different memory limits. The current
 `l64c64a076`, resident-multigrid test found these practical starting points:
 
 ```text

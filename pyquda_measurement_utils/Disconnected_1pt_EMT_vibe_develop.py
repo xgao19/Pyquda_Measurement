@@ -19,7 +19,7 @@ import h5py
 import numpy as np
 from opt_einsum import contract
 
-from pyquda import getMPIComm
+from pyquda import MPI, getGridCoord, getGridSize, getMPIComm
 from pyquda.field import LatticeGauge, LatticeFermion
 from pyquda_utils import core, phase, convert
 from pyquda_comm.array import arrayIdentity, arrayZeros
@@ -203,6 +203,18 @@ def _timer_stop(start, *objects):
     return perf_counter() - start
 
 
+def _sum_spatial_projected(projected):
+    """Sum spatial subdomains while preserving global time on every rank."""
+    projected = np.asarray(projected)
+    local_nt = projected.shape[-1]
+    global_nt = local_nt * getGridSize()[3]
+    time_start = local_nt * getGridCoord()[3]
+    result = np.zeros(projected.shape[:-1] + (global_nt,), dtype=projected.dtype)
+    result[..., time_start:time_start + local_nt] = projected
+    getMPIComm().Allreduce(MPI.IN_PLACE, result, op=MPI.SUM)
+    return result
+
+
 def _unique_zero_momentum_index(momentum_list):
     """Return the unique zero-momentum index or raise a clear error."""
     zero_indices = [
@@ -303,20 +315,17 @@ class EMTDisconnectedQuark1pt(FlowedFermionBilinearKernel):
     @staticmethod
     def _impose_P_Breit_slice(complex_field, phases_3pt):
         """Project a local scalar field to spatial momenta and keep time."""
-        slice_t = core.gatherLattice(
+        return _sum_spatial_projected(
             array_to_numpy(
                 contract("qwtzyx, wtzyx -> qt", phases_3pt, complex_field)
             ),
-            [1, -1, -1, -1],
         )
-        return getMPIComm().bcast(slice_t, root=0)
 
     @staticmethod
     def _project_gamma_fields(gamma_fields, phases_3pt):
         """Project ``[gamma,site]`` scalar fields and preserve absolute time."""
         projected = contract("qwtzyx,gwtzyx->gqt", phases_3pt, gamma_fields)
-        slice_t = core.gatherLattice(array_to_numpy(projected), [2, -1, -1, -1])
-        return getMPIComm().bcast(slice_t, root=0)
+        return _sum_spatial_projected(array_to_numpy(projected))
 
     @staticmethod
     def _closed_loop_derivative_from_right_projection(

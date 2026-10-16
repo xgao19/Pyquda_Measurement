@@ -1455,3 +1455,31 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   Syntax checks covered 34 Python files, 38 shell/PBS scripts and five JSON plans.
   These checks do not establish full-base GPU/MPI or independent physics
   validation. No production tasks were submitted for this commit.
+
+
+## 2026-10-16: Reduce disconnected EMT projection overhead and default Aurora to B24
+
+- Replaced the quark-loop scalar/Gamma projection's root-side gather, spatial
+  reordering and broadcast with an in-place host-array Allreduce(SUM). Each
+  rank fills its own global-time interval before reduction; space sums, time
+  ordering, spin-color normalization and output formats are unchanged. No
+  legacy communication fallback or global PyQUDA interface change was added.
+- Added CPU tests for scalar/Gamma projection wiring and spatial/time grids,
+  including non-contiguous input arrays, and extended the CPU import stubs.
+- Set the Aurora quark-loop shell and Python defaults to B24. Retained HP512,
+  SC12, one independent base and 768-solve shards in the application; did not
+  copy the live benchmark's NP2 workload or detailed profiling override.
+  Perlmutter remains B1 as requested. Updated batching recommendations,
+  platform-specific memory cautions and application-wiring assertions.
+- Aurora validation job 8933007 completed two NP2/SC12 bases (48 solves) on
+  eight nodes. All 31 base/average datasets passed comparison with job
+  8932633's B24 output at rtol=1e-10 and atol=1e-12; maximum absolute and
+  relative L2 differences were 1.33e-15 and 2.26e-15. Excluding the first batch,
+  compute time fell from 6.444 to 4.233 seconds/source versus the instrumented
+  gather run 8932914; contraction fell from 3.827 to 1.610 seconds/source.
+  These are small-sample compute timings, not full HP512 production validation.
+- Pre-commit regression passed 192 CPU/mock tests and four additional
+  application checks; Python/Bash syntax and diff hygiene checks passed.
+  Perlmutter B24 was neither
+  enabled nor submitted. Reusable environment facts in SESSION_MEMORY.md did
+  not change.
