@@ -53,6 +53,20 @@ def array_to_numpy(arr):
     return np.asarray(arr)
 
 
+def _sum_spatial_projected(projected):
+    """Sum spatial subdomains while preserving global time on every rank."""
+    from pyquda import MPI, getGridCoord, getGridSize, getMPIComm
+
+    projected = np.asarray(projected)
+    local_nt = projected.shape[-1]
+    global_nt = local_nt * getGridSize()[3]
+    time_start = local_nt * getGridCoord()[3]
+    result = np.zeros(projected.shape[:-1] + (global_nt,), dtype=projected.dtype)
+    result[..., time_start:time_start + local_nt] = projected
+    getMPIComm().Allreduce(MPI.IN_PLACE, result, op=MPI.SUM)
+    return result
+
+
 def read_sample_log_entries(path):
     """Read a lightweight sample log using exact non-empty lines."""
     path = Path(path)

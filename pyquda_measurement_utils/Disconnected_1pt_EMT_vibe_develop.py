@@ -19,7 +19,7 @@ import h5py
 import numpy as np
 from opt_einsum import contract
 
-from pyquda import MPI, getGridCoord, getGridSize, getMPIComm
+from pyquda import getMPIComm
 from pyquda.field import LatticeGauge, LatticeFermion
 from pyquda_utils import core, phase, convert
 from pyquda_comm.array import arrayIdentity, arrayZeros
@@ -30,6 +30,7 @@ from pyquda_measurement_utils.io_corr import (
 from pyquda_measurement_utils.tools import (
     _asarray_on_queue,
     _get_xp_from_array,
+    _sum_spatial_projected,
     array_to_numpy,
     mpi_print,
     mpi_timer_print,
@@ -201,18 +202,6 @@ def _timer_stop(start, *objects):
         _sync_backend_object(obj)
     getMPIComm().Barrier()
     return perf_counter() - start
-
-
-def _sum_spatial_projected(projected):
-    """Sum spatial subdomains while preserving global time on every rank."""
-    projected = np.asarray(projected)
-    local_nt = projected.shape[-1]
-    global_nt = local_nt * getGridSize()[3]
-    time_start = local_nt * getGridCoord()[3]
-    result = np.zeros(projected.shape[:-1] + (global_nt,), dtype=projected.dtype)
-    result[..., time_start:time_start + local_nt] = projected
-    getMPIComm().Allreduce(MPI.IN_PLACE, result, op=MPI.SUM)
-    return result
 
 
 def _unique_zero_momentum_index(momentum_list):

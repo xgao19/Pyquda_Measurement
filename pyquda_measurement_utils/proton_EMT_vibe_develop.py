@@ -34,6 +34,7 @@ from pyquda_measurement_utils.fermion_bilinear_basis import (
     symmetric_vector_emt,
 )
 from pyquda_measurement_utils.tools import (
+    _sum_spatial_projected,
     array_to_numpy,
     mpi_print,
     mpi_timer_print,
@@ -164,11 +165,9 @@ class ProtonQuarkEMT(FlowedFermionBilinearKernel):
 
     @classmethod
     def _project_gamma_scalars_to_qt(cls, scalar_fields, phases_3pt, t0):
-        slice_t = core.gatherLattice(
+        slice_t = _sum_spatial_projected(
             array_to_numpy(contract("qwtzyx,gwtzyx->gqt", phases_3pt, scalar_fields)),
-            [2, -1, -1, -1],
         )
-        slice_t = getMPIComm().bcast(slice_t, root=0)
         return np.roll(np.asarray(slice_t), -t0, axis=-1)
 
     def get_C3_primitive_bilinears_proton(

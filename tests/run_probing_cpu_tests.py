@@ -57,7 +57,7 @@ def install_stubs(pyquda_root):
                      fermionToLink=unavailable, linkToFermion=unavailable)
     gamma_api = module("pyquda_utils.gamma", gamma=gamma.DeGrandRossiMatrix.matrix)
     module("pyquda_utils.fft", fft=unavailable, ifft=unavailable)
-    source = module("pyquda_utils.source")
+    source = module("pyquda_utils.source", sequential12=unavailable)
     module("pyquda_utils", core=core, phase=phase, convert=convert, gamma=gamma_api, source=source)
 
 

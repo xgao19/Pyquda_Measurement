@@ -1483,3 +1483,39 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   Perlmutter B24 was neither
   enabled nor submitted. Reusable environment facts in SESSION_MEMORY.md did
   not change.
+
+
+## 2026-10-16: Share spatial Allreduce with connected proton and pion EMT
+
+- Moved the existing global-time-buffer spatial reduction into `tools.py` and
+  reused it for disconnected EMT and connected proton/pion 3pt projections.
+  Replaced the connected Gather+broadcast pairs without a legacy fallback;
+  retained the global time ordering, source-time roll, 2pt paths and output
+  schemas. Extended CPU tests to both connected projections and the a050 MPI
+  grid, with fail-loud sequential-source import stubs for CPU-only testing.
+- Proton Aurora job 8933720 ran original and develop on the same ten nodes,
+  a050 stream b cfg600, dt21, F10 and two sources. Direct A/B comparison passed
+  at rtol=1e-10 and atol=1e-12: 2pt was identical and maximum 3pt relative L2
+  difference was 1.59e-16. The job exited 1 only because both reruns failed the
+  strict historical-production comparison: maximum relative L2 differences
+  were 5.34e-9 for 2pt and 3.09e-9 for 3pt. These common baseline differences
+  were not introduced by Allreduce; their exact origin remains undetermined.
+  For the second source, primitive contraction decreased from 106.988 to
+  96.483 seconds and source total from 474.166 to 465.948 seconds.
+- Pion Aurora job 8933875 directly compared snapshots of Pyquda_Measurement
+  and Pyquda_Measurement_develop on ten nodes, a050 stream b cfg600, source
+  [47,51,53,63], dt21, 125 momenta and one Symanzik flow step. Exit status was
+  zero; all datasets and metadata passed the same strict tolerance. 2pt was
+  identical and maximum 3pt relative L2 difference was 1.67e-16. Accumulated
+  projection time fell from 1.868 to 0.921 seconds (18 calls), primitive
+  contraction from 10.356 to 9.114 seconds, and measurement total from 341.000
+  to 335.861 seconds. This one-source F1 test includes warmup/setup and does
+  not establish a full-production speedup.
+- Independent validation scripts/data remain outside this repository under
+  `run/l80c80a050/EMT_proton_connected_UD/benchmark/unpol_dt21_allreduce` and
+  `run/l80c80a050/develop/pion_emt_allreduce` in the shared workspace. Production
+  data/cache and the original measurement checkout were not modified.
+- Pre-commit regression passed the 202-test CPU/mock suite; the connected
+  algebra, projection, flow and HDF5 checks also passed 54 tests (overlapping
+  with that suite). Diff hygiene passed. Reusable environment facts in
+  SESSION_MEMORY.md did not change.

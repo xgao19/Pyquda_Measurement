@@ -30,6 +30,7 @@ from pyquda_measurement_utils.pion_utils_vibe_develop import (
     contract_pion_2pt,
 )
 from pyquda_measurement_utils.tools import (
+    _sum_spatial_projected,
     array_to_numpy,
     mpi_print,
     mpi_timer_print,
@@ -97,8 +98,7 @@ class QuarkEMT(FlowedFermionBilinearKernel):
     @classmethod
     def _project_gamma_scalar_fields(cls, scalar_fields, phases_3pt, t0):
         projected = contract("qwtzyx,gwtzyx->gqt", phases_3pt, scalar_fields)
-        slice_t = core.gatherLattice(array_to_numpy(projected), [2, -1, -1, -1])
-        slice_t = getMPIComm().bcast(slice_t, root=0)
+        slice_t = _sum_spatial_projected(array_to_numpy(projected))
         return np.roll(np.asarray(slice_t), -t0, axis=-1)
 
     def get_C3_primitive_bilinears(
