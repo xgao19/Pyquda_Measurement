@@ -87,6 +87,7 @@ from pyquda_measurement_utils.pion_utils_vibe_develop import (
 )
 from pyquda_measurement_utils.tools import (
     _get_xp_from_array,
+    _reduce_spatial_projected,
     array_to_numpy,
     mpi_print,
 )
@@ -181,7 +182,7 @@ class pion_soft_factor:
         prop_bw_src_sink = xp.einsum("ik,tzyxklca,ln->tzyxinca", src_gamma, prop_bw_bar, sink_gamma, optimize=True)
         corr_local = xp.einsum("tzyxjiab,tzyxilba->tzyx", prop_bw_src_sink, prop_fw_t, optimize=True)
         corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-        return core.gatherLattice(array_to_numpy(corr_t), [0, -1, -1, -1])
+        return _reduce_spatial_projected(array_to_numpy(corr_t))
 
     def contract_tmdwf_check(self, latt_info, prop_fw, prop_bw, pion_mom, pion_pair_label):
         xp = _get_xp_from_array(prop_fw.data)
@@ -202,8 +203,10 @@ class pion_soft_factor:
                     left = xp.einsum("ij,tzyxjlca->tzyxilca", src_gamma, shifted_bar, optimize=True)
                     corr_local = xp.einsum("tzyxjiab,tzyxilba->tzyx", left, prop_fw_t, optimize=True)
                     corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-                    corr_list.append(core.gatherLattice(array_to_numpy(corr_t), [0, -1, -1, -1]))
-        return np.asarray(corr_list)
+                    corr_global = _reduce_spatial_projected(array_to_numpy(corr_t))
+                    if latt_info.mpi_rank == 0:
+                        corr_list.append(corr_global)
+        return np.asarray(corr_list) if latt_info.mpi_rank == 0 else None
 
     def contract_soft_factor(self, latt_info, prop_fw, prop_bw_src, prop_sink_bw, prop_sink_fw, pion_mom):
         xp = _get_xp_from_array(prop_fw.data)
@@ -268,7 +271,7 @@ class pion_soft_factor:
                             optimize=True,
                         )
                         corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-                        corr_global = core.gatherLattice(array_to_numpy(corr_t), [0, -1, -1, -1])
+                        corr_global = _reduce_spatial_projected(array_to_numpy(corr_t))
                         if latt_info.mpi_rank == 0:
                             corr_collect[isrc, igm, idir, bT] = corr_global
                 del (

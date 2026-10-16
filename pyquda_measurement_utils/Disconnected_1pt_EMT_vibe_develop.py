@@ -30,6 +30,7 @@ from pyquda_measurement_utils.io_corr import (
 from pyquda_measurement_utils.tools import (
     _asarray_on_queue,
     _get_xp_from_array,
+    _reduce_spatial_projected,
     _sum_spatial_projected,
     array_to_numpy,
     mpi_print,
@@ -1366,11 +1367,10 @@ class EMTDisconnectedGluon1pt:
                             contract("...ab,...ba->...", F_mr, F_nr), tmp
                         )
 
-                    slice_t = core.gatherLattice(
+                    slice_t = _reduce_spatial_projected(
                         array_to_numpy(
                             contract("qwtzyx, wtzyx -> qt", phases_3pt, tmp)
-                        ),
-                        [1, -1, -1, -1],
+                        )
                     )
                     if U.latt_info.mpi_rank == 0:
                         Tmunu_t[mu, nu, :, step, :] += 2.0 * slice_t

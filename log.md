@@ -1554,3 +1554,43 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   checks. Targeted CPU checks passed 37 tests (overlapping with the suite), with
   two GPU-backend tests deliberately deselected on the login node. Reusable
   SESSION_MEMORY.md facts did not change.
+
+
+## 2026-10-16: Use root-only Reduce for pion soft factor and gluon EMT
+
+- Replaced the three pion soft-factor Gather calls (wall 2pt, TMDWF check,
+  four-point contraction) and the disconnected gluon EMT projection with the
+  existing global-time-preserving spatial Reduce helper. TMDWF now returns
+  None on non-root ranks instead of an object array of None. Preserved root
+  output axes, gluon 2/Vs normalization, flow schedule, HDF5 schema and gluon's
+  existing zero-array return on non-root ranks. No additional batching or
+  legacy reduction fallback was introduced.
+- Added root/non-root CPU checks for all four callers, output-axis ordering,
+  gluon normalization, flow bookkeeping and root-only writing. Pre-commit
+  CPU/mock regression passed 219 tests; the earlier focused soft-factor and
+  HDF5/schema checks passed 17 tests. Diff hygiene checks passed.
+- Aurora job 8936660 completed with exit status zero on ten nodes, 100 ranks,
+  full a050 geometry and grid [1,5,4,5]. Actual original/develop snapshots ran
+  serially using identical inputs and copies of the same initial tuning cache.
+  Soft-factor tests used four deterministic random propagators, two pion pairs,
+  seven gamma pairs, nonzero pion momentum and zero/nonzero displacements.
+  Gluon EMT used the real stream-b cfg600 HYP1 gauge, 27 momenta, and flow times
+  0 and 0.207936. Each case ran one warmup and two measured repeats.
+- All 48 datasets passed at rtol=1e-10 and atol=1e-12; input hashes and HDF5
+  metadata matched. Maximum absolute difference was 4.80e-10 for the combined
+  correlator file and 1.11e-16 for native gluon files; maximum relative L2
+  difference was 1.77e-16. Both modified modules match the validated snapshot.
+- Median steady-repeat kernel times (original -> develop, seconds): wall 2pt
+  0.185 -> 0.179; TMDWF 2.147 -> 2.063; four-point 2.978 -> 2.976; gluon with
+  flow/IO 11.293 -> 11.298. No substantial overall speedup is established;
+  four-point and gluon reduction-stage timings were slower in this small test.
+  Gluon time is dominated by flow (~8.32 seconds) and clover (~2.64 seconds).
+  Random-field soft-factor tests exclude inversion and do not measure full
+  production throughput.
+- Initial job 8936461 failed in the original gluon contraction before Reduce
+  was tested: the independent harness omitted gauge.toDevice(), mixing CPU
+  temporaries with dpnp clover fields. Matching the existing application's
+  device setup fixed the harness without changing either package for this
+  issue. Scripts, snapshots and outputs remain outside the repository under
+  run/l80c80a050/develop/soft_factor_gluon_reduce. Production data/cache and the
+  original checkout remain unchanged. SESSION_MEMORY.md was not changed.

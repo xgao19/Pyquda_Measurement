@@ -11,6 +11,8 @@ import pyquda
 from pyquda_measurement_utils import tools
 import pyquda_measurement_utils.pion_utils_vibe_develop as pion
 import pyquda_measurement_utils.Disconnected_1pt_qTMD_vibe_develop as disconnected
+import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft_factor
+import pyquda_measurement_utils.Disconnected_1pt_EMT_vibe_develop as emt
 
 
 @pytest.mark.parametrize('grid', [(1, 1, 1, 1), (2, 1, 1, 3), (1, 5, 4, 5)])
@@ -150,3 +152,105 @@ def test_disconnected_shards_do_not_broadcast_or_allocate_on_nonroot(monkeypatch
     else:
         assert writes == []
         assert (1, 1, 16, 1, 4) not in allocations
+
+
+@pytest.mark.parametrize('rank', [0, 1])
+def test_soft_factor_reductions_preserve_axes_and_root_results(monkeypatch, rank):
+    rng = np.random.default_rng(82)
+    shape = (2, 1, 2, 2, 4, 4, 3, 3)
+    info = SimpleNamespace(mpi_rank=rank, global_size=[2, 2, 1, 2])
+
+    class Prop:
+        def __init__(self, data):
+            self.data = data
+
+        def copy(self):
+            return Prop(self.data.copy())
+
+        def lexico(self, multi):
+            assert multi is False
+            return self.data
+
+        def shift(self, steps, direction):
+            return Prop(np.roll(self.data, -steps, axis=3 - direction))
+
+    props = [Prop(rng.normal(size=shape) + 1j * rng.normal(size=shape)) for _ in range(4)]
+    measurement = soft_factor.pion_soft_factor({
+        'quark_mom': [[0, 0, 1]], 'bT_dir': [0, 1], 'bT_length': 1,
+        'bz_length': 1, 'tsep_list': [3],
+        'pion_channel_pairs': {'5': (soft_factor.G5, soft_factor.G5)},
+        'gamma_channel_pairs': {'5': ('5', '5'), 'XY': ('X', 'Y')},
+    })
+    monkeypatch.setattr(measurement, 'apply_phase', lambda prop, *args: prop.copy())
+    monkeypatch.setattr(soft_factor, 'mpi_print', lambda *args: None)
+    projected = []
+
+    def reduce(local):
+        projected.append(local.copy() * 3)
+        return projected[-1] if rank == 0 else None
+
+    monkeypatch.setattr(soft_factor, '_reduce_spatial_projected', reduce)
+    wall = measurement.contract_wall_2pt(info, *props[:2], [0, 0, 1], '5')
+    tmdwf = measurement.contract_tmdwf_check(info, *props[:2], [0, 0, 1], '5')
+    corr, pion_labels, gamma_labels = measurement.contract_soft_factor(info, *props, [0, 0, 1])
+    assert len(projected) == 1 + 8 + 8
+    assert pion_labels == ['5'] and gamma_labels == ['5', 'XY']
+    if rank == 0:
+        np.testing.assert_array_equal(wall, projected[0])
+        np.testing.assert_array_equal(tmdwf, np.stack(projected[1:9]))
+        expected = np.stack(projected[9:]).reshape(2, 2, 1, 2, 2).transpose(2, 3, 0, 1, 4)
+        np.testing.assert_array_equal(corr, expected)
+    else:
+        assert wall is None and tmdwf is None and corr is None
+
+
+@pytest.mark.parametrize('rank', [0, 1])
+def test_gluon_reduce_keeps_normalization_flow_and_nonroot_zeros(monkeypatch, rank, tmp_path):
+    info = SimpleNamespace(mpi_rank=rank, size=[2, 1, 1, 2],
+                           global_size=[6, 1, 1, 2], t_boundary=-1)
+    gauge = SimpleNamespace(latt_info=info, data=np.zeros(1, complex), location='numpy')
+    gauge.copy = lambda: gauge
+    shape = (2, 2, 1, 1, 1)
+    rng = np.random.default_rng(83)
+    fields = [[rng.normal(size=shape + (3, 3)) for _ in range(4)] for _ in range(4)]
+    phases = rng.normal(size=(3,) + shape) + 1j * rng.normal(size=(3,) + shape)
+    monkeypatch.setattr(emt.phase, 'MomentumPhase',
+                        lambda info: SimpleNamespace(getPhases=lambda *args: phases))
+    monkeypatch.setattr(emt, 'arrayZeros', lambda shape, dtype, location: np.zeros(shape, dtype))
+    monkeypatch.setattr(emt, 'mpi_print', lambda *args: None)
+    measurement = emt.EMTDisconnectedGluon1pt({
+        'qext': [[0, 0, 0, 0], [1, 0, 0, 0], [-1, 0, 0, 0]],
+        'flow_type': 'symanzik', 'flow_epsilon': 0.1, 'flow_steps': 1,
+        'config_num': 600,
+    })
+    monkeypatch.setattr(measurement, '_all_F_clover_traceless', lambda gauge: fields)
+    advances = []
+    monkeypatch.setattr(measurement, '_advance_flowed_gauge', lambda *args: advances.append(args[1:]))
+    projected = []
+
+    def reduce(local):
+        projected.append(local.copy() * 3)
+        return projected[-1] if rank == 0 else None
+
+    monkeypatch.setattr(emt, '_reduce_spatial_projected', reduce)
+    writes = []
+    monkeypatch.setattr(emt, 'save_emt_gluon_1pt_hdf5',
+                        lambda tag, data, attrs: writes.append((data.copy(), attrs)))
+    result = measurement.flowed_1pt(gauge, str(tmp_path / 'gluon'))
+    assert len(projected) == 20
+    assert advances == [(0, 0.1, 1, 1), (1, 0.1, 1, 1)]
+    expected = np.zeros((4, 4, 3, 2, 2), complex)
+    if rank == 0:
+        index = 0
+        for step in range(2):
+            for mu in range(4):
+                for nu in range(mu, 4):
+                    expected[mu, nu, :, step] = 2 * projected[index] / 6
+                    index += 1
+        assert len(writes) == 1
+        np.testing.assert_array_equal(writes[0][0], expected)
+        assert writes[0][1]['volume_norm'] == 6
+        np.testing.assert_array_equal(writes[0][1]['flow_times'], [0., 0.1])
+    else:
+        assert writes == []
+    np.testing.assert_array_equal(result, expected)
