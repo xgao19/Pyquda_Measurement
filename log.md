@@ -1594,3 +1594,55 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   issue. Scripts, snapshots and outputs remain outside the repository under
   run/l80c80a050/develop/soft_factor_gluon_reduce. Production data/cache and the
   original checkout remain unchanged. SESSION_MEMORY.md was not changed.
+
+
+## 2026-10-17: Optimize pion soft factor and use 36-component TMDWF shifts
+
+- Reworked four-point blocks into volume-batched 12x12 matrix products with
+  fixed source/sink operands prepared once per contraction. Share the spatial
+  contraction across gamma channels and project the resulting small spin
+  tensor. Walk separations incrementally; use local negative rolls only for
+  spatial axes with one MPI partition, otherwise use global propagator shifts.
+  Batch projected outputs into one root-only Reduce per four-point call and
+  one Reduce per TMDWF channel, preserving phases, axes and output schemas.
+- Prepare two 36-complex-component/site TMDWF operands before the displacement
+  loops. Shift only the compact backward operand and directly contract it with
+  the fixed forward operand. Positive PyQUDA shifts read the next coordinate:
+  negative local roll, send the first face to the minus neighbor, receive from
+  the plus neighbor into the last face. Distributed compact shifts use
+  contiguous host-staged Sendrecv and queue-aware device conversion. No FFT,
+  full-field gather, persistent field cache or legacy fallback was added.
+- Fixed wall-propagator attributes to use one serial HDF5 writer after the
+  collective save. Broadcast attribute failures so all ranks raise consistently.
+  Preserve owning SYCL queues for backend matrices and result allocations.
+- Added CPU coverage for matrix/block algebra, generic complex source gamma,
+  compact-component equivalence, shift signs, mixed spatial/time grids,
+  periodic wraps, neighbor faces, source immutability, changing inputs,
+  collective counts, root-only results and attribute-error propagation.
+- Aurora validation 8936958 verified the preceding four-point optimization;
+  8937382 verified the complete implementation including 36-component TMDWF.
+  Both exited zero. The latter used 10 nodes, 100 ranks, full 80^4 geometry and
+  grid [1,5,4,5], comparing untouched original and modified develop snapshots.
+  Fifteen cases each ran one warmup, two clean repeats and a separate profiled
+  repeat. All 22 HDF5 files / 3064 datasets passed at rtol=1e-10, atol=1e-12;
+  maximum absolute difference was 2.1904e-8 and relative L2 difference 2.2024e-14.
+  Input hashes, repeat consistency, collective IO roundtrip and expected
+  attribute-error propagation passed. Compact shifts matched actual PyQUDA
+  shifts exactly on a small 100-rank lattice for x/y/z displacements 0..11,
+  including global periodic wraps. The working module matches the job snapshot.
+- Clean median TMDWF times (two pion channels, original -> develop, seconds):
+  long displacement 143.853 -> 12.528; zero-momentum short displacement
+  4.051 -> 0.926; z-boundary case 138.879 -> 3.690. Long four-point cases took
+  about 9.28-9.32 seconds versus 80.90-81.60 originally. These total gains also
+  include prior reduction and incremental-shift changes. Against the preceding
+  develop job, long TMDWF improved from 60.468 to 12.528 seconds (4.83x) and
+  z-boundary TMDWF from 17.376 to 3.690 (4.71x); those are cross-job references,
+  not interleaved timing controls. Synthetic propagators exclude inversions;
+  no full-production throughput or Perlmutter validation is claimed.
+- Independent scripts, code snapshots, staged timing and comparison reports
+  remain outside this repository at run/l80c80a050/develop/soft_factor_optimized
+  and run/l80c80a050/develop/tmdwf_components36. Production data/cache and the
+  original repository are unchanged. No generated benchmark artifacts are
+  committed. SESSION_MEMORY.md is unchanged.
+- Pre-commit CPU/mock regression passed 235 tests, with four additional shared
+  pion structure checks passing separately. Diff hygiene checks passed.

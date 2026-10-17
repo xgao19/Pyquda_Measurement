@@ -9,6 +9,7 @@ from pyquda_measurement_utils.flowed_fermion_bilinear_vibe_develop import (
 from pyquda_measurement_utils.pion_EMT_vibe_develop import QuarkEMT
 from pyquda_measurement_utils.proton_EMT_vibe_develop import ProtonQuarkEMT
 from pyquda_measurement_utils.pion_soft_factor_vibe_develop import pion_soft_factor
+from pyquda_measurement_utils.pion_soft_factor_vibe_develop import _shifted_lexico
 import pyquda_measurement_utils.pion_current_background_response_vibe_develop as response
 from application.qTMDWF_CG import qTMDWF_runner
 
@@ -21,10 +22,10 @@ def test_connected_emt_uses_lightweight_bilinear_base():
 
 
 def test_soft_factor_uses_global_propagator_shift():
-    source = inspect.getsource(pion_soft_factor.contract_soft_factor)
-    assert "xp.roll" not in source
-    assert "phased_sink_backward.shift(bT, bT_dir)" in source
-    assert "prop_bw_src.shift(bT, bT_dir)" in source
+    source = inspect.getsource(_shifted_lexico)
+    assert "getGridSize()[direction] == 1" in source
+    assert "shifted.shift(1, direction)" in source
+    assert "xp.roll(shifted, -1, axis=3 - direction)" in source
 
 
 def test_qtmdwf_runner_uses_exact_log_and_one_root_writer():

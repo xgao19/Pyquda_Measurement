@@ -74,6 +74,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from pyquda import getGridCoord, getGridSize, getMPIComm
+from pyquda_comm import getRankFromCoord
 from pyquda_utils import core, gamma, phase, source
 
 from pyquda_measurement_utils.fermion_bilinear_basis import (
@@ -84,6 +86,7 @@ from pyquda_measurement_utils.io_corr import ensure_parent_dir
 from pyquda_measurement_utils.pion_utils_vibe_develop import (
     matrix_on_backend,
     matrix_stack_on_backend,
+    zeros_on_backend,
 )
 from pyquda_measurement_utils.tools import (
     _get_xp_from_array,
@@ -106,6 +109,112 @@ soft_factor_pion_channel_pairs = {
     "Z5-X5__Z5-X5": (_z5_minus_x5, _z5_minus_x5),
 }
 G5 = gamma.gamma(15)
+
+
+def _spin_color_matrix(xp, prop):
+    """Pack lexicographic spin/color indices into volume-batched 12x12 matrices."""
+    return xp.transpose(prop, (0, 1, 2, 3, 4, 6, 5, 7)).reshape(-1, 12, 12)
+
+
+def _soft_factor_spin_matrices(gamma_ls, gamma5, reference):
+    xp = _get_xp_from_array(reference)
+    eye3 = matrix_on_backend(np.eye(3, dtype=reference.dtype), reference)
+    spin = xp.matmul(gamma_ls, gamma5)
+    spin12 = xp.einsum("sil,ba->sialb", spin, eye3).reshape(-1, 12, 12)
+    gamma5_12 = xp.einsum("mn,ba->mbna", gamma5, eye3).reshape(12, 12)
+    return spin12, gamma5_12
+
+
+def _unpack_soft_factor_block(xp, packed, spatial):
+    block = packed.reshape(packed.shape[0], *spatial, 4, 3, 4, 3)
+    return xp.transpose(block, (0, 1, 2, 3, 4, 5, 7, 6, 8))
+
+
+def _prepare_soft_factor_left(left, gamma_ls, gamma5):
+    """Prepare the source-side operand once per contraction, not per shift."""
+    xp = _get_xp_from_array(left)
+    spin12, gamma5_12 = _soft_factor_spin_matrices(gamma_ls, gamma5, left)
+    factor = xp.matmul(_spin_color_matrix(xp, left)[None], spin12[:, None])
+    return factor, gamma5_12, left.shape[:4]
+
+
+def _soft_factor_block_from_left(prepared, right):
+    factor, gamma5_12, spatial = prepared
+    xp = _get_xp_from_array(right)
+    right_t = xp.swapaxes(xp.matmul(gamma5_12, _spin_color_matrix(xp, right)), -1, -2)
+    return _unpack_soft_factor_block(xp, xp.matmul(factor, right_t[None]), spatial)
+
+
+def _prepare_soft_factor_right(gamma_ls, gamma5, right):
+    """Prepare the fixed sink-side operand once per sink separation."""
+    xp = _get_xp_from_array(right)
+    spin12, gamma5_12 = _soft_factor_spin_matrices(gamma_ls, gamma5, right)
+    right_t = xp.swapaxes(xp.matmul(gamma5_12, _spin_color_matrix(xp, right)), -1, -2)
+    return xp.matmul(spin12[:, None], right_t[None]), right.shape[:4]
+
+
+def _soft_factor_block_from_right(left, prepared):
+    factor, spatial = prepared
+    xp = _get_xp_from_array(left)
+    packed = xp.matmul(_spin_color_matrix(xp, left)[None], factor)
+    return _unpack_soft_factor_block(xp, packed, spatial)
+
+
+def _shifted_lexico(prop, length, direction):
+    """Walk positive separations; only rank-local spatial axes may use roll."""
+    xp = _get_xp_from_array(prop.data)
+    if direction in (0, 1, 2) and getGridSize()[direction] == 1:
+        shifted = prop.lexico(False)
+        for displacement in range(length + 1):
+            if displacement:
+                shifted = xp.roll(shifted, -1, axis=3 - direction)
+            yield shifted
+    else:
+        shifted = prop
+        for displacement in range(length + 1):
+            if displacement:
+                shifted = shifted.shift(1, direction)
+            yield shifted.lexico(False)
+
+
+def _tmdwf_components(forward, backward, src_gamma, gamma5):
+    """Prepare the two 36-component operands of the legacy TMDWF bilinear.
+
+    The repeated source-spin sums can be taken before ordinary coordinate
+    shifts. Conjugation is already included in the backward operand.
+    """
+    xp = _get_xp_from_array(forward)
+    backward_bar = xp.einsum("ij,tzyxmlca,kl->tzyxkjca", gamma5, backward.conj(), gamma5, optimize=True)
+    left = xp.einsum("ij,tzyxjlca->tzyxilca", src_gamma, backward_bar, optimize=True)
+    left_c = xp.einsum("tzyxjiab->tzyxiab", left, optimize=True)
+    forward_c = xp.swapaxes(xp.einsum("tzyxilba->tzyxiba", forward, optimize=True), -1, -2)
+    return left_c, forward_c
+
+
+def _shift_tmdwf_components(components, direction):
+    """Shift a compact lexicographic field by +1, matching Propagator.shift.
+
+    Positive shifts read the next coordinate (negative roll). Only one face
+    is host-staged for distributed axes; no full field is gathered or cached.
+    """
+    xp = _get_xp_from_array(components)
+    axis = 3 - direction
+    shifted = xp.roll(components, -1, axis=axis)
+    grid = getGridSize()
+    if grid[direction] != 1:
+        coord = list(getGridCoord())
+        dest, source = coord.copy(), coord.copy()
+        dest[direction] = (coord[direction] - 1) % grid[direction]
+        source[direction] = (coord[direction] + 1) % grid[direction]
+        first, last = [slice(None)] * components.ndim, [slice(None)] * components.ndim
+        first[axis], last[axis] = 0, -1
+        sendbuf = np.ascontiguousarray(array_to_numpy(components[tuple(first)]))
+        recvbuf = np.empty_like(sendbuf)
+        getMPIComm().Sendrecv(sendbuf, dest=getRankFromCoord(dest),
+                              recvbuf=recvbuf, source=getRankFromCoord(source))
+        incoming = matrix_on_backend(recvbuf, components)
+        shifted[tuple(last)] = incoming
+    return shifted
 
 
 def momentum_tag(momentum):
@@ -152,9 +261,21 @@ class pion_soft_factor:
         ensure_parent_dir(save_h5)
         prop.saveH5(save_h5, "propagator")
         if attrs:
-            with h5py.File(save_h5, "a") as f:
-                for key, value in attrs.items():
-                    f.attrs[key] = value
+            comm = getMPIComm()
+            comm.Barrier()
+            error = None
+            root_exception = None
+            if comm.Get_rank() == 0:
+                try:
+                    with h5py.File(save_h5, "a") as f:
+                        for key, value in attrs.items():
+                            f.attrs[key] = value
+                except Exception as exc:
+                    root_exception = exc
+                    error = f"{type(exc).__name__}: {exc}"
+            error = comm.bcast(error, root=0)
+            if error is not None:
+                raise RuntimeError(f"Failed to write wall-propagator attributes: {error}") from root_exception
 
     def load_wall_propagator(self, tag):
         return core.LatticePropagator.loadH5(tag + ".h5", "propagator")
@@ -190,23 +311,23 @@ class pion_soft_factor:
         src_gamma = matrix_on_backend(src_matrix, prop_fw.data)
         gamma5 = matrix_on_backend(G5, prop_fw.data)
         prop_fw_phase = self.apply_phase(prop_fw, [-pion_mom[0], -pion_mom[1], -pion_mom[2]], 1)
-        prop_fw_t = prop_fw_phase.lexico(False)
-        corr_list = []
-        for bT_dir in self.bT_dir:
-            shifted_bw = prop_bw.copy()
+        left_c, forward_c = _tmdwf_components(
+            prop_fw_phase.lexico(False), prop_bw.lexico(False), src_gamma, gamma5)
+        local_shape = (len(self.bT_dir), self.bT_length + 1, self.bz_length + 1, latt_info.size[3])
+        corr_local_collect = zeros_on_backend(local_shape, prop_fw.data.dtype, xp, prop_fw.data)
+        for idir, bT_dir in enumerate(self.bT_dir):
+            shifted_bw = left_c
             for bT in range(self.bT_length + 1):
                 if bT != 0:
-                    shifted_bw = prop_bw.shift(bT, bT_dir)
+                    shifted_bw = _shift_tmdwf_components(shifted_bw, bT_dir)
+                shifted = shifted_bw
                 for bz in range(self.bz_length + 1):
-                    shifted = shifted_bw if bz == 0 else shifted_bw.shift(bz, 2)
-                    shifted_bar = xp.einsum("ij,tzyxmlca,kl->tzyxkjca", gamma5, shifted.lexico(False).conj(), gamma5, optimize=True)
-                    left = xp.einsum("ij,tzyxjlca->tzyxilca", src_gamma, shifted_bar, optimize=True)
-                    corr_local = xp.einsum("tzyxjiab,tzyxilba->tzyx", left, prop_fw_t, optimize=True)
-                    corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-                    corr_global = _reduce_spatial_projected(array_to_numpy(corr_t))
-                    if latt_info.mpi_rank == 0:
-                        corr_list.append(corr_global)
-        return np.asarray(corr_list) if latt_info.mpi_rank == 0 else None
+                    if bz:
+                        shifted = _shift_tmdwf_components(shifted, 2)
+                    corr_t = xp.einsum("tzyxiab,tzyxiab->t", shifted, forward_c, optimize=True)
+                    corr_local_collect[idir, bT, bz] = corr_t
+        corr_global = _reduce_spatial_projected(array_to_numpy(corr_local_collect))
+        return corr_global.reshape(-1, latt_info.global_size[3]) if latt_info.mpi_rank == 0 else None
 
     def contract_soft_factor(self, latt_info, prop_fw, prop_bw_src, prop_sink_bw, prop_sink_fw, pion_mom):
         xp = _get_xp_from_array(prop_fw.data)
@@ -240,46 +361,28 @@ class pion_soft_factor:
             [gamma2_matrices[key] for key in gamma_pair_labels], prop_fw.data
         )
 
-        Gw = prop_fw.lexico(False)
-        Gw_dagger = prop_sink_fw.lexico(False)
         phased_sink_backward = self.apply_phase(
             prop_sink_bw,
             [-2 * pion_mom[0], -2 * pion_mom[1], -2 * pion_mom[2]],
             1,
         )
-        Gw_dagger_conj = Gw_dagger.conj()
-
-        shape = (len(pion_pair_labels), len(gamma_pair_labels), len(self.bT_dir), self.bT_length + 1, latt_info.global_size[3])
-        corr_collect = np.empty(shape, dtype=np.complex128) if latt_info.mpi_rank == 0 else None
+        source_left = _prepare_soft_factor_left(prop_fw.lexico(False), src_ls, gamma5)
+        sink_right = _prepare_soft_factor_right(sink_ls, gamma5, prop_sink_fw.lexico(False).conj())
+        local_shape = (len(pion_pair_labels), len(gamma_pair_labels), len(self.bT_dir), self.bT_length + 1, latt_info.size[3])
+        corr_local_collect = zeros_on_backend(local_shape, prop_fw.data.dtype, xp, prop_fw.data)
         for idir, bT_dir in enumerate(self.bT_dir):
-            for bT in range(self.bT_length + 1):
-                shifted_sink_backward = phased_sink_backward.shift(bT, bT_dir)
-                shifted_source_backward = prop_bw_src.shift(bT, bT_dir)
-                Gw_bperp_shift = shifted_sink_backward.lexico(False)
-                Gw_bperp_dagger_shift = shifted_source_backward.lexico(False).conj()
-                tmp_1 = xp.einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc", Gw, src_ls, gamma5, Gw_bperp_dagger_shift, gamma5, optimize=True)
-                tmp_2 = xp.einsum("tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc", Gw_bperp_shift, sink_ls, gamma5, Gw_dagger_conj, gamma5, optimize=True)
+            source_walk = _shifted_lexico(prop_bw_src, self.bT_length, bT_dir)
+            sink_walk = _shifted_lexico(phased_sink_backward, self.bT_length, bT_dir)
+            for bT, (source_shift, sink_shift) in enumerate(zip(source_walk, sink_walk)):
+                tmp_1 = _soft_factor_block_from_left(source_left, source_shift.conj())
+                tmp_2 = _soft_factor_block_from_right(sink_shift, sink_right)
                 for isrc in range(len(pion_pair_labels)):
-                    for igm in range(len(gamma_pair_labels)):
-                        mpi_print(latt_info, f"Contract pion soft factor bT={bT} dir={bT_dir} pion_pair={pion_pair_labels[isrc]} gamma_pair={gamma_pair_labels[igm]}")
-                        corr_local = xp.einsum(
-                            "tzyxjiba,ik,tzyxklba,lj->tzyx",
-                            tmp_1[isrc],
-                            gamma2_ls[igm],
-                            tmp_2[isrc],
-                            gamma1_ls[igm],
-                            optimize=True,
-                        )
-                        corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-                        corr_global = _reduce_spatial_projected(array_to_numpy(corr_t))
-                        if latt_info.mpi_rank == 0:
-                            corr_collect[isrc, igm, idir, bT] = corr_global
-                del (
-                    shifted_sink_backward,
-                    shifted_source_backward,
-                    Gw_bperp_shift,
-                    Gw_bperp_dagger_shift,
-                    tmp_1,
-                    tmp_2,
-                )
+                    color_spin = xp.einsum("tzyxjiba,tzyxklba->tjikl", tmp_1[isrc], tmp_2[isrc], optimize=True)
+                    corr_by_gamma = xp.einsum("tjikl,gik,glj->gt", color_spin, gamma2_ls, gamma1_ls, optimize=True)
+                    corr_local_collect[isrc, :, idir, bT] = corr_by_gamma
+                    mpi_print(latt_info, f"Contract pion soft factor bT={bT} dir={bT_dir} pion_pair={pion_pair_labels[isrc]} gamma_pairs={len(gamma_pair_labels)}")
+                del tmp_1, tmp_2
+        corr_collect = _reduce_spatial_projected(array_to_numpy(corr_local_collect))
+        if latt_info.mpi_rank == 0:
+            corr_collect = np.asarray(corr_collect, dtype=np.complex128)
         return corr_collect, pion_pair_labels, gamma_pair_labels

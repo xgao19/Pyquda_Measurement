@@ -43,7 +43,7 @@ def install_stubs(pyquda_root):
            LatticeInfo=DeviceOnly, LatticeComplex=DeviceOnly,
            LatticeLink=DeviceOnly, LatticePropagator=DeviceOnly, MultiLatticeFermion=DeviceOnly)
     module("pyquda_comm", getArrayBackend=lambda: "numpy",
-           getMPIRank=unavailable, getCoordFromRank=unavailable)
+           getMPIRank=unavailable, getCoordFromRank=unavailable, getRankFromCoord=unavailable)
     module("pyquda_comm.array", arrayAsArray=lambda value, *args, **kwargs: np.asarray(value),
            arrayIdentity=unavailable, arrayZeros=unavailable)
     gamma_path = pyquda_root / "pyquda_core/pyquda/gamma.py"
@@ -78,6 +78,8 @@ def main():
         str(repo / "tests/test_disconnected_emt_flow_bookkeeping.py"),
         str(repo / "tests/test_emt_projected_allreduce.py"),
         str(repo / "tests/test_projected_reduce.py"),
+        str(repo / "tests/test_pion_soft_factor_optimized.py"),
+        str(repo / "tests/test_tmdwf_components36.py"),
         str(repo / "tests/test_disconnected_shard_utils.py"), "-q",
         str(repo / "tests/test_flowed_quark_ringed_norm.py"),
         str(repo / "tests/test_emt_disconnected_analysis.py"),

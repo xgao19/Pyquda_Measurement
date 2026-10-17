@@ -158,7 +158,7 @@ def test_disconnected_shards_do_not_broadcast_or_allocate_on_nonroot(monkeypatch
 def test_soft_factor_reductions_preserve_axes_and_root_results(monkeypatch, rank):
     rng = np.random.default_rng(82)
     shape = (2, 1, 2, 2, 4, 4, 3, 3)
-    info = SimpleNamespace(mpi_rank=rank, global_size=[2, 2, 1, 2])
+    info = SimpleNamespace(mpi_rank=rank, size=[2, 2, 1, 2], global_size=[2, 2, 1, 2])
 
     class Prop:
         def __init__(self, data):
@@ -183,6 +183,7 @@ def test_soft_factor_reductions_preserve_axes_and_root_results(monkeypatch, rank
     })
     monkeypatch.setattr(measurement, 'apply_phase', lambda prop, *args: prop.copy())
     monkeypatch.setattr(soft_factor, 'mpi_print', lambda *args: None)
+    monkeypatch.setattr(soft_factor, 'getGridSize', lambda: [1, 1, 1, 1])
     projected = []
 
     def reduce(local):
@@ -193,13 +194,12 @@ def test_soft_factor_reductions_preserve_axes_and_root_results(monkeypatch, rank
     wall = measurement.contract_wall_2pt(info, *props[:2], [0, 0, 1], '5')
     tmdwf = measurement.contract_tmdwf_check(info, *props[:2], [0, 0, 1], '5')
     corr, pion_labels, gamma_labels = measurement.contract_soft_factor(info, *props, [0, 0, 1])
-    assert len(projected) == 1 + 8 + 8
+    assert len(projected) == 3
     assert pion_labels == ['5'] and gamma_labels == ['5', 'XY']
     if rank == 0:
         np.testing.assert_array_equal(wall, projected[0])
-        np.testing.assert_array_equal(tmdwf, np.stack(projected[1:9]))
-        expected = np.stack(projected[9:]).reshape(2, 2, 1, 2, 2).transpose(2, 3, 0, 1, 4)
-        np.testing.assert_array_equal(corr, expected)
+        np.testing.assert_array_equal(tmdwf, projected[1].reshape(8, 2))
+        np.testing.assert_array_equal(corr, projected[2])
     else:
         assert wall is None and tmdwf is None and corr is None
 
