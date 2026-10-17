@@ -1692,3 +1692,53 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   No generated benchmark artifacts are committed. SESSION_MEMORY.md is unchanged.
 - Pre-commit regression passed 244 CPU/mock tests and four additional shared
   pion structure checks. Diff hygiene checks passed.
+
+
+## 2026-10-17: Optimize connected nucleon CG qTMD and PDF contractions
+
+- Add `nucleon_qtmd_contractions.contract_nucleon_qtmd` for CG qTMD, CG PDF
+  and GI PDF. Pack the full propagator and sequential spin-color matrices into
+  lexicographic layout, reuse two CG shift buffers and packed neighbor faces,
+  and use host-staged nearest-neighbor Sendrecv. Zero displacements do not copy
+  the full field. Preserve signed shifts, transverse-direction resets and the
+  PDF negative-branch restart. GI PDF retains the existing covariant transport.
+- Project the untransformed 4x4 spin matrix using separable Cartesian momentum
+  phases, including global rank offsets and source origins. For qz=0, sum z
+  before the x/y projections. Reduce blocks of 16 Wilson indices for both
+  flavors to rank zero, then apply the small Gamma transform there. Preserve
+  full time extent, Wilson/momentum/Gamma ordering and root-only D/U results.
+  No sequential-source or smearing deduplication is included.
+- Add 25 CPU tests covering checkerboard/lexicographic packing, signed local
+  and distributed halo faces, all 2450 production CG displacements, both
+  momentum grids, nonzero rank/source offsets, all Gamma/flavor contractions,
+  partial reduction blocks, input immutability and nonroot output ownership.
+  Include these tests in the standard CPU/mock runner.
+- Aurora job 8938053 exited zero and reported VALIDATION PASSED using 10 nodes,
+  100 ranks, 80^4 geometry and grid [1,5,4,5]. It ran a byte-identical copy of
+  the standalone nucleon production ts18 driver against the new kernel for
+  two real b/600 sources, retaining 2pt, all 2450 CG qTMD Wilson indices and
+  both 49-displacement PDFs. Both modes used software_gradientflow_260930 and
+  independent copies of its matching EMT production QUDA cache. Earlier job
+  8937850 failed at initialization because the historical nucleon cache was
+  incompatible; the test cache seed was corrected without changing production.
+- All 14 same-name HDF5 pairs passed schema, metadata and numerical checks at
+  rtol=1e-10, atol=1e-12; dense 3pt correlations also passed relative L2 <= 1e-8.
+  The 2pt values are identical. Maximum 3pt relative L2 difference is
+  2.4353e-15 (maximum absolute difference 6.3810e-6). The committed kernel is
+  byte-identical to the successful job snapshot.
+- Second-source timings, with fine-stage synchronization disabled, were
+  743.844 -> 334.580 seconds overall (2.223x); CG qTMD 530.689 -> 136.924
+  seconds (3.876x), CG PDF 14.130 -> 4.506 seconds, GI PDF 16.582 -> 9.009
+  seconds. Inversions, sequential construction and smearing were unchanged.
+  Source 0 used separate detailed synchronized profiling; this two-source
+  test is not a statistical throughput study or a Perlmutter validation.
+- The standalone A/B drivers, detailed stage timers, job snapshots and reports
+  remain outside this repository under
+  `run/l80c80a050/develop/nucleon_qtmd_optimized`. The original checkout and
+  production driver/data/cache remain unchanged. The new kernel is used by the
+  independent candidate driver; existing application drivers are not switched
+  automatically. No benchmark outputs or caches are committed.
+  SESSION_MEMORY.md is unchanged because no stable conventions changed.
+- Pre-commit verification passed 269 CPU/mock regression tests and eight
+  independent benchmark instrumentation/driver-equivalence checks. Diff hygiene
+  checks passed.
