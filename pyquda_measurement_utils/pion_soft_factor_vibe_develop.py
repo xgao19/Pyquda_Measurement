@@ -161,60 +161,69 @@ def _soft_factor_block_from_right(left, prepared):
 
 
 def _shifted_lexico(prop, length, direction):
-    """Walk positive separations; only rank-local spatial axes may use roll."""
-    xp = _get_xp_from_array(prop.data)
-    if direction in (0, 1, 2) and getGridSize()[direction] == 1:
-        shifted = prop.lexico(False)
-        for displacement in range(length + 1):
-            if displacement:
-                shifted = xp.roll(shifted, -1, axis=3 - direction)
-            yield shifted
-    else:
-        shifted = prop
-        for displacement in range(length + 1):
-            if displacement:
-                shifted = shifted.shift(1, direction)
-            yield shifted.lexico(False)
+    """Convert once, then consume the lexicographic walk's temporary views."""
+    yield from _shifted_lexico_array(prop.lexico(False), length, direction)
 
 
 def _tmdwf_components(forward, backward, src_gamma, gamma5):
-    """Prepare the two 36-component operands of the legacy TMDWF bilinear.
+    """Prepare two nine-component operands of the legacy TMDWF bilinear.
 
-    The repeated source-spin sums can be taken before ordinary coordinate
-    shifts. Conjugation is already included in the backward operand.
+    Its remaining backward spin dependence factors as v[i] * left[a,b],
+    where v[i] = sum_j gamma5[j,i]. Absorb v into the forward operand before
+    any coordinate shifts. This factorization is specific to this bilinear,
+    not a compression of general propagators or four-point blocks.
     """
     xp = _get_xp_from_array(forward)
-    backward_bar = xp.einsum("ij,tzyxmlca,kl->tzyxkjca", gamma5, backward.conj(), gamma5, optimize=True)
-    left = xp.einsum("ij,tzyxjlca->tzyxilca", src_gamma, backward_bar, optimize=True)
-    left_c = xp.einsum("tzyxjiab->tzyxiab", left, optimize=True)
-    forward_c = xp.swapaxes(xp.einsum("tzyxilba->tzyxiba", forward, optimize=True), -1, -2)
+    left_c = xp.einsum("nk,kl,tzyxmlab->tzyxab", src_gamma, gamma5, backward.conj(), optimize=True)
+    forward_c = xp.einsum("ji,tzyxilba->tzyxab", gamma5, forward, optimize=True)
     return left_c, forward_c
 
 
-def _shift_tmdwf_components(components, direction):
-    """Shift a compact lexicographic field by +1, matching Propagator.shift.
+def _shifted_lexico_array(field, length, direction):
+    """Yield positive shifts with reusable buffers and ordinary periodic halos.
 
-    Positive shifts read the next coordinate (negative roll). Only one face
-    is host-staged for distributed axes; no full field is gathered or cached.
+    The input is read-only. Later yields are temporary views into two work
+    buffers: callers must consume them before advancing this walk again.
+    Independent walks own separate buffers, including nested bT/bz walks.
     """
-    xp = _get_xp_from_array(components)
+    yield field
+    if length == 0:
+        return
+    xp = _get_xp_from_array(field)
     axis = 3 - direction
-    shifted = xp.roll(components, -1, axis=axis)
+    first, last = [slice(None)] * field.ndim, [slice(None)] * field.ndim
+    first[axis], last[axis] = 0, -1
+    first, last = tuple(first), tuple(last)
+    interior_dst, interior_src = [slice(None)] * field.ndim, [slice(None)] * field.ndim
+    interior_dst[axis], interior_src[axis] = slice(None, -1), slice(1, None)
+    interior_dst, interior_src = tuple(interior_dst), tuple(interior_src)
+    buffers = [zeros_on_backend(field.shape, field.dtype, xp, field) for _ in range(min(length, 2))]
     grid = getGridSize()
-    if grid[direction] != 1:
+    distributed = grid[direction] != 1
+    if distributed:
         coord = list(getGridCoord())
         dest, source = coord.copy(), coord.copy()
         dest[direction] = (coord[direction] - 1) % grid[direction]
         source[direction] = (coord[direction] + 1) % grid[direction]
-        first, last = [slice(None)] * components.ndim, [slice(None)] * components.ndim
-        first[axis], last[axis] = 0, -1
-        sendbuf = np.ascontiguousarray(array_to_numpy(components[tuple(first)]))
-        recvbuf = np.empty_like(sendbuf)
-        getMPIComm().Sendrecv(sendbuf, dest=getRankFromCoord(dest),
-                              recvbuf=recvbuf, source=getRankFromCoord(source))
-        incoming = matrix_on_backend(recvbuf, components)
-        shifted[tuple(last)] = incoming
-    return shifted
+        dest, source = getRankFromCoord(dest), getRankFromCoord(source)
+        comm = getMPIComm()
+        face_shape = field.shape[:axis] + field.shape[axis + 1:]
+        packed_face = zeros_on_backend(face_shape, field.dtype, xp, field)
+        recvbuf = np.empty(face_shape, dtype=field.dtype)
+    current = field
+    for displacement in range(1, length + 1):
+        out = buffers[(displacement - 1) % len(buffers)]
+        out[interior_dst] = current[interior_src]
+        if distributed:
+            packed_face[:] = current[first]
+            sendbuf = np.ascontiguousarray(array_to_numpy(packed_face))
+            comm.Sendrecv(sendbuf, dest=dest, recvbuf=recvbuf, source=source)
+            incoming = matrix_on_backend(recvbuf, field)
+            out[last] = incoming
+        else:
+            out[last] = current[first]
+        current = out
+        yield current
 
 
 def momentum_tag(momentum):
@@ -316,15 +325,9 @@ class pion_soft_factor:
         local_shape = (len(self.bT_dir), self.bT_length + 1, self.bz_length + 1, latt_info.size[3])
         corr_local_collect = zeros_on_backend(local_shape, prop_fw.data.dtype, xp, prop_fw.data)
         for idir, bT_dir in enumerate(self.bT_dir):
-            shifted_bw = left_c
-            for bT in range(self.bT_length + 1):
-                if bT != 0:
-                    shifted_bw = _shift_tmdwf_components(shifted_bw, bT_dir)
-                shifted = shifted_bw
-                for bz in range(self.bz_length + 1):
-                    if bz:
-                        shifted = _shift_tmdwf_components(shifted, 2)
-                    corr_t = xp.einsum("tzyxiab,tzyxiab->t", shifted, forward_c, optimize=True)
+            for bT, shifted_bw in enumerate(_shifted_lexico_array(left_c, self.bT_length, bT_dir)):
+                for bz, shifted in enumerate(_shifted_lexico_array(shifted_bw, self.bz_length, 2)):
+                    corr_t = xp.einsum("tzyxab,tzyxab->t", shifted, forward_c, optimize=True)
                     corr_local_collect[idir, bT, bz] = corr_t
         corr_global = _reduce_spatial_projected(array_to_numpy(corr_local_collect))
         return corr_global.reshape(-1, latt_info.global_size[3]) if latt_info.mpi_rank == 0 else None

@@ -79,7 +79,7 @@ def main():
         str(repo / "tests/test_emt_projected_allreduce.py"),
         str(repo / "tests/test_projected_reduce.py"),
         str(repo / "tests/test_pion_soft_factor_optimized.py"),
-        str(repo / "tests/test_tmdwf_components36.py"),
+        str(repo / "tests/test_tmdwf_components9.py"),
         str(repo / "tests/test_disconnected_shard_utils.py"), "-q",
         str(repo / "tests/test_flowed_quark_ringed_norm.py"),
         str(repo / "tests/test_emt_disconnected_analysis.py"),

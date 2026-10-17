@@ -1646,3 +1646,49 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   committed. SESSION_MEMORY.md is unchanged.
 - Pre-commit CPU/mock regression passed 235 tests, with four additional shared
   pion structure checks passing separately. Diff hygiene checks passed.
+
+
+## 2026-10-17: Use nine-component TMDWF and reusable lexicographic halos
+
+- Factor the remaining backward spin vector out of the 36-component TMDWF
+  bilinear and absorb it into the fixed forward operand. Both operands now
+  contain nine complex color-pair components per site. Preserve the original
+  conjugation, phases, output ordering, normalization and root-only reduction.
+  This factorization applies to this specific bilinear, not general propagators.
+- Replace the compact roll/overwrite and four-point propagator-shift paths
+  with a shared lexicographic walker: explicit interior copies, contiguous
+  device face packing, and host-staged nearest-neighbor Sendrecv. Convert each
+  four-point shifted propagator to lexicographic layout once per walk. Reuse
+  two output buffers, the device packing face and host receive buffer within
+  each walk; host send copies and incoming device transfers still occur per
+  step. No asynchronous MPI, GPU-aware MPI, FFT or persistent cache is used.
+- Yielded work buffers are temporary views consumed before advancing the
+  walker. Inputs remain read-only; nested bT/bz walks own independent buffers.
+  Updated CPU tests cover nine-component algebra with general complex gamma
+  matrices, both 9/144-component halo exchanges, signs and periodic wraps,
+  nonuniform neighbor fields, buffer reuse and nested input immutability.
+- Aurora job 8937570 exited zero and reported VALIDATION PASSED. Ten nodes and
+  100 ranks ran the original and develop implementations on full 80^4 geometry,
+  grid [1,5,4,5]. All 15 cases, 22 HDF5 files and 3064 datasets passed the
+  original/develop comparison at rtol=1e-10, atol=1e-12. Maximum absolute
+  difference was 2.1904e-8; maximum relative L2 difference was 1.0406e-14.
+  Input hashes, repeated outputs, source immutability and collective IO checks
+  passed. Both compact and full-field halo walks agreed exactly with real
+  PyQUDA shifts on a small 100-rank lattice for x/y/z displacements 0..11,
+  including global periodic wraps. Current source matches the validated snapshot.
+- Clean median timings (original -> develop, seconds): long TMDWF
+  142.847 -> 2.684; short zero-momentum TMDWF 4.035 -> 0.300; z-boundary TMDWF
+  138.560 -> 0.825; long four-point tsep6/8/10 approximately 80.02-80.88 ->
+  5.05. Relative to job 8937382, long and z-boundary TMDWF improved by 4.67x
+  and 4.47x; long four-point improved by 1.84x. These incremental figures are
+  cross-job references, not interleaved timing controls. Separate profiling
+  puts long TMDWF contraction at 1.727 seconds and device-to-host transfer at
+  0.125 seconds; stage maxima across ranks are not strictly additive. Synthetic
+  contractions exclude inversion and do not establish full production or
+  Perlmutter performance.
+- Independent scripts, snapshots, outputs and timing reports remain outside
+  the repository at run/l80c80a050/develop/soft_factor_components9_lexico.
+  Original production data/cache and the original checkout are unchanged.
+  No generated benchmark artifacts are committed. SESSION_MEMORY.md is unchanged.
+- Pre-commit regression passed 244 CPU/mock tests and four additional shared
+  pion structure checks. Diff hygiene checks passed.
