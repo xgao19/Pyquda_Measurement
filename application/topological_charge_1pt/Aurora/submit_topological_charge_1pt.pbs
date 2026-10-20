@@ -1,0 +1,24 @@
+#!/bin/bash -l
+#PBS -A StructNGB
+#PBS -q debug-scaling
+#PBS -N topology_example
+#PBS -l select=10:ngpus=6
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=flare
+#PBS -j oe
+
+set -euo pipefail
+ulimit -c 0
+root=/lus/flare/projects/StructNGB/xgao
+repo="$root/software_gradientflow/Pyquda_Measurement_develop"
+example="$root/run/l80c80a050/develop/topological_charge_1pt/example"
+mkdir -p "$example/cache" "$example/log"
+exec > "$example/log/${PBS_JOBID:?}.log" 2>&1
+source "$root/software_gradientflow_260930/activate-pyquda-develop.sh"
+export PYTHONPATH="$repo:${PYTHONPATH:-}"
+export PYTHONDONTWRITEBYTECODE=1 QUDA_ENABLE_P2P=0 QUDA_ENABLE_TUNING=1
+unset QUDA_RESOURCE_PATH QUDA_ENABLE_MPS QUDA_ENABLE_DEVICE_MEMORY_POOL CUPY_CACHE_DIR ROCR_VISIBLE_DEVICES HIP_VISIBLE_DEVICES
+/opt/cray/pals/1.8/bin/mpiexec -n 100 -ppn 10 -envall --cpu-bind=depth \
+    "$root/run/l80c80a050/EMT_proton_connected_UD/tile_flat_affinity.sh" \
+    python -u "$repo/application/topological_charge_1pt/Aurora/Pyquda_topological_charge_1pt.py"

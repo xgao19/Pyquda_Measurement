@@ -1742,3 +1742,53 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Pre-commit verification passed 269 CPU/mock regression tests and eight
   independent benchmark instrumentation/driver-equivalence checks. Diff hygiene
   checks passed.
+
+## 2026-10-20: Add and validate flowed topological-charge loops
+
+- Add `TopologicalCharge1pt`, a deterministic gauge-only finite-flow clover
+  loop with six independent Hermitian traceless field strengths and the
+  three-trace epsilon contraction. Reuse gauge-only clover/flow primitives
+  without changing the historical EMT schedule or its numerical output.
+  Topology uses uniform integration substeps for every output interval.
+- Add root-only `topological_charge_loop_v1` HDF5 output with momentum,
+  flow-time and absolute-time axes, total-charge diagnostics and explicit
+  configuration/stream, normalization, preprocessing and code provenance.
+  Add a configurable Aurora example; no propagator inversions, hadron-ratio
+  extraction, matching or final RGI extrapolation is included.
+- Add math and workflow tests for the full epsilon contraction, analytic
+  normalization, gauge conjugation, reflection, clover projection, Fourier
+  reality, source alignment, scheduling, input immutability and file ownership.
+  Pre-commit CPU/mock regression: 291 tests passed. The four measurement files
+  are byte-identical to the successful GPU job's frozen source snapshot.
+- Aurora validation job 8948692 finished with PBS state F, exit 0 and
+  VALIDATION PASSED on 10 nodes/100 ranks. It checked a050 b.600, 27 momenta,
+  five output times, Wilson and Symanzik flow, independent scalar QUDA charge,
+  epsilon contraction, small-field gauge invariance, one rank and two
+  100-rank decompositions, repeatability and integrator step refinement.
+  EMT vs baseline 5036ce0 agreed exactly. Maximum decomposition and gauge
+  transformation differences were 1.913e-16 and 1.001e-15; total-charge
+  differences were 2.665e-13 (Wilson) and 1.741e-13 (Symanzik).
+- The initial job 8948645 exposed an existing installed QUDA zero-force
+  matrix-exponential singularity, not fixed in this work. Identity links are
+  now checked only at t=0; nontrivial fields exercise flow. Neither zero
+  Fourier momentum nor zero total charge is excluded. Validation explicitly
+  rejects matching NaNs. The native density-pointer API is not used.
+- Two clean measurements took 39.2709/39.2777 s (Wilson) and
+  41.0714/40.9714 s (Symanzik), excluding warmup and initial gauge input.
+  Independent profile passes assign 32.56/34.28 s to flow and about 6.56 s
+  to clover. Integrator-step differences shrink by factors 8.22/8.36 on the
+  second halving. This is numerical validation, not continuum physics or an
+  ensemble performance study. Full evidence is in the validation summary;
+  external scripts/data remain under run/l80c80a050/develop/topological_charge_1pt.
+- Add Markdown and LaTeX derivations plus the three-page compiled PDF, covering
+  normalization/orientation, volume and Fourier conventions, source alignment,
+  RGI limit qualifications, physics references and measured validation results.
+  Install checksum-verified standalone Tectonic 0.17.0 under the external
+  software_gradientflow/latex directory with a separate activation script and
+  local package cache. Initial and offline PDF builds passed, references
+  resolved, and all three pages were visually inspected. LaTeX intermediates
+  are ignored and excluded from this commit; final PDF is retained.
+- Update the README index and only stable environment/convention pitfalls in
+  SESSION_MEMORY.md. Production data/cache, QUDA/PyQUDA installations and the
+  original measurement checkout are unchanged. No generated benchmark outputs,
+  downloaded compiler or macro/font cache are committed.

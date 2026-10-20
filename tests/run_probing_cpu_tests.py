@@ -72,6 +72,8 @@ def main():
 
     print("CPU MOCK TESTS ONLY: no QUDA, GPU or MPI verification")
     return pytest.main(pytest_args or [
+        str(repo / "tests/test_topological_charge_math.py"),
+        str(repo / "tests/test_topological_charge_workflow.py"),
         str(repo / "tests/test_disconnected_probing_math.py"),
         str(repo / "tests/test_disconnected_probing_workflow.py"),
         str(repo / "tests/test_disconnected_noise_bookkeeping.py"),

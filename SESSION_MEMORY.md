@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-08-02
+Last updated: 2026-10-20
 
 This file contains only reusable environment facts, stable conventions, and
 pitfalls that are easy to repeat.  Commit history and completed-work summaries
@@ -61,6 +61,31 @@ belong in `log.md` and Git history.
   activating the appropriate environment.
 - Treat this repository as read-only while testing external l80 workflows unless
   the user explicitly authorizes repository changes.
+
+## Local LaTeX Documents
+
+- On Aurora, source `software_gradientflow/activate-latex.sh` for Tectonic;
+  its executable and macro/font cache live under `software_gradientflow/latex`,
+  outside this repository and independently of the PyQUDA environment.
+- Compile with `tectonic path/to/document.tex`; use `--only-cached` after a
+  successful first build to avoid network access. Track source and final PDF,
+  not LaTeX intermediates (`docs/.gitignore`).
+
+## Topological Charge Loops
+
+- `TopologicalCharge1pt` stores finite-flow clover density with Hermitian
+  `H=-i*(C-Cdag)_traceless/8`, directions xyzt and epsilon0123=+1. Its scalar
+  schema is not an EMT tensor and is not already an extrapolated RGI result.
+- Unlike historical EMT, every topology output interval uses the same
+  `flow_substeps_per_interval`, including the first interval. Retain exactly
+  one zero Fourier mode for total-charge diagnostics.
+- The inspected installed QUDA `exponentiate_iQ` is singular at exactly zero
+  force. Identity-link validation is t=0 only; use nontrivial fields for flow.
+  This does not exclude zero Fourier momentum or zero total charge. Reject
+  non-finite comparison data explicitly; matching NaNs must not count as pass.
+- Avoid the inspected PyQUDA `qchargeDensity()` path: its density flag remains
+  set after return. Use the manual clover loop; scalar `qcharge()` is the
+  independent total-charge reference.
 
 ## EMT Conventions And Pitfalls
 

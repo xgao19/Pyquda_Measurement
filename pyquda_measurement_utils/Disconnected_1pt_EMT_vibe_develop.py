@@ -22,7 +22,8 @@ from opt_einsum import contract
 from pyquda import getMPIComm
 from pyquda.field import LatticeGauge, LatticeFermion
 from pyquda_utils import core, phase, convert
-from pyquda_comm.array import arrayIdentity, arrayZeros
+from pyquda_comm.array import arrayZeros
+from pyquda_measurement_utils.flowed_gauge_utils import advance_gauge_flow, clover_traceless
 
 from pyquda_measurement_utils.io_corr import (
     save_emt_gluon_1pt_hdf5,
@@ -1285,36 +1286,14 @@ class EMTDisconnectedGluon1pt:
     def _advance_flowed_gauge(self, U_flow, step, stepsize, Nsteps, substeps_per_interval=1):
         """Advance the flowed gauge field using the gluon-flow schedule."""
         if Nsteps > 0 and step == 0:
-            if self.flow_type == "wilson":
-                U_flow.wilsonFlow(10, epsilon=stepsize / 10)
-            elif self.flow_type == "symanzik":
-                U_flow.symanzikFlow(10, epsilon=stepsize / 10)
+            advance_gauge_flow(U_flow, self.flow_type, 10, stepsize / 10)
         elif Nsteps > 0 and step < Nsteps:
-            if self.flow_type == "wilson":
-                U_flow.wilsonFlow(substeps_per_interval, epsilon=stepsize / substeps_per_interval)
-            elif self.flow_type == "symanzik":
-                U_flow.symanzikFlow(substeps_per_interval, epsilon=stepsize / substeps_per_interval)
+            advance_gauge_flow(U_flow, self.flow_type, substeps_per_interval, stepsize / substeps_per_interval)
 
     @staticmethod
     def _F_clover_traceless(U: LatticeGauge, mu: int, nu: int):
         """Construct the traceless clover field strength F_{mu nu}."""
-        loops_one = [
-            [mu, nu, mu + 4, nu + 4],
-            [nu, mu + 4, nu + 4, mu],
-            [mu + 4, nu + 4, mu, nu],
-            [nu + 4, mu, nu, mu + 4],
-        ]
-
-        F = U.loop([loops_one] * 4, coeff=[1.0, 1.0, 1.0, 1.0])
-        data = F.data
-        A = 0.125 * (data - data.swapaxes(-2, -1).conjugate())
-
-        Nc = A.shape[-1]
-        trA = contract("...ii->...", A)
-        I = arrayIdentity(Nc, A.dtype, F.location)
-        A -= trA[..., None, None] * I / Nc
-        data[...] = (-1j) * A
-        return F
+        return clover_traceless(U, mu, nu)
 
     def _all_F_clover_traceless(self, U: LatticeGauge):
         """Build all independent F_{mu nu} and fill the antisymmetric table."""

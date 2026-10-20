@@ -105,12 +105,19 @@ application/EMT_meson/          Pion/meson EMT workflows.
 application/EMT_proton/         Proton EMT workflows.
 application/EMT_disconnected_1pt/ Guided quark-loop, convergence, and optional proton C2/3pt workflow; gluon is an advanced add-on.
 application/qTMD_disconnected_1pt/ Shared qTMD/PDF one-point workflows.
+application/topological_charge_1pt/ Flowed clover topological-charge loops (Aurora).
 application/EMFF_pion/          Pion electromagnetic form factor workflow.
 application/pion_TMD/           Connected pion CG/GI qTMD and PDF workflow.
 ```
 
 Each actively maintained application directory has its own README with
 measurement-specific parameters and output conventions.
+
+The gauge-only [topological-charge application](application/topological_charge_1pt/README.md)
+has [mathematical conventions](docs/topological_charge/README.md), a
+[typeset derivation](docs/topological_charge/topological_charge.pdf), and an
+[Aurora validation report](docs/topological_charge/validation_summary.md).
+Its output is a finite-flow loop, not an already extracted RGI nucleon form factor.
 
 Perlmutter examples:
 

@@ -290,6 +290,21 @@ def save_emt_meson_2pt_hdf5(tag, C2, gamma_list, momentum_list, attrs=None):
         f.create_dataset("momentum_list", data=np.asarray(momentum_list, dtype=np.int32))
 
 
+def get_topological_charge_loop_file_tag(data_dir, ensemble, stream, cfg, setup):
+    """Build a source-independent tag including stream and configuration."""
+    return str(Path(data_dir) / "topologicalChargeLoop" / f"{stream}.{cfg}" /
+               f"{ensemble}.topologicalChargeLoop.{stream}.{cfg}.{setup}")
+
+
+def save_topological_charge_1pt_hdf5(tag, result):
+    """Write scalar topology loops; the caller must be MPI rank zero."""
+    with _prepare_h5_file(f"{tag}.h5", result["attrs"]) as handle:
+        handle.create_dataset("loop", data=np.asarray(result["loop"], dtype=np.complex128))
+        handle.create_dataset("momentum_list", data=np.asarray(result["momentum_list"], dtype=np.int32))
+        handle.create_dataset("flow_times_lattice", data=result["flow_times_lattice"])
+        handle.create_dataset("diagnostics/Q_total", data=result["Q_total"])
+
+
 # Save flowed gluon EMT one-point data.
 def save_emt_gluon_1pt_hdf5(tag, Tmunu_t, attrs=None):
     save_h5 = f"{tag}.h5"

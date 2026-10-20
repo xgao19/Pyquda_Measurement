@@ -1,4 +1,4 @@
-# LaTeX build artifacts
+# LaTeX intermediates; final PDFs remain tracked.
 *.aux
 *.log
 *.out
@@ -14,3 +14,5 @@
 *.vrb
 *.run.xml
 *-blx.bib
+*.xdv
+*.bbl

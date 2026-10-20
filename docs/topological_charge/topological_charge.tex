@@ -1,0 +1,158 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage{amsmath,amssymb,booktabs,hyperref,geometry}
+\geometry{margin=25mm}
+\title{Flowed Clover Topological Charge: Normalization and Verification}
+\author{PyQUDA Measurement}
+\date{October 2026}
+\begin{document}
+\maketitle
+\section{Scope and conventions}
+This implementation measures only a hadron-independent gluon loop. It does
+not extract a nucleon form factor or perform a continuum extrapolation.
+Use directions $(0,1,2,3)=(x,y,z,t)$ and $\epsilon_{0123}=+1$.
+Hermitian generators satisfy $\operatorname{Tr}(T^aT^b)=\delta^{ab}/2$.
+For links $U_\mu=\exp(iag A_\mu)$ and the sum $C_{\mu\nu}$ of four oriented
+plaquettes based at the same site, define
+\begin{align}
+ A_{\mu\nu}&=\frac{C_{\mu\nu}-C_{\mu\nu}^\dagger}{8}
+ -\frac{\mathbf1}{3}\operatorname{Tr}\frac{C_{\mu\nu}-C_{\mu\nu}^\dagger}{8},\\
+ H_{\mu\nu}&=-iA_{\mu\nu}=a^2gG_{\mu\nu}+O(a^4).
+\end{align}
+Here $A$ is anti-Hermitian, $H$ is Hermitian, and both are traceless.
+In particular $H_{\nu\mu}=-H_{\mu\nu}$.
+
+\section{The three-trace formula}
+The 24 nonzero permutations in the epsilon contraction fall into three
+pairings. Reversal within either antisymmetric pair cancels the corresponding
+epsilon sign; exchanging the pairs leaves their trace unchanged by cyclicity.
+Each pairing therefore contributes eight equal terms, giving
+\begin{align}
+ q_{\mathrm{lat}}
+ &=\frac{\epsilon_{\mu\nu\rho\sigma}}{32\pi^2}
+    \operatorname{ReTr}(H_{\mu\nu}H_{\rho\sigma})\\
+ &=\frac1{4\pi^2}\operatorname{ReTr}
+    (H_{01}H_{23}-H_{02}H_{13}+H_{03}H_{12}).
+\end{align}
+No commutativity assumption is needed. Since
+$\operatorname{Tr}(HK)^*=\operatorname{Tr}(KH)=\operatorname{Tr}(HK)$,
+the local density is real. It is invariant under local color conjugation and
+changes sign under reversal of one spatial axis. For $H_{01}=H_{23}
+=\operatorname{diag}(1,-1,0)/2$ and other independent planes zero,
+$q_{\mathrm{lat}}=1/(8\pi^2)$, fixing a simple normalization test.
+
+The links already contain the coupling:
+\begin{equation}
+ q_{\mathrm{lat}}=a^4q_{\mathrm{phys}}+\text{cutoff corrections},\qquad
+ q_{\mathrm{phys}}=\frac{g^2}{32\pi^2}
+ \epsilon_{\mu\nu\rho\sigma}\operatorname{Tr}(G_{\mu\nu}G_{\rho\sigma}).
+\end{equation}
+If $G$ includes $g$, omit the explicit $g^2$ in the last expression.
+No additional flavor factor, fermion-loop sign or EMT factor of two belongs
+in the implementation. QUDA's anti-Hermitian lower-plane convention maps to
+this formula using $A=iH$; two factors give the required minus sign.
+
+\section{Fourier transform and source alignment}
+For $V_s=L_xL_yL_z$, origin $o=0$ and integer momentum $\mathbf n$, store
+\begin{equation}
+ L(\mathbf n,t_f,\tau)=\frac1{V_s}\sum_{\mathbf x}
+ e^{2\pi i\sum_j n_j(x_j-o_j)/L_j}q_{\mathrm{lat}}(t_f,\mathbf x,\tau).
+\end{equation}
+Reality implies $L(-\mathbf n)=L(\mathbf n)^*$ and
+$Q(t_f)=V_s\sum_\tau L(0,t_f,\tau)$.
+For a source $s=(\mathbf s,t_0)$,
+\begin{equation}
+ L_s(\mathbf n,t_f,\tau)=e^{-2\pi i\sum_jn_j(s_j-o_j)/L_j}
+ L(\mathbf n,t_f,(t_0+\tau)\bmod N_t).
+\end{equation}
+The gluonic time shift has no antiperiodic fermion sign. The disconnected
+building block with a compatible polarized two-point contraction is
+\begin{equation}
+ C_{3,\Gamma}^{Q}=V_s\bigl(\langle C_{2,\Gamma}L_s\rangle
+ -\langle C_{2,\Gamma}\rangle\langle L_s\rangle\bigr).
+\end{equation}
+Configuration/stream identity and source correlations must survive averaging.
+This is not yet a complete kinematic ratio.
+
+\section{Flowed observable and RGI limit}
+At fixed positive physical $t_f$, take the continuum limit before $t_f\to0$:
+\begin{equation}
+ F_Q^{\mathrm{RGI}}(Q^2)=\lim_{t_f\to0}\lim_{a\to0}
+ F_Q^{\mathrm{GF}}(Q^2,a,t_f).
+\end{equation}
+The small-flow expansion identifies the RGI density, including the singlet
+axial-divergence mixing structure~\cite{luscher,lw}. No separate axial
+measurement or standalone $\overline{\mathrm{MS}}$ conversion is performed
+here. Finite-flow results must not be labelled already RGI; running and mixing
+can produce non-polynomial, logarithmic corrections in the extrapolation.
+Global continuum charge conservation along flow does not imply independence
+of local nonforward matrix elements. At finite spacing even the clover total
+charge has cutoff effects. Require a physical window with
+$a\ll\sqrt{8t_f}$ and a radius small relative to insertion/source separations.
+
+In the proposed nucleon convention~\cite{fukushima},
+\begin{equation}
+ M_N^{-1}\langle N(p')|q_{\rm top}|N(p)\rangle
+ =\bar u(p')i\gamma_5u(p)F_Q(Q^2),\quad d_Q=-F_Q(0).
+\end{equation}
+The forward pseudoscalar bilinear vanishes: extrapolate from finite transfer.
+In general $Q^2=|\mathbf p'-\mathbf p|^2-(E'-E)^2$.
+The Wick-rotation sign must be derived together with gamma matrices, epsilon
+and the chosen polarized projector; the explicit Minkowski $i\gamma_5$ is not
+an extra $i$ multiplying the real Euclidean density. A Breit-frame density is
+not an ordinary relativistic probability density. Existing overlap/AWI
+calculations~\cite{gong} guide signal construction, not direct flowed-clover
+matching.
+
+\section{Verification and cost}
+CPU tests compare all 24 epsilon terms with the compact expression on
+noncommuting matrices, test gauge conjugation, reflection, Hermiticity,
+tracelessness, identity links, Fourier pairing, source alignment, scheduling,
+root ownership and HDF5 metadata. GPU tests check actual link-level gauge
+invariance, MPI decompositions, QUDA total charge and the pre-extraction EMT
+baseline. Integration-step refinement compares equal physical output times;
+finite-step outputs need not be identical. See the companion Markdown
+validation summary for actual pass/pending status.
+The installed QUDA exponential has a singularity at exactly zero force.
+Identity links are therefore checked only at zero flow time; nontrivial
+fields exercise flow. This restriction does not exclude zero Fourier momentum
+or zero total charge, and does not constitute a fix of QUDA.
+
+Six clover planes and three traces are needed per output time, with no quark
+inversions. Only projected loops are transferred and stored. An output with
+125 momenta, 21 flow times and 80 time slices occupies 3.20 MiB in complex128;
+a full real $80^4$ density would occupy 312.5 MiB per flow time.
+
+\subsection{Validated Aurora result}
+Job 8948692 completed successfully on 20 October 2026 with 10 nodes and 100
+ranks. Its real $80^4$ input was stream b, configuration 600, Coulomb gauge
+fixed with no additional HYP for topology. Both Wilson and Symanzik flow used
+27 momenta and output times $t_f/a^2=0,0.1,0.2,0.3,0.4$.
+The pre-extraction EMT baseline was commit \texttt{5036ce0}; all compared EMT
+datasets agreed exactly. Small-field MPI-decomposition and gauge-transformation
+differences were below $1.92\times10^{-16}$ and $1.01\times10^{-15}$ respectively.
+Total-charge differences relative to native QUDA were at most
+$2.67\times10^{-13}$ (Wilson) and $1.75\times10^{-13}$ (Symanzik).
+Step halving from $0.01$ to $0.005$ to $0.0025$ reduced consecutive loop
+differences by factors 8.22 and 8.36 respectively. The identity-flow limitation
+above remains in force; this is not a validation of that singular case.
+
+Two clean repeats, excluding warmup and initial gauge input, took about
+39.27 seconds per Wilson measurement and 41.02 seconds per Symanzik measurement.
+Separately instrumented passes assigned 32.56/34.28 seconds to flow and
+6.56/6.56 seconds to clover construction. Density contraction was about
+0.063 seconds, projection 0.016 seconds and HDF5 output 0.011 seconds or less.
+These are maximum accumulated component times over ranks, not strictly
+additive wall times. The companion Markdown report retains detailed results.
+
+\begin{thebibliography}{9}
+\bibitem{fukushima} Fukushima and Uji, \emph{Polarized Nucleon as a
+Topological Dipole}, \href{https://arxiv.org/abs/2607.03123}{arXiv:2607.03123}.
+\bibitem{luscher} M. Luescher, \emph{On the chiral anomaly and the Yang--Mills
+gradient flow}, \href{https://arxiv.org/abs/2109.07965}{arXiv:2109.07965}, Eq.~(21).
+\bibitem{lw} M. Luescher and P. Weisz, \emph{Renormalization of the topological
+charge density in QCD with dimensional regularization},
+\href{https://arxiv.org/abs/2103.15440}{arXiv:2103.15440}, Sec.~6.
+\bibitem{gong} M. Gong et al., \emph{Strange and Charm Quark Spins from Anomalous
+Ward Identity}, \href{https://arxiv.org/abs/1511.03671}{arXiv:1511.03671}.
+\end{thebibliography}
+\end{document}
