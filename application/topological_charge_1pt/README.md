@@ -15,7 +15,10 @@ HYP**. Both Wilson and Symanzik flow are supported. `flow_epsilon` is the output
 interval, not the integrator step: all intervals use the same number of
 substeps, unlike the historical EMT first-interval convention. Default times
 are `0,.1,.2,.3,.4` in units of `a^2`, with integration step `.01`.
-These are numerical test choices, not an established physical flow window.
+Optional `flow_first_interval_substeps` overrides only the first interval;
+omitting it preserves the uniform schedule above. Metadata records both the
+first and subsequent integration step sizes. These are numerical test choices,
+not an established physical flow window.
 
 Output is one HDF5 file per configuration and setup under
 `data/topologicalChargeLoop/<stream>.<configuration>/`:

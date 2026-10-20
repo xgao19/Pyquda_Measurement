@@ -37,7 +37,8 @@ class TopologicalCharge1pt:
     """Measure all requested flow times, including zero, on a gauge copy.
 
     ``flow_epsilon`` is the output interval in lattice units. Every interval
-    uses ``flow_substeps_per_interval`` steps, including the first interval.
+    uses ``flow_substeps_per_interval`` steps by default. An optional
+    ``flow_first_interval_substeps`` overrides only the first interval.
     ``qext`` contains integer (nx, ny, nz, 0) modes and exactly one zero mode.
     """
 
@@ -50,6 +51,8 @@ class TopologicalCharge1pt:
             raise ValueError("flow_epsilon must be finite and positive")
         self.flow_steps = _integer(parameters["flow_steps"], "flow_steps", 0)
         self.substeps = _integer(parameters["flow_substeps_per_interval"], "flow_substeps_per_interval", 1)
+        self.first_substeps = _integer(parameters.get("flow_first_interval_substeps", self.substeps),
+                                       "flow_first_interval_substeps", 1)
         q = np.asarray(parameters["qext"])
         if (q.ndim != 2 or q.shape[1] != 4 or not np.issubdtype(q.dtype, np.integer)
                 or np.any(q[:, 3] != 0) or len(np.unique(q, axis=0)) != len(q)):
@@ -88,8 +91,9 @@ class TopologicalCharge1pt:
                 loops[:, step, :] = reduced / volume
             del fields, density, projected, reduced
             if step < self.flow_steps:
-                advance_gauge_flow(flowed, self.flow_type, self.substeps,
-                                   self.flow_epsilon / self.substeps)
+                substeps = self.first_substeps if step == 0 else self.substeps
+                advance_gauge_flow(flowed, self.flow_type, substeps,
+                                   self.flow_epsilon / substeps)
         if not root:
             return None
         attrs = {
@@ -100,6 +104,8 @@ class TopologicalCharge1pt:
             "mpi_grid": np.asarray(getGridSize(), dtype=np.int32),
             "flow_type": self.flow_type, "flow_epsilon": self.flow_epsilon,
             "flow_steps": self.flow_steps, "flow_substeps_per_interval": self.substeps,
+            "flow_first_interval_substeps": self.first_substeps,
+            "first_integration_epsilon": self.flow_epsilon / self.first_substeps,
             "integration_epsilon": self.flow_epsilon / self.substeps,
             "momentum_phase_origin": np.zeros(4, dtype=np.int32),
             "spatial_momentum_phase_convention": "exp(+2pi*i*sum_j q_j*(x_j-origin_j)/L_j)",

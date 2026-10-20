@@ -4,12 +4,18 @@ Baseline: `5036ce0` (before the topological-charge addition).
 
 ## CPU
 
-The complete CPU mock regression runner passed **291 tests** on 2026-10-20,
+The complete CPU mock regression runner passed **298 tests** on 2026-10-20,
 including the new topological math/workflow tests and existing EMT tests.
 The runner stubs GPU/MPI operations and therefore does not establish GPU
 correctness or performance. It checks the epsilon reduction, known analytic
 normalization, color conjugation, reflection, clover projection, Fourier and
 source alignment, immutable input, schedule, root ownership and HDF5 schema.
+This includes default uniform substeps and the optional first-interval override,
+with independent first/later step-size metadata and invalid-value rejection.
+
+The production schedule (first 10 substeps, later 3, output interval
+0.207936, 125 momenta) passed a separate five-configuration noHYP/HYP GPU
+benchmark, job 8948902; details follow the original validation below.
 
 ## GPU
 
@@ -99,7 +105,59 @@ The report separates warmup, two clean repeats and an instrumented pass.
 Profile timings synchronize the owning device queues; component maxima need
 not add exactly to a total wall time due to rank imbalance and overhead.
 
-No production files are changed. No Perlmutter, continuum/RGI extrapolation,
+The original validation changed no production files. No Perlmutter, continuum/RGI extrapolation,
 physical nucleon ratio sign or final form-factor validation is claimed.
 The LaTeX source is compiled with the local standalone Tectonic installation.
 The repository tracks its final PDF, not compiler caches or intermediate files.
+
+## Production-schedule benchmark: 8948902
+
+Job **8948902 passed** on 2026-10-20: PBS state F, exit 0,
+`BENCHMARK_PASSED` and both summary entries `passed=true`.
+It requested one hour in debug-scaling on 10 nodes / 100 ranks, grid
+`[1,5,4,5]`; PBS recorded `00:15:38` of used wall time.
+The measurement package is byte-identical to the frozen job snapshots.
+
+It measured b.600, b.610, b.620, b.630 and b.640 serially without HYP, then
+the same five configurations with one HYP step (0.75, 0.6, 0.3, dir_ignore=-1).
+Both variants used Symanzik flow at output times `0:0.207936:2.07936`:
+10 integration substeps in the first interval and 3 in each later interval,
+37 total. All 125 momenta with spatial components -2 through +2 were retained,
+including zero; each loop has shape `[125,11,80]`.
+All configurations shared one read-only Aurora tunecache through symlinks;
+the post-run cache hash was unchanged.
+
+All ten files passed metadata, finite-value, Fourier-conjugation and zero-mode
+total checks. Native scalar `qcharge()`, evaluated on a separate gauge copy
+with the same integration schedule, agreed with the total-charge trajectory:
+maximum absolute differences **1.5987e-13** (noHYP) and **8.6597e-14** (HYP).
+The native comparison uses `rtol=1e-10, atol=1e-9` with explicit finite checks.
+HYP and noHYP are different observables and are not required to agree.
+This validates the implementation at the production schedule, not integrator
+step-size convergence at this coarser step size.
+
+Mean seconds/configuration, excluding the first configuration in each variant:
+
+| Part | noHYP | HYP |
+|---|---:|---:|
+| Gauge read | 3.4970 | 1.6770 |
+| HYP/device upload | 0.0132 | 2.1663 |
+| Measurement plus HDF5 write | 49.2235 | 49.3369 |
+| Output checks | 0.0109 | 0.0109 |
+| Production-like total | 52.7466 | 53.1939 |
+| Additional native reference | 36.6787 | 36.6046 |
+
+The first production-like totals were 57.4250 s and 52.2277 s respectively.
+Production-like totals exclude the independent reference, initialization,
+shutdown and garbage collection. HYP ran second on the same nodes and inputs;
+its faster reads may reflect filesystem caching, not an intrinsic HYP benefit.
+These four-configuration means do not establish large concurrent-job throughput.
+
+External scripts, frozen inputs, timing CSVs and numerical outputs remain under
+`run/l80c80a050/topological_charge_1pt/benchmark` and
+`run/l80c80a050/topological_charge_1pt_HYP/benchmark`, each in
+`runs/8948902.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov/`.
+The noHYP directory holds the combined `log/summary.json`.
+Separate production directories were prepared outside this repository;
+full production was not submitted. No output data, runtime profiles or caches
+are included in this repository.

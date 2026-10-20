@@ -1792,3 +1792,32 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   SESSION_MEMORY.md. Production data/cache, QUDA/PyQUDA installations and the
   original measurement checkout are unchanged. No generated benchmark outputs,
   downloaded compiler or macro/font cache are committed.
+
+## 2026-10-20: Fix the validated topology production flow schedule
+
+- Add optional `flow_first_interval_substeps` to TopologicalCharge1pt.
+  Omitting it retains uniform integration; setting it to 10 with later
+  substeps set to 3 matches the referenced EMT gluon production schedule.
+  Record both counts and integration step sizes in HDF5 metadata.
+  Existing EMT kernels and the topology operator are unchanged.
+- Extend CPU tests for both schedules, root/nonroot behavior, metadata and
+  invalid first-interval counts; the complete CPU/mock suite passes 298 tests.
+  The measurement package matches both successful GPU job snapshots byte
+  for byte. Update application guidance, mathematical documentation and PDF.
+- Aurora benchmark 8948902 completed with state F, exit 0 and BENCHMARK_PASSED
+  on 10 nodes / 100 ranks. Five configurations b.600--640 were measured first
+  without HYP, then with HYP1, at 125 momenta and 11 Symanzik output times
+  0:0.207936:2.07936. All ten outputs passed schema, finite, conjugation and
+  total-charge checks. Maximum differences from native scalar QUDA charge
+  were 1.5987e-13 and 8.6597e-14. The shared read-only tunecache was unchanged.
+- Excluding the first configuration, production-like totals averaged
+  52.7466 s (noHYP) and 53.1939 s (HYP); separate native-reference work cost
+  36.6787/36.6046 s. Totals exclude initialization/shutdown and reference work;
+  HYP ran second and may benefit from file caching. No production-step-size
+  convergence or large concurrent-job throughput is claimed.
+- Full evidence is recorded in docs/topological_charge/validation_summary.md.
+  External benchmark and production scripts stay under
+  run/l80c80a050/topological_charge_1pt and topological_charge_1pt_HYP.
+  No full production submission, runtime data, profiles, tuning caches or
+  LaTeX intermediates are included. SESSION_MEMORY.md changes only the
+  reusable first-interval convention.

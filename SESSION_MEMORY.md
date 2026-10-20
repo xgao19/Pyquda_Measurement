@@ -76,9 +76,10 @@ belong in `log.md` and Git history.
 - `TopologicalCharge1pt` stores finite-flow clover density with Hermitian
   `H=-i*(C-Cdag)_traceless/8`, directions xyzt and epsilon0123=+1. Its scalar
   schema is not an EMT tensor and is not already an extrapolated RGI result.
-- Unlike historical EMT, every topology output interval uses the same
-  `flow_substeps_per_interval`, including the first interval. Retain exactly
-  one zero Fourier mode for total-charge diagnostics.
+- Unlike historical EMT, topology defaults to the same
+  `flow_substeps_per_interval` for every interval. Optional
+  `flow_first_interval_substeps` overrides only the first; metadata records
+  both counts and step sizes. Retain exactly one zero Fourier mode.
 - The inspected installed QUDA `exponentiate_iQ` is singular at exactly zero
   force. Identity-link validation is t=0 only; use nontrivial fields for flow.
   This does not exclude zero Fourier momentum or zero total charge. Reject

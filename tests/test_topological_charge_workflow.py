@@ -19,6 +19,8 @@ def parameters(**overrides):
     ("flow_type", "unknown"), ("flow_epsilon", 0), ("flow_epsilon", float("nan")),
     ("flow_steps", -1), ("flow_steps", 1.5), ("flow_steps", True),
     ("flow_substeps_per_interval", 0), ("qext", [[1, 0, 0, 0]]),
+    ("flow_first_interval_substeps", 0), ("flow_first_interval_substeps", True),
+    ("flow_first_interval_substeps", 1.5),
     ("qext", [[0., 0., 0., 0.]]), ("qext", [[0, 0, 0, 1]]),
     ("qext", [[0, 0, 0, 0]] * 2), ("qext", []),
 ])
@@ -31,7 +33,8 @@ def test_invalid_parameters(key, value):
 
 @pytest.mark.parametrize("rank", [0, 1])
 @pytest.mark.parametrize("flow_type", ["wilson", "symanzik"])
-def test_schedule_input_ownership_and_hdf5(monkeypatch, tmp_path, rank, flow_type):
+@pytest.mark.parametrize("first_substeps,later_substeps", [(None, 10), (10, 3)])
+def test_schedule_input_ownership_and_hdf5(monkeypatch, tmp_path, rank, flow_type, first_substeps, later_substeps):
     calls = []
     info = SimpleNamespace(global_size=[2, 2, 2, 4], mpi_rank=rank)
 
@@ -57,11 +60,15 @@ def test_schedule_input_ownership_and_hdf5(monkeypatch, tmp_path, rank, flow_typ
     monkeypatch.setattr(topology, "getGridSize", lambda: [1, 1, 1, 1])
     params = parameters()
     params["flow_type"] = flow_type
+    params["flow_substeps_per_interval"] = later_substeps
+    if first_substeps is not None:
+        params["flow_first_interval_substeps"] = first_substeps
     gauge = Gauge()
     tag = get_topological_charge_loop_file_tag(tmp_path, "small", "b", 600, "test")
     result = topology.TopologicalCharge1pt(params).flowed_1pt(gauge, tag)
     assert gauge.time == 0
-    assert calls == [(flow_type, 10, .01)] * 2
+    first = later_substeps if first_substeps is None else first_substeps
+    assert calls == [(flow_type, first, .1 / first), (flow_type, later_substeps, .1 / later_substeps)]
     if rank:
         assert result is None
         assert not list(tmp_path.rglob("*.h5"))
@@ -74,6 +81,10 @@ def test_schedule_input_ownership_and_hdf5(monkeypatch, tmp_path, rank, flow_typ
             assert handle.attrs["stream"] == "b"
             assert handle.attrs["volume_norm"] == 8
             assert handle.attrs["schema"] == "topological_charge_loop_v1"
+            assert handle.attrs["flow_first_interval_substeps"] == first
+            assert handle.attrs["flow_substeps_per_interval"] == later_substeps
+            assert handle.attrs["first_integration_epsilon"] == .1 / first
+            assert handle.attrs["integration_epsilon"] == .1 / later_substeps
             np.testing.assert_allclose(handle["flow_times_lattice"][:], [0, .1, .2])
             np.testing.assert_allclose(handle["diagnostics/Q_total"][:], result["Q_total"])
 

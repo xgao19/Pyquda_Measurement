@@ -131,8 +131,11 @@ or new inversions if propagators were not retained.
 ## 3. Flow, RGI limit and physics interpretation
 
 Measurements include zero flow time and each requested endpoint. New topology
-uses the same integration substeps for every interval. Output interval and
-integration step are distinct quantities. The shared primitive leaves the
+uses the same integration substeps for every interval by default. Optional
+`flow_first_interval_substeps` changes only the first interval; when omitted,
+it equals `flow_substeps_per_interval`. Output metadata records both counts
+and `first_integration_epsilon` versus the later `integration_epsilon`.
+Output interval and integration step are distinct quantities. The shared primitive leaves the
 historical EMT first-interval ten-substep schedule unchanged.
 
 At fixed positive physical flow time, the continuum loop defines a finite

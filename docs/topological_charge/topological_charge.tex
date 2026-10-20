@@ -74,6 +74,11 @@ Configuration/stream identity and source correlations must survive averaging.
 This is not yet a complete kinematic ratio.
 
 \section{Flowed observable and RGI limit}
+The output interval and integration step are distinct. By default all intervals
+use the same substep count. An optional first-interval override permits ten
+substeps initially and three thereafter without changing the output times.
+Both counts and step sizes are recorded in metadata; omitting the override
+preserves the uniform integration schedule.
 At fixed positive physical $t_f$, take the continuum limit before $t_f\to0$:
 \begin{equation}
  F_Q^{\mathrm{RGI}}(Q^2)=\lim_{t_f\to0}\lim_{a\to0}
@@ -143,6 +148,22 @@ Separately instrumented passes assigned 32.56/34.28 seconds to flow and
 0.063 seconds, projection 0.016 seconds and HDF5 output 0.011 seconds or less.
 These are maximum accumulated component times over ranks, not strictly
 additive wall times. The companion Markdown report retains detailed results.
+
+\subsection{Production-schedule benchmark}
+Job 8948902 also passed on 20 October 2026, using ten nodes and 100 ranks.
+Five configurations (b.600--640 in steps of ten) were measured without HYP,
+then with one HYP step. Symanzik output times were
+$t_f/a^2=0,0.207936,\ldots,2.07936$, with ten integration substeps initially
+and three per later interval, and 125 momenta including zero.
+All ten files passed finite-value, Fourier and metadata checks. Maximum
+total-charge differences from native QUDA were $1.60\times10^{-13}$ (noHYP)
+and $8.66\times10^{-14}$ (HYP). This is not a step-refinement test at the
+production step size.
+Excluding the first configuration, production-like totals averaged
+52.75 and 53.19 seconds respectively; independent native-reference work
+added about 36.6 seconds and is excluded from those totals, as are
+initialization and shutdown. HYP ran second, so input-cache effects may
+affect the comparison. These timings do not establish large-job throughput.
 
 \begin{thebibliography}{9}
 \bibitem{fukushima} Fukushima and Uji, \emph{Polarized Nucleon as a
