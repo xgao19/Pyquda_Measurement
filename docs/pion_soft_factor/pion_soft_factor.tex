@@ -22,6 +22,7 @@
 \fancyhead[R]{\today}
 \fancyfoot[C]{\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
+\setlength{\headheight}{14pt}
 
 % ---------------------------------------------------------------------------
 % Math convenience
@@ -189,16 +190,19 @@ obtained from the $-\mathbf{k}$ forward propagator via
    \;=\; \Gfive \; G_{-\mathbf{k}}(x; t_{0})^{\dagger} \; \Gfive\, .
 \end{equation}
 
-In the code this operation is performed by the \einsum\ pattern
 
+The dagger exchanges both spin and color ends. For a field stored as
+\walltag{tzyxmlca}, an explicit reference implementation is
 \begin{verbatim}
-    xp.einsum("ij, tzyxmlca, kl -> tzyxkjca",
-             gamma5, prop.conj(), gamma5)
+    xp.einsum("kl,tzyxmlca,mj->tzyxkjac",
+              gamma5, prop.conj(), gamma5)
 \end{verbatim}
+The production implementation packs row $(\mathrm{spin},\mathrm{color})$ and
+column $(\mathrm{spin},\mathrm{color})$ into $12\times12$ matrices and uses
+ordinary matrix adjoints. Color indices are not spectators to the transpose.
+The historical \walltag{ij,tzyxmlca,kl} expression summed unrelated spin
+indices and is not used.
 
-which transposes the spin indices $(i\leftrightarrow j,\;k\leftrightarrow l)$
-appropriately.  The color index $a$ and the spatial lattice indices $(z,y,x)$ are
-spectators in this transformation.
 
 \subsection{Momentum Phase Convention}
 
@@ -211,7 +215,7 @@ Operation & Phase factor \\
 \midrule
 Wall source at $t_{0}$ with momentum $\mathbf{k}$
    & $\exp(+i\,\mathbf{k}\!\cdot\!\mathbf{x})$ \\[4pt]
-Sink-side phase on $G_{\mathbf{k}}$ (two-point)
+SP phase on $G_{\mathrm{fw}}$
    & $\exp(-i\,\mathbf{p}\!\cdot\!\mathbf{x})$ where $\mathbf{p}$ is the meson momentum \\[4pt]
 Sink-side phase on $G_{\mathbf{k}_{\mathrm{bw}}}$ (soft factor)
    & $\exp(-2i\,\mathbf{P}\!\cdot\!\mathbf{x})$ where $\mathbf{P}=\mathbf{k}_{\mathrm{fw}}+\mathbf{k}_{\mathrm{bw}}$ \\
@@ -226,89 +230,60 @@ When \walltag{sign=-1}, the complex conjugate $\exp(-i\mathbf{k}\!\cdot\!\mathbf
 is used instead.
 
 % ===========================================================================
+
 \section{Wall-to-Wall Two-Point Diagnostic}
-% ===========================================================================
 
-Before computing the four-point soft factor we verify that the wall-source
-propagators produce a sensible pion two-point function.  Using the forward
-propagator $G_{\mathrm{fw}} \equiv G_{\mathbf{k}}(t_{0})$ and the backward-source
-propagator $G_{\mathrm{bw}} \equiv G_{-\mathbf{k}_{\mathrm{bw}}}(t_{0})$, the
-wall-to-wall two-point function for source interpolator $\Gamma_{\mathrm{src}}$ and
-sink interpolator $\Gamma_{\mathrm{sink}}$ is
+The SS diagnostic follows the native GPT implementation. Each line is projected
+and spatially summed separately, with no volume normalization:
+\begin{align}
+F(t) &= \sum_{\mathbf y} e^{-i\mathbf k_{\rm fw}\cdot\mathbf y}
+                  G_{\rm fw}(\mathbf y,t),\\
+B(t) &= \sum_{\mathbf x} e^{+i\mathbf k_{\rm bw}\cdot\mathbf x}
+                  G_{\rm bw}(\mathbf x,t),\\
+C_{2}^{\rm SS}(t)
+ &= \Tr\!\left[\Gamma_{\rm src}\Gfive B(t)^\dagger\Gfive
+                     \Gamma_{\rm sink}F(t)\right].\label{eq:C2}
+\end{align}
+The momentum on the backward forward-propagating line is
+$-\mathbf k_{\rm bw}$; the extra positive phase above becomes negative upon
+taking the dagger. The routine takes both quark momenta explicitly, rather
+than attempting to recover them from their sum.
 
-\begin{equation}\label{eq:C2}
-C_{2}(t) \;=\;
-\sum_{\mathbf{x}} \Tr\Big[
-   \Gamma_{\mathrm{src}}\;
-   \gbar{G}_{\mathrm{bw}}(\mathbf{x}, t; t_{0})\;
-   \Gamma_{\mathrm{sink}}\;
-   G_{\mathrm{fw}}^{\mathrm{phased}}(\mathbf{x}, t; t_{0})
-\Big]\, ,
-\end{equation}
+The open matrices $F$ and $B$ are summed globally before multiplication.
+Tracing rank-local products and then reducing would lose products between
+different spatial MPI subdomains. One root-only reduction collects both open
+lines in global time order; rank zero then performs the small matrix trace.
 
-where
+\section{qTMDWF Diagnostic}
 
-\begin{itemize}[nosep]
-  \item $\gbar{G}_{\mathrm{bw}}$ is the gamma5-hermiticity-conjugated antiquark line,
-        Eq.~\eqref{eq:antiquark}.
-  \item $G_{\mathrm{fw}}^{\mathrm{phased}}$ is the forward propagator multiplied by
-        the meson momentum phase $\exp(-i\mathbf{p}\!\cdot\!\mathbf{x})$ with
-        $\mathbf{p} = \mathbf{k}_{\mathrm{fw}} + \mathbf{k}_{\mathrm{bw}}$.
-  \item The backward propagator is \emph{not} phased, because the wall source
-        $\eta_{-\mathbf{k}_{\mathrm{bw}}}(t_{0})$ already carries
-        $-\mathbf{k}_{\mathrm{bw}}$ in its construction; the antiquark line thus
-        naturally projects onto total momentum $\mathbf{p}$.
-\end{itemize}
-
-In the code, \walltag{contract\_wall\_2pt} performs this computation using
-three nested \einsum\ calls:
-
-\begin{enumerate}[nosep]
-  \item $\gbar{G}_{\mathrm{bw}}$ via gamma5 conjugation.
-  \item $\Gamma_{\mathrm{src}} \cdot \gbar{G}_{\mathrm{bw}} \cdot \Gamma_{\mathrm{sink}}$.
-  \item Trace with $G_{\mathrm{fw}}^{\mathrm{phased}}$ and spatial sum.
-\end{enumerate}
-
-The final index structure is \walltag{(sink\_key, src\_key, t)}, and after gathering
-across MPI ranks the time axis is rolled so that the source time $t_{0}$ maps to
-$t=0$.
-
-% ===========================================================================
-\section{qTMDWF-like Diagnostic Check}
-% ===========================================================================
-
-The qTMDWF diagnostic generalizes the two-point function by shifting the backward
-antiquark line transversely and longitudinally before contracting.  For transverse
-displacement $b_{T}$ along axis $\hat{n}_{T}$ and longitudinal displacement $b_{z}$:
-
+The SP diagnostic uses the full 16-element canonical raw sink Gamma basis:
 \begin{equation}\label{eq:tmdwf}
-C_{\mathrm{TMDWF}}(b_{T}, b_{z}, t) \;=\;
-\sum_{\mathbf{x}} \Tr\Big[
-   \Gamma_{\mathrm{src}}\;
-   \gbar{G}_{\mathrm{bw}}^{\,\mathrm{shift}}(\mathbf{x}, t; t_{0})\;
-   G_{\mathrm{fw}}^{\mathrm{phased}}(\mathbf{x}, t; t_{0})
-\Big]\, ,
+C_{\rm SP}^{g}(\mathbf b,t)=
+ \sum_{\mathbf x}e^{-i\mathbf p\cdot\mathbf x}
+ \Tr\!\left[\Gamma_{\rm src}\Gfive
+     G_{\rm bw}(\mathbf x+\mathbf b,t)^\dagger\Gfive
+     \Gamma_g G_{\rm fw}(\mathbf x,t)\right],
+\qquad \mathbf p=\mathbf k_{\rm fw}+\mathbf k_{\rm bw}.
 \end{equation}
+Here $\mathbf b=b_T\hat n_T+b_z\hat z$. The phase is evaluated at the
+unshifted forward coordinate. The source matrix is the first member of the
+selected pion pair; the sink scans the shared 16-Gamma basis independently
+of the second member, which is used by SS and C4.
 
-where $\gbar{G}_{\mathrm{bw}}^{\,\mathrm{shift}}$ is the gamma5-conjugated backward
-propagator shifted by $(b_{T}, b_{z})$.  The forward propagator is left unshifted.
+The return shape is \walltag{[sink\_gamma,separation,time]}, with separation
+flattened in direction, $b_T$, $b_z$ order. This is the native GPT
+\walltag{slice\_trDA} definition after cyclically rotating the trace.
+The Identity sink is index~9 (zero based). Raw PyQUDA \walltag{Y5} and
+\walltag{T5} require the stored \walltag{physical\_from\_pyquda} signs to match
+GPT's uniform $\gamma_\mu\gamma_5$ convention.
 
-This diagnostic is valuable because:
+SS and SP are different observables: SS has independent sums over $\mathbf x$
+and $\mathbf y$, whereas SP multiplies the lines at the same coordinate before
+summing. Their zero-displacement values need not agree. The former nine-component
+TMDWF compression relied on disconnected spin sums and has been removed;
+all shifted fields now retain the full spin-color structure.
 
-\begin{enumerate}[nosep]
-  \item It tests that the backward propagator carries the expected momentum
-        and spatial structure.
-  \item It previews the transverse displacement needed for the full soft factor.
-  \item For $b_{T}=0,\;b_{z}=0$ it reduces to a simpler trace that can be compared
-        against the two-point diagnostic as a consistency check.
-\end{enumerate}
 
-In the code, \walltag{contract\_tmdwf\_check} iterates over $b_{T}$ and $b_{z}$,
-applies coordinate-gauge shifts via \walltag{prop.shift()}, gamma5-conjugates the
-shifted propagator, and contracts against the phased forward propagator with a
-single $\Gamma_{\mathrm{src}}$ insertion (no sink interpolator).
-
-% ===========================================================================
 \section{Soft-Factor Four-Point Contraction}
 % ===========================================================================
 
@@ -506,12 +481,12 @@ Key & Matrix & Description \\
 \walltag{"X"}  & $\Gone$                        & $\gamma_{1}$ \\
 \walltag{"Y"}  & $\Gtwo$                        & $\gamma_{2}$ \\
 \walltag{"X5"} & $\Gone\Gfive$                  & $\gamma_{1}\gamma_{5}$ \\
-\walltag{"Y5"} & $\Gtwo\Gfive$                  & $\gamma_{2}\gamma_{5}$ \\
+\walltag{"Y5"} & $-\Gtwo\Gfive$                 & Raw PyQUDA axial channel \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-In the code these are stored in the dictionary \walltag{soft\_factor\_pyquda\_gammas},
+In the code these are stored in the dictionary \walltag{\_raw\_gamma\_by\_label},
 which maps each key to the corresponding PyQUDA \walltag{gamma} object.  The
 \walltag{gamma(15)} denotes $\Gfive$ (the 16th element in the standard Euclidean
 gamma basis, 0-indexed), and \walltag{gamma(0)} is the identity.
@@ -530,9 +505,8 @@ overlap at finite momentum.  Both $\Gamma_{1}/\Gamma_{2}$ (the soft-factor gamma
 insertions) and \walltag{pion\_src}/\walltag{pion\_sink} (the pion interpolators)
 are passed as Python dictionaries, so the user can supply arbitrary operator sets.
 
-The legacy convention is that the source and sink interpolator dictionaries
-are the same object by default, but they can be set independently to explore
-operator dependence.
+The source and sink matrices are the two members of each explicit pion
+channel pair; insertion channels likewise retain ordered Gamma1/Gamma2 pairs.
 
 \subsection{Gamma5 as \texorpdfstring{$\Gfive$}{gamma5}}
 
@@ -548,61 +522,31 @@ The matrix $\Gfive$ appears in three distinct roles:
 \end{enumerate}
 
 In the code, the variable \walltag{G5 = gamma.gamma(15)} is used for roles~1 and~2,
-while role~3 uses the entry \walltag{soft\_factor\_pyquda\_gammas["5"]}, which is
+while role~3 uses the entry \walltag{\_raw\_gamma\_by\_label["5"]}, which is
 the same underlying matrix.
 
 % ===========================================================================
+
 \section{Transverse Displacement Implementation}
-\paragraph{Global shift under MPI decomposition.}
-Every nonzero transverse displacement is applied to the complete PyQUDA
-\texttt{LatticePropagator} through \texttt{prop.shift}. This invokes the halo
-communication required when the transverse direction is MPI decomposed.
-Rolling a rank-local lexicographic array would instead wrap at the local
-subdomain boundary and produce a decomposition-dependent four-point function.
-% ===========================================================================
 
-\subsection{Coordinate-Gauge Shifts}
+Positive displacement reads the next coordinate:
+$G^{[b]}(x)=G(x+b\hat n)$, the convention of native GPT \walltag{cshift} and
+PyQUDA \walltag{shift}. On a single spatial partition this agrees with a
+\emph{negative} NumPy/CuPy roll. The historical positive roll has the opposite sign.
 
-The transverse displacement $\mathbf{b}$ is implemented by a global
-propagator shift in the coordinate gauge (CG). No explicit gauge link is
-inserted between the shifted quark fields. This is consistent with the CG
-convention used in the pion qTMD workflow.
+The canonical \walltag{\_shifted\_lexico\_array} walker advances one site at a
+time using reusable buffers. For a distributed direction it sends the first
+face to the minus neighbor and receives the plus neighbor's first face into
+the last face. Thus periodic wrapping uses the global lattice, not the local
+subdomain. The physics directions $x,y,z$ map to lexicographic axes $3,2,1$.
+Nested transverse and longitudinal walks own separate buffers; callers consume
+each temporary view before advancing its walk.
 
-For a displacement of $b_{T}$ lattice units along axis $\hat{n}_{T}$ (where
-$n_{T}=0$ means $x$, $n_{T}=1$ means $y$, $n_{T}=2$ means $z$), the operation is
+\walltag{bT\_dir} selects the transverse directions,
+\walltag{bT\_length} is the inclusive transverse maximum, and
+\walltag{bz\_length} is the inclusive longitudinal maximum for SP only.
 
-\begin{verbatim}
-    shifted_prop = prop.shift(bT, bT_dir)
-\end{verbatim}
 
-The PyQUDA field operation owns the conversion from physics direction to field
-layout and communicates across MPI subdomain boundaries. The rank-local
-lexicographic array is materialized only after the shift.
-
-\begin{center}
-\begin{tabular}{ll}
-\toprule
-\walltag{bT\_dir} & \walltag{axis} in lexicographic layout \\
-\midrule
-0 ($x$) & 3 \\
-1 ($y$) & 2 \\
-2 ($z$) & 1 \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\subsection{Displacement Parameters}
-
-\begin{itemize}[nosep]
-  \item \walltag{bT\_dir}: list of axes along which to displace, e.g.\
-        \walltag{[0]} for $x$ only, \walltag{[0, 1]} for both $x$ and $y$.
-  \item \walltag{bT\_length}: maximum displacement in lattice units (inclusive;
-        loop runs from $0$ to \walltag{bT\_length}).
-  \item \walltag{bz\_length}: maximum longitudinal displacement (default $0$,
-        used only in the qTMDWF diagnostic).
-\end{itemize}
-
-% ===========================================================================
 \section{Code Implementation}
 % ===========================================================================
 
@@ -629,10 +573,11 @@ Key & Description \\
 \end{tabular}
 \end{center}
 
-The channel axes are paired rather than Cartesian products.  The stored order
-is
-\texttt{[pion\_pair,gamma\_pair,bT\_direction,bT,time]} (with an outer
-\texttt{tsep} axis in the combined output).  Each pair label and both members
+The C4 channel axes are paired rather than Cartesian products. The stored order is
+\begin{verbatim}
+    [pion_pair, gamma_pair, bT_direction, bT, time]
+\end{verbatim}
+with an outer \texttt{tsep} axis in the combined output. Each pair label and both members
 are written explicitly to HDF5.  The insertion labels are resolved through the
 canonical raw PyQUDA basis
 \texttt{5,I,X,Y,X5,Y5}; in particular \texttt{Y5} is the raw bit-mask matrix,
@@ -659,10 +604,12 @@ Saves the propagator to HDF5 using \walltag{prop.saveH5(tag + ".h5", "propagator
 Optional metadata (lattice tag, configuration number, smearing, source time, quark
 momentum) is written as HDF5 attributes for reproducibility.
 
-\subsection{\walltag{load\_wall\_propagator(latt\_info, tag)}}
+\subsection{\walltag{load\_wall\_propagator(tag)}}
 
 Loads a previously saved propagator via
-\walltag{core.LatticePropagator.loadH5(tag + ".h5", "propagator")}.
+\begin{verbatim}
+    core.LatticePropagator.loadH5(tag + ".h5", "propagator")
+\end{verbatim}
 
 \subsection{\walltag{apply\_phase(prop, momentum, sign=1, x0=None)}}
 
@@ -677,281 +624,122 @@ Multiplies the propagator data by a momentum phase factor:
   \item Returns a copy of the propagator with the phased data.
 \end{itemize}
 
-\subsection{\walltag{contract\_wall\_2pt(latt\_info, prop\_fw, prop\_bw, pion\_mom, src\_key, sink\_keys)}}
 
-Computes the wall-to-wall two-point function, Eq.~\eqref{eq:C2}.  Steps:
+\subsection{SS and SP contractions}
 
-\begin{enumerate}[nosep]
-  \item Phase the forward propagator with $\exp(-i\mathbf{p}\!\cdot\!\mathbf{x})$.
-  \item Lexicographically reorder both propagators: \walltag{.lexico(False)}.
-  \item Gamma5-conjugate the backward propagator.
-  \item Contract with source and sink interpolators.
-  \item Trace and spatial sum.
-  \item Gather across MPI ranks.
-\end{enumerate}
+\walltag{contract\_wall\_2pt} takes lattice info, two propagators, both quark
+momenta and a pion pair label, and returns the global-time SS array on rank zero.
+The routine phases and sums each line separately, globally reduces the open
+matrices, and only then forms the full trace in Eq.~\eqref{eq:C2}.
 
-\subsection{\walltag{contract\_tmdwf\_check(latt\_info, prop\_fw, prop\_bw, pion\_mom, src\_key)}}
+\walltag{contract\_tmdwf\_check} takes lattice info, two propagators, the total
+pion momentum and a pion pair label. It prepares the forward/source operand
+once, walks the full backward field through all separations, and contracts
+against all 16 sink matrices. One root-only reduction returns
+\walltag{[16,n\_dir*(n\_bT+1)*(n\_bz+1),Lt]}.
+Non-root ranks return \walltag{None} in both routines. The application rolls
+the final time axis by $-t_0$ before writing the result.
 
-Computes the qTMDWF-like diagnostic, Eq.~\eqref{eq:tmdwf}.  Iterates over
-$(b_{T}, b_{z})$ and returns a flat list of time-series correlators.
 
-\subsection{\walltag{contract\_soft\_factor(latt\_info, prop\_fw, prop\_bw\_src, prop\_sink\_bw, prop\_sink\_fw, pion\_mom)}}
+\subsection{\walltag{contract\_soft\_factor}}
 
 The main four-point contraction, described in full in Sec.~\ref{sec:einsum}.
 Returns the five-dimensional array \walltag{(n\_src, n\_gm1, n\_dir, n\_bT+1, Lt)}
 together with the ordered key lists.
 
 % ===========================================================================
-\section{Einsum Contraction Patterns}
-\label{sec:einsum}
-% ===========================================================================
 
-The soft-factor contraction uses four \einsum\ calls per $(b_{T}, \Gamma_{1})$
-combination.  This is the most complex contraction in the Pyquda\_Measurement
-codebase.  We document the index conventions here.
+\section{Matrix Blocks and Trace Contractions}\label{sec:einsum}
 
-\subsection{Index Convention}
-
-In the time-major lexicographic layout, propagators carry the indices
-
+The lexicographic field order is
 \begin{equation}\label{eq:indices}
-\underbrace{t}_{\text{time}}\,
-\underbrace{z}_{\text{spatial }2}\,
-\underbrace{y}_{\text{spatial }1}\,
-\underbrace{x}_{\text{spatial }0}\,
-\underbrace{j}_{\text{spin sink}}\,
-\underbrace{i}_{\text{spin source}}\,
-\underbrace{b}_{\text{color sink}}\,
-\underbrace{a}_{\text{color source}}
+G[t,z,y,x,j,i,b,a],
 \end{equation}
-
-Gamma matrices are $4\times4$ with indices $(k,l)$ in spin space.  The
-interpolator stacks $\Gamma_{\mathrm{src}}$ and $\Gamma_{\mathrm{sink}}$ carry
-an additional leading batch index $s$ (enumerating the source or sink keys).
-Similarly, the $\Gamma_{1}$ and $\Gamma_{2}$ stacks carry a batch index over
-the gamma keys.
-
-\subsection{Einsum 1: Closed Block \texorpdfstring{$A_{b}$}{A\_b}}
-
-\begin{equation}\label{eq:einsum_A}
-\begin{aligned}
-A_{b} \;=\; &
-\einsum\big(
-   \text{\walltag{tzyxjiba, sik, kl, tzyxmlca, mn}}
-   \to \text{\walltag{stzyxjnbc}}, \\
-   &\qquad G_{w},\;
-        \Gamma_{\mathrm{src}}^{\mathrm{stack}},\;
-        \Gfive,\;
-        \big[G_{w}^{\mathrm{b}_{\perp}\dagger}\big]^{\mathrm{shift},\,\conj{}},\;
-        \Gfive
-\big)
-\end{aligned}
+where $(j,b)$ are the matrix row and $(i,a)$ the column. Packing into a
+$12\times12$ matrix interleaves spin and color; every spin insertion is
+$\Gamma\otimes I_3$. Both block builders implement
+\begin{equation}
+M(L,S,R)=L(S\otimes I_3)(\Gfive\otimes I_3)
+                  R^\dagger(\Gfive\otimes I_3).
 \end{equation}
+Source and sink preparation reuse fixed operands. The transpose applies to
+the conjugated propagator before right multiplication by gamma5, so the
+implementation does not assume a symmetric gamma5 matrix.
 
-Index mapping:
+For an independent index expansion of either block:
+\begin{verbatim}
+"tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc"
+\end{verbatim}
+The operands are $L$, the source/sink matrix stack, gamma5, $R^*$ and gamma5.
+Both outputs have normal matrix row/column order. Closing the C4 color trace
+therefore requires opposite color labels in the two blocks:
+\begin{verbatim}
+color_spin = xp.einsum("tzyxjiba,tzyxklab->tjikl", A, B)
+corr = xp.einsum("tjikl,gik,glj->gt", color_spin, Gamma2, Gamma1)
+\end{verbatim}
+The repeated \walltag{ba,ba} ordering in the historical implementation
+instead transposed only the color part of the second block and is incorrect.
+The SP projection of $A=G_{\rm fw}\Gamma_{\rm src}\bar G_{\rm bw}$ is
+\begin{verbatim}
+xp.einsum("tzyxjiaa,gij->gt", A, sink_gammas)
+\end{verbatim}
+The repeated color label explicitly takes the color diagonal; the spin
+labels close through the sink matrix. Spatial sums precede one batched
+root-only reduction for SP and C4.
 
-\begin{center}
-\begin{tabular}{ll}
-\toprule
-Index & Carried by \\
-\midrule
-$t,z,y,x$ & Spacetime (summed/kept depending on position) \\
-$j,i$     & Spin sink/source of $G_{w}$ \\
-$b,a$     & Color sink/source of $G_{w}$ \\
-$s$       & Batch over source interpolator keys \\
-$k,l,m,n$ & Spin contraction indices (closed in the einsum) \\
-$l,c$     & Spin/color of $G_{w}^{\mathrm{b}_{\perp}\dagger}$ (sink side) \\
-$n,c$     & Output spin/color indices \\
-\bottomrule
-\end{tabular}
-\end{center}
 
-The superscript ``shift, $\conj{}$'' means that $G_{w}^{\mathrm{b}_{\perp}\dagger}$
-has been rolled by $b_{T}$ along the appropriate spatial axis and then complex
-conjugated (the dagger in the name).  The two $\Gfive$ insertions perform the
-gamma5-hermiticity conjugation of the shifted propagator.
 
-The output block $A_{b}$ has shape $(s, t, z, y, x, j, n, b, c)$, where $s$
-indexes the source interpolator, $(j,n)$ are the open spin indices, and $(b,c)$
-are the open color indices that will connect to $B_{b}$.
-
-\subsection{Einsum 2: Closed Block \texorpdfstring{$B_{b}$}{B\_b}}
-
-\begin{equation}\label{eq:einsum_B}
-\begin{aligned}
-B_{b} \;=\; &
-\einsum\big(
-   \text{\walltag{tzyxjiba, sik, kl, tzyxmlca, mn}}
-   \to \text{\walltag{stzyxjnbc}}, \\
-   &\qquad G_{w}^{\mathrm{b}_{\perp},\,\mathrm{shift}},\;
-        \Gamma_{\mathrm{sink}}^{\mathrm{stack}},\;
-        \Gfive,\;
-        \big[G_{w}^{\dagger}\big]^{\conj{}},\;
-        \Gfive
-\big)
-\end{aligned}
-\end{equation}
-
-This is structurally identical to $A_{b}$ but with different propagators and
-interpolators:
-
-\begin{itemize}[nosep]
-  \item $G_{w}^{\mathrm{b}_{\perp},\,\mathrm{shift}}$ is the transversely shifted
-        \emph{and sink-phased} backward quark propagator.
-  \item $G_{w}^{\dagger}$ is the forward antiquark propagator from the sink
-        time slice, complex conjugated but \emph{not} shifted.
-  \item $\Gamma_{\mathrm{sink}}$ replaces $\Gamma_{\mathrm{src}}$.
-\end{itemize}
-
-\subsection{Einsum 3: Four-Point Trace}
-
-\begin{equation}\label{eq:einsum_C4}
-\begin{aligned}
-C_{4}(\mathbf{x}, t) \;=\; &
-\einsum\big(
-   \text{\walltag{tzyxjiba, ik, tzyxklba, lj}}
-   \to \text{\walltag{tzyx}}, \\
-   &\qquad A_{b}[\text{isrc}],\;
-        \Gamma_{2}[\text{igm}],\;
-        B_{b}[\text{isrc}],\;
-        \Gamma_{1}[\text{igm}]
-\big)
-\end{aligned}
-\end{equation}
-
-This einsum closes the spin and color indices:
-
-\begin{itemize}[nosep]
-  \item $j$ (spin of $A_{b}$)$\;\to\;$ $i$ (row of $\Gamma_{2}$)
-  \item $k$ (column of $\Gamma_{2}$) $\;\to\;$ $k$ (spin of $B_{b}$)
-  \item $l$ (spin of $B_{b}$) $\;\to\;$ $l$ (row of $\Gamma_{1}$)
-  \item $j$ (column of $\Gamma_{1}$) $\;\to\;$ $j$ (spin of $A_{b}$)
-  \item $b,a$ color indices are traced within \einsum.
-\end{itemize}
-
-The result is a scalar on spin-color space at each spacetime point $(\mathbf{x},t)$.
-
-\subsection{Einsum 4: Time Projection}
-
-\begin{equation}\label{eq:einsum_time}
-C_{4}(t) \;=\;
-\einsum\big(
-   \text{\walltag{tzyx $\to$ t}},\;
-   C_{4}(\mathbf{x}, t)
-\big)
-\end{equation}
-
-This sums over the spatial volume $\mathbf{x} = (z,y,x)$ at each time slice,
-yielding the time-series correlator $C_{4}(t)$.  After this step the result is
-gathered across MPI ranks.
-
-\subsection{Full Loop Structure}
-
-The contraction loops are nested as follows (outermost first):
-
-\begin{enumerate}[nosep]
-  \item $b_{T}$ direction (\walltag{idir})
-  \item $b_{T}$ magnitude (0 to \walltag{bT\_length})
-  \item Source interpolator key (\walltag{isrc})
-  \item Gamma-1 key (\walltag{igm})
-\end{enumerate}
-
-For each $(b_{T}, \text{dir})$ pair, the shifted propagators and the two blocks
-$A_{b}$, $B_{b}$ are computed \emph{outside} the $(\text{isrc}, \text{igm})$ loops.
-Only the final trace (Einsum~3) and time projection (Einsum~4) are inside the
-inner loops.  This is a significant optimization because the block construction
-dominates the computational cost.
-
-% ===========================================================================
 \section{HDF5 Output Structure}
-% ===========================================================================
 
-\subsection{Propagator Files}
-
-\begin{verbatim}
-data/pion_soft_factor_prop/
-  {lat}.pion_soft_factor_prop.{cfg}.{ama}.{src}.{sm}.{mom}.h5
-\end{verbatim}
-
-Each file contains a single dataset \walltag{"propagator"} and HDF5 attributes:
-\walltag{lat\_tag}, \walltag{config\_num}, \walltag{sm\_tag}, \walltag{tslice},
-\walltag{quark\_momentum} (as int32 array).
-
-\subsection{Two-Point Diagnostic}
+Propagator files are unchanged and can be reused for corrected contractions.
+Every new correlator file records the following metadata:
+\begin{itemize}[nosep]
+  \item \walltag{soft\_factor\_schema}: \walltag{full\_spin\_color\_v3}.
+  \item \walltag{correlator\_definition} and axis names.
+  \item The positive-shift convention and canonical raw basis metadata.
+  \item \walltag{physical\_from\_pyquda} for the Gamma convention conversion.
+\end{itemize}
+Old correlator files do not satisfy this schema and must be recontracted;
+there is no legacy contraction mode or duplicate output hierarchy.
 
 \begin{verbatim}
-data/pion_soft_factor_c2pt/
-  {lat}.pion_soft_factor_c2pt.{cfg}.{ama}.{src}.{sm}.fw_{mom1}.bw_{mom2}.h5
+SS:
+  /SS/pion_pair/{pair}/PX{px}PY{py}PZ{pz}
+SP:
+  /SP/pion_pair/{pair}/PX{px}PY{py}PZ{pz}/gamma/{sink}/b_X/bT{b}/bz{z}
+C4:
+  /pion_pair/{pair}/gamma_pair/{gpair}/bX_{b}/ts{tsep}
 \end{verbatim}
+Each leaf is one complex global-time array, already rolled by the application.
+SP writes all 16 sink labels in \walltag{sink\_gamma\_labels}; transverse
+directions also include \walltag{b\_Y}/\walltag{b\_Z}. SS records both
+\walltag{quark\_momentum\_fw} and \walltag{quark\_momentum\_bw}; its displayed
+pion momentum is their sum. C4 retains the paired source/sink and insertion
+labels and explicit source/sink matrices.
 
-HDF5 group hierarchy (from \walltag{save\_pion\_soft\_factor\_c2pt\_hdf5\_noRoll}):
 
-\begin{verbatim}
-  /SS/{src_key}/{sink_key}/PX{p[0]}PY{p[1]}PZ{p[2]}   -> dataset
-\end{verbatim}
 
-\subsection{qTMDWF Diagnostic}
+\section{Comparison with Native GPT and Validation}
 
-\begin{verbatim}
-data/pion_soft_factor_qTMDWF/
-  {lat}.pion_soft_factor_qTMDWF.{cfg}.{ama}.{src}.{sm}.fw_{mom1}.bw_{mom2}.h5
-\end{verbatim}
+The reference is the native GPT matrix expression
+$\sum_x\Tr[A\Gamma_2B\Gamma_1]$, not the historical explicit-einsum script.
+SS and SP use the native GPT spatial-sum definitions. Gamma labels use the
+repository's shared canonical raw basis; apply its stored transform before
+comparing with GPT's uniform axial convention. Fixed gauge preprocessing,
+wall-source momenta, phase origin, shift sign and source time must also match.
 
-HDF5 group hierarchy (from \walltag{save\_pion\_soft\_factor\_qTMDWF\_hdf5\_noRoll}):
+\walltag{tests/soft\_factor\_reference.py} independently copies each
+spin/color component into matrix rows and columns and uses NumPy matrix
+products, adjoints and traces. It does not call production packing, block,
+einsum or halo routines. Tests cover random complex inputs and interpolators,
+all 16 SP sinks, ordered C4 insertions, nonzero phases, asymmetric volumes,
+positive shifts and wraps, input immutability, SS cross-site/cross-rank terms,
+root ownership, HDF5 channel identity and raw-to-physical Gamma signs.
+Exact norm and off-diagonal color examples catch the former disconnected-spin
+and color-transpose errors. CPU halo fixtures check neighbor direction and
+boundary faces; they do not replace a real distributed GPU production rerun.
 
-\begin{verbatim}
-  /SP/{src_key}/PX{px}PY{py}PZ{pz}/{b_dir}/bT{bT}/bz{bz}   -> dataset
-\end{verbatim}
 
-\subsection{Four-Point Soft Factor}
-
-\begin{verbatim}
-data/pion_soft_factor/
-  {lat}.pion_soft_factor.{cfg}.{ama}.{src}.{sm}.fw_{mom1}.bw_{mom2}.h5
-\end{verbatim}
-
-HDF5 group hierarchy (from \walltag{save\_pion\_soft\_factor\_hdf5\_noRoll}):
-
-\begin{verbatim}
-  /src{src_key}_sink{sink_key}/{gm1}_{gm2}/{b_dir}_{bT}/ts{tsep}   -> dataset
-\end{verbatim}
-
-Each dataset contains a 1D complex array of length $L_{t}$, the time-series
-correlator for that combination of source interpolator, gamma insertions,
-transverse displacement, and sink separation.
-
-% ===========================================================================
-\section{Comparison with Legacy Code}
-% ===========================================================================
-
-This implementation is a port from the GPT/PyQUDA mixed workflow
-\walltag{PyQUDA\_qTMD\_ff\_4pt\_einsum.py}.  The key differences are:
-
-\begin{enumerate}[nosep]
-  \item \textbf{Pure PyQUDA}: No GPT dependency.  All gauge fixing, smearing,
-        inversion, and I/O use the PyQUDA stack.
-  \item \textbf{HDF5 propagator storage}: Propagators are saved between Stage~1
-        and Stage~2, enabling (a) decoupled production and analysis, (b) reuse
-        of propagators for multiple contraction parameter sets, and
-        (c) portability across machines (propagators can be analyzed locally).
-  \item \textbf{Identical physics}: The contraction patterns, gamma conventions,
-        phase factors, and wall-source definitions are preserved from the legacy
-        workflow to ensure output compatibility.  The numerical results should
-        agree to machine precision with the GPT/PyQUDA mixed code.
-  \item \textbf{Class-based design}: The \walltag{pion\_soft\_factor} class
-        encapsulates all parameters and provides methods for each computational
-        step, improving maintainability and enabling unit testing.
-  \item \textbf{Backend abstraction}: All \einsum\ calls are dispatched through
-        \walltag{xp} (which can be \walltag{numpy}, \walltag{cupy}, \walltag{dpnp},
-        or \walltag{torch}), so the same code runs on CPU, NVIDIA GPU, Intel GPU,
-        or PyTorch backends without modification.  Gamma stacks are first moved
-        to the backend and, for \walltag{dpnp}, the exact SYCL queue of the
-        reference propagator before stacking.  Gathered arrays use the shared
-        backend-aware host conversion rather than backend-specific
-        \walltag{asnumpy} calls.
-\end{enumerate}
-
-% ===========================================================================
 \section*{Acknowledgments}
 
 This work builds on the PyQUDA framework and the legacy GPT/PyQUDA mixed

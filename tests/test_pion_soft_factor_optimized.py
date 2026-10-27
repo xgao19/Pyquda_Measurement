@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
+from soft_factor_reference import adjoint, four_point, matrices, spin, tmdwf
 
 
 class Prop:
@@ -54,29 +55,8 @@ def test_shift_walk_matches_pyquda_sign_and_wraparound(monkeypatch, local):
         np.testing.assert_array_equal(prop.data, data)
 
 
-def reference_four_point(m, props):
-    fw, bw, sink_bw, sink_fw = [prop.data for prop in props]
-    src = np.stack([pair[0] for pair in m.pion_channel_pairs.values()])
-    sink = np.stack([pair[1] for pair in m.pion_channel_pairs.values()])
-    out = np.empty((2, 3, 2, 4, fw.shape[0]), complex)
-    for idir, direction in enumerate(m.bT_dir):
-        for b in range(m.bT_length + 1):
-            a = np.einsum('tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc',
-                          fw, src, soft.G5, np.roll(bw, -b, axis=3-direction).conj(), soft.G5,
-                          optimize=True)
-            c = np.einsum('tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc',
-                          np.roll(sink_bw, -b, axis=3-direction), sink, soft.G5,
-                          sink_fw.conj(), soft.G5, optimize=True)
-            for i in range(2):
-                for j, (g1, g2) in enumerate(m.gamma_channel_pairs.values()):
-                    out[i, j, idir, b] = np.einsum(
-                        'tzyxjiba,ik,tzyxklba,lj->t', a[i], soft._raw_gamma_by_label[g2],
-                        c[i], soft._raw_gamma_by_label[g1], optimize=True)
-    return out
-
-
 @pytest.mark.parametrize('grid', [[1, 1, 1, 1], [1, 5, 4, 5]])
-def test_full_contractions_match_legacy_with_changing_inputs(monkeypatch, grid):
+def test_full_contractions_match_matrix_traces_with_changing_inputs(monkeypatch, grid):
     rng = np.random.default_rng(410)
     shape = (2, 2, 2, 2, 4, 4, 3, 3)
     props = [Prop(rng.normal(size=shape) + 1j*rng.normal(size=shape)) for _ in range(4)]
@@ -100,18 +80,13 @@ def test_full_contractions_match_legacy_with_changing_inputs(monkeypatch, grid):
     for _ in range(2):
         before = [prop.data.copy() for prop in props]
         actual, plabels, glabels = m.contract_soft_factor(info, *props, [0, 0, 0])
-        np.testing.assert_allclose(actual, reference_four_point(m, props), rtol=1e-12, atol=1e-10)
+        expected = four_point(m, [p.data for p in props], soft.G5, soft._raw_gamma_by_label, [0, 0, 0])
+        np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-10)
         assert plabels == list(m.pion_channel_pairs) and glabels == list(m.gamma_channel_pairs)
         for label, (src, _) in m.pion_channel_pairs.items():
             actual = m.contract_tmdwf_check(info, *props[:2], [0, 0, 0], label)
-            reference = []
-            for direction in m.bT_dir:
-                for b in range(4):
-                    for z in range(4):
-                        shifted = np.roll(np.roll(props[1].data, -b, axis=3-direction), -z, axis=1)
-                        bar = np.einsum('ij,tzyxmlca,kl->tzyxkjca', soft.G5, shifted.conj(), soft.G5)
-                        left = np.einsum('ij,tzyxjlca->tzyxilca', src, bar)
-                        reference.append(np.einsum('tzyxjiab,tzyxilba->t', left, props[0].data))
+            reference = tmdwf(props[0].data, props[1].data, src, soft.G5,
+                              list(soft._raw_gamma_by_label.values()), [0, 0, 0], m.bT_dir, 3, 3)
             np.testing.assert_allclose(actual, reference, rtol=1e-12, atol=1e-10)
         for prop, old in zip(props, before):
             np.testing.assert_array_equal(prop.data, old)
@@ -121,18 +96,19 @@ def test_full_contractions_match_legacy_with_changing_inputs(monkeypatch, grid):
     assert len(reductions) == 6
 
 
-def test_prepared_matrix_blocks_match_original_einsum():
+def test_prepared_matrix_blocks_match_independent_matrix_products():
     rng = np.random.default_rng(411)
     shape = (2, 1, 2, 3, 4, 4, 3, 3)
     left = rng.normal(size=shape) + 1j*rng.normal(size=shape)
     right = rng.normal(size=shape) + 1j*rng.normal(size=shape)
     gammas = rng.normal(size=(3, 4, 4)) + 1j*rng.normal(size=(3, 4, 4))
-    ref = np.einsum('tzyxjiba,sik,kl,tzyxmlca,mn->stzyxjnbc',
-                    left, gammas, soft.G5, right, soft.G5, optimize=True)
-    a = soft._soft_factor_block_from_left(soft._prepare_soft_factor_left(left, gammas, soft.G5), right)
-    b = soft._soft_factor_block_from_right(left, soft._prepare_soft_factor_right(gammas, soft.G5, right))
-    np.testing.assert_allclose(a, ref, rtol=1e-12, atol=1e-11)
-    np.testing.assert_allclose(b, ref, rtol=1e-12, atol=1e-11)
+    g5 = rng.normal(size=(4, 4)) + 1j*rng.normal(size=(4, 4))
+    a = soft._soft_factor_block_from_left(soft._prepare_soft_factor_left(left, gammas, g5), right.conj())
+    b = soft._soft_factor_block_from_right(left, soft._prepare_soft_factor_right(gammas, g5, right.conj()))
+    for index, gamma in enumerate(gammas):
+        ref = matrices(left) @ spin(gamma) @ spin(g5) @ adjoint(matrices(right)) @ spin(g5)
+        np.testing.assert_allclose(matrices(a[index]), ref, rtol=1e-12, atol=1e-10)
+        np.testing.assert_allclose(matrices(b[index]), ref, rtol=1e-12, atol=1e-10)
 
 
 @pytest.mark.parametrize('rank', [0, 1])

@@ -449,6 +449,20 @@ def _matrix_for_hdf5(matrix):
     return np.asarray(matrix)
 
 
+def _write_pion_soft_factor_metadata(handle, definition, axes):
+    """Identify corrected contractions and the shared raw Gamma basis."""
+    _write_h5_attrs(handle, {
+        **basis_attrs(),
+        "soft_factor_schema": "full_spin_color_v3",
+        "correlator_definition": definition,
+        "dataset_axes": axes,
+        "gamma_convention": "canonical_raw_pyquda",
+        "shift_convention": "positive_displacement_reads_x_plus_b",
+    })
+    for name, values in basis_metadata().items():
+        handle.create_dataset(name, data=values)
+
+
 def save_pion_soft_factor_hdf5_noRoll(
     corr,
     tag,
@@ -462,12 +476,9 @@ def save_pion_soft_factor_hdf5_noRoll(
     save_h5 = tag + ".h5"
     ensure_parent_dir(save_h5)
     f = h5py.File(save_h5, 'w')
-    _write_h5_attrs(f, {
-        **basis_attrs(),
-        "soft_factor_schema": "paired_channels_v2",
-        "dataset_axes": "tsep,pion_pair,gamma_pair,bT_direction,bT,time",
-        "gamma_convention": "canonical_raw_pyquda",
-    })
+    _write_pion_soft_factor_metadata(
+        f, "sum_x_trace_A_Gamma2_B_Gamma1",
+        "tsep,pion_pair,gamma_pair,bT_direction,bT,time")
 
     pion_pair_labels = list(pion_channel_pairs)
     gamma_pair_labels = list(gamma_channel_pairs)
@@ -489,9 +500,6 @@ def save_pion_soft_factor_hdf5_noRoll(
         "gamma2_labels",
         data=np.asarray([gamma_channel_pairs[label][1] for label in gamma_pair_labels], dtype="S"),
     )
-    for name, values in basis_metadata().items():
-        f.create_dataset(name, data=values)
-
     bT_list = ["bX", "bY", "bZ"]
     if latt_info.mpi_rank == 0:
         print(f"no roll")
@@ -518,24 +526,29 @@ def save_pion_soft_factor_qTMDWF_hdf5_noRoll(corr, tag, pion_pair_label, momentu
     if latt_info.mpi_rank == 0:
         print(f"no roll")
         print(f"corr.shape, {np.shape(corr)}")
-    f.attrs["channel_schema"] = "paired_channels_v2"
+    _write_pion_soft_factor_metadata(
+        f, "SP_sum_x_trace_source_bar_backward_sink_forward",
+        "sink_gamma,bT_direction,bT,bz,time")
+    f.create_dataset("sink_gamma_labels", data=np.asarray(GAMMA_LABELS, dtype="S"))
     sm = f.require_group("SP")
     g_src = sm.require_group("pion_pair").require_group(str(pion_pair_label))
     p_tag = "PX"+str(momentum[0])+"PY"+str(momentum[1])+"PZ"+str(momentum[2])
     g_p = g_src.require_group(p_tag)
-    idx = 0
-    for direction in bT_dir:
-        g_T = g_p.require_group(bT_list[direction])
-        for bT in range(bT_length + 1):
-            g_bT = g_T.require_group("bT" + str(bT))
-            for bz in range(bz_length + 1):
-                g_bT.create_dataset("bz" + str(bz), data=corr[idx])
-                idx += 1
+    for igamma, label in enumerate(GAMMA_LABELS):
+        g_gamma = g_p.require_group("gamma").require_group(label)
+        idx = 0
+        for direction in bT_dir:
+            g_T = g_gamma.require_group(bT_list[direction])
+            for bT in range(bT_length + 1):
+                g_bT = g_T.require_group("bT" + str(bT))
+                for bz in range(bz_length + 1):
+                    g_bT.create_dataset("bz" + str(bz), data=corr[igamma, idx])
+                    idx += 1
     f.close()
 
 
 # Save the wall-to-wall two-point diagnostic used by the pion soft-factor workflow.
-def save_pion_soft_factor_c2pt_hdf5_noRoll(corr, tag, pion_pair_label, momentum, latt_info):
+def save_pion_soft_factor_c2pt_hdf5_noRoll(corr, tag, pion_pair_label, quark_mom_fw, quark_mom_bw, latt_info):
     save_h5 = tag + ".h5"
     ensure_parent_dir(save_h5)
     f = h5py.File(save_h5, 'w')
@@ -543,7 +556,11 @@ def save_pion_soft_factor_c2pt_hdf5_noRoll(corr, tag, pion_pair_label, momentum,
     if latt_info.mpi_rank == 0:
         print(f"no roll")
         print(f"corr.shape, {np.shape(corr)}")
-    f.attrs["channel_schema"] = "paired_channels_v2"
+    _write_pion_soft_factor_metadata(
+        f, "SS_trace_product_of_separately_projected_spatial_sums", "time")
+    f.attrs["quark_momentum_fw"] = np.asarray(quark_mom_fw, dtype=np.int32)
+    f.attrs["quark_momentum_bw"] = np.asarray(quark_mom_bw, dtype=np.int32)
+    momentum = np.asarray(quark_mom_fw) + np.asarray(quark_mom_bw)
     sm = f.require_group("SS")
     g_src = sm.require_group("pion_pair").require_group(str(pion_pair_label))
     p_tag = "PX"+str(momentum[0])+"PY"+str(momentum[1])+"PZ"+str(momentum[2])

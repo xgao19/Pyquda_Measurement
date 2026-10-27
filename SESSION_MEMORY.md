@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-10-20
+Last updated: 2026-10-27
 
 This file contains only reusable environment facts, stable conventions, and
 pitfalls that are easy to repeat.  Commit history and completed-work summaries
@@ -183,6 +183,17 @@ belong in `log.md` and Git history.
   bases may be extended without changing measurement identity.
 
 ## qTMD Conventions And Pitfalls
+
+- Pion soft-factor contractions use `full_spin_color_v3`. SS C2 phases and
+  globally sums each open wall line before multiplication; local products
+  lose cross-site and cross-rank terms. SP qTMDWF instead sums local products
+  and returns `[16, separation, time]` in the canonical raw sink basis.
+- Soft-factor references are full spin-color matrix traces, not the historical
+  einsum code. The removed nine-component SP factorization relied on invalid
+  spin sums. Both blocks have normal matrix color order, so C4 closes `ba,ab`.
+- Compare SP with native GPT after applying `physical_from_pyquda` (Y5/T5
+  axial signs); the Identity sink is index 9. Positive shifts read `x+b`.
+  Old correlators require recontraction; saved wall propagators remain usable.
 
 - Keep common CG/GI geometry and transport in `qtmd_operator_utils.py`;
   connected code must not import disconnected production modules.

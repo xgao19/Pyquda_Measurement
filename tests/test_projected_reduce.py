@@ -191,14 +191,19 @@ def test_soft_factor_reductions_preserve_axes_and_root_results(monkeypatch, rank
         return projected[-1] if rank == 0 else None
 
     monkeypatch.setattr(soft_factor, '_reduce_spatial_projected', reduce)
-    wall = measurement.contract_wall_2pt(info, *props[:2], [0, 0, 1], '5')
+    wall = measurement.contract_wall_2pt(info, *props[:2], [0, 0, 1], [0, 0, 0], '5')
     tmdwf = measurement.contract_tmdwf_check(info, *props[:2], [0, 0, 1], '5')
     corr, pion_labels, gamma_labels = measurement.contract_soft_factor(info, *props, [0, 0, 1])
     assert len(projected) == 3
     assert pion_labels == ['5'] and gamma_labels == ['5', 'XY']
     if rank == 0:
-        np.testing.assert_array_equal(wall, projected[0])
-        np.testing.assert_array_equal(tmdwf, projected[1].reshape(8, 2))
+        from soft_factor_reference import wall_2pt
+
+        # Scaling both globally summed lines by three scales SS by nine.
+        expected = wall_2pt(*[p.data for p in props[:2]], soft_factor.G5,
+                            soft_factor.G5, soft_factor.G5, [0, 0, 0], [0, 0, 0])
+        np.testing.assert_allclose(wall, 9 * expected)
+        np.testing.assert_array_equal(tmdwf, projected[1].reshape(16, 8, 2))
         np.testing.assert_array_equal(corr, projected[2])
     else:
         assert wall is None and tmdwf is None and corr is None

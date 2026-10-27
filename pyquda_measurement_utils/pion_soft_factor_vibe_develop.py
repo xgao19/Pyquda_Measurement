@@ -1,9 +1,8 @@
 """
 Pion soft-factor four-point workflow in PyQUDA.
 
-This module ports the legacy GPT/PyQUDA mixed workflow
-``PyQUDA_qTMD_ff_4pt_einsum.py`` to a PyQUDA-native structure.  The calculation
-is intentionally split into two stages:
+This module implements the native GPT matrix-trace definitions in PyQUDA.
+The calculation is intentionally split into two stages:
 
 1. Generate and save Coulomb-gauge wall-source propagators for every source
    time slice and for every requested quark momentum.
@@ -31,14 +30,22 @@ the same wall-source pion diagnostics as the legacy code.  The antiquark line is
 
     Gbar_bw(x; t0) = gamma5 G_bw(x; t0)^dagger gamma5.
 
-For a source interpolator ``Gamma_src`` and sink interpolator ``Gamma_sink``,
+The SS two-point diagnostic projects each wall line separately. For forward
+quark momentum ``kf`` and backward quark momentum ``kb``, define
 
-    C2(t) = sum_x Tr[
-        Gamma_src Gbar_bw(x; t0) Gamma_sink G_fw(x; t0)
-    ].
+    F(t) = sum_x exp(-i kf.x) G_fw(x; t0),
+    B(t) = sum_x exp(+i kb.x) G_bw(x; t0),
+    C2_SS(t) = Tr[Gamma_src gamma5 B(t)^dagger gamma5 Gamma_sink F(t)].
 
-The TMDWF-like check additionally shifts the backward line by ``bT`` and ``bz``
-before the same trace.
+The SP TMDWF diagnostic retains the full canonical raw 16-Gamma sink basis:
+
+    C_SP(g, b, t) = sum_x exp[-i (kf+kb).x]
+        Tr[Gamma_src gamma5 G_bw(x+b)^dagger gamma5 Gamma_g G_fw(x)].
+
+The positive shift reads x+b, including across MPI boundaries. SS and SP have
+different spatial sums; their zero-displacement values need not agree. The raw
+Y5 and T5 channels require the stored physical_from_pyquda signs for comparison
+with GPT's uniform gamma_mu gamma5 convention.
 
 Soft-factor four-point contraction
 ----------------------------------
@@ -65,8 +72,8 @@ The soft-factor four-point correlator is then
     C4(t; tsep, b, Gamma1, Gamma2) =
         sum_x Tr[ A_b(x) Gamma2 B_b(x) Gamma1 ].
 
-The gamma lists and default pion interpolators are kept close to the legacy
-script so that output can be compared directly before further refactoring.
+All traces close both spin and color indices. The historical explicit einsum
+implementation is not a reference for the contraction algebra.
 """
 
 from pathlib import Path
@@ -141,7 +148,7 @@ def _prepare_soft_factor_left(left, gamma_ls, gamma5):
 def _soft_factor_block_from_left(prepared, right):
     factor, gamma5_12, spatial = prepared
     xp = _get_xp_from_array(right)
-    right_t = xp.swapaxes(xp.matmul(gamma5_12, _spin_color_matrix(xp, right)), -1, -2)
+    right_t = xp.matmul(xp.swapaxes(_spin_color_matrix(xp, right), -1, -2), gamma5_12)
     return _unpack_soft_factor_block(xp, xp.matmul(factor, right_t[None]), spatial)
 
 
@@ -149,7 +156,7 @@ def _prepare_soft_factor_right(gamma_ls, gamma5, right):
     """Prepare the fixed sink-side operand once per sink separation."""
     xp = _get_xp_from_array(right)
     spin12, gamma5_12 = _soft_factor_spin_matrices(gamma_ls, gamma5, right)
-    right_t = xp.swapaxes(xp.matmul(gamma5_12, _spin_color_matrix(xp, right)), -1, -2)
+    right_t = xp.matmul(xp.swapaxes(_spin_color_matrix(xp, right), -1, -2), gamma5_12)
     return xp.matmul(spin12[:, None], right_t[None]), right.shape[:4]
 
 
@@ -163,20 +170,6 @@ def _soft_factor_block_from_right(left, prepared):
 def _shifted_lexico(prop, length, direction):
     """Convert once, then consume the lexicographic walk's temporary views."""
     yield from _shifted_lexico_array(prop.lexico(False), length, direction)
-
-
-def _tmdwf_components(forward, backward, src_gamma, gamma5):
-    """Prepare two nine-component operands of the legacy TMDWF bilinear.
-
-    Its remaining backward spin dependence factors as v[i] * left[a,b],
-    where v[i] = sum_j gamma5[j,i]. Absorb v into the forward operand before
-    any coordinate shifts. This factorization is specific to this bilinear,
-    not a compression of general propagators or four-point blocks.
-    """
-    xp = _get_xp_from_array(forward)
-    left_c = xp.einsum("nk,kl,tzyxmlab->tzyxab", src_gamma, gamma5, backward.conj(), optimize=True)
-    forward_c = xp.einsum("ji,tzyxilba->tzyxab", gamma5, forward, optimize=True)
-    return left_c, forward_c
 
 
 def _shifted_lexico_array(field, length, direction):
@@ -300,37 +293,50 @@ class pion_soft_factor:
         phased.data[:] = phased.data * mom_phase[:, :, :, :, :, None, None, None, None]
         return phased
 
-    def contract_wall_2pt(self, latt_info, prop_fw, prop_bw, pion_mom, pion_pair_label):
+    def contract_wall_2pt(self, latt_info, prop_fw, prop_bw, quark_mom_fw, quark_mom_bw, pion_pair_label):
+        """Trace separately projected, globally summed wall lines (GPT SS)."""
         xp = _get_xp_from_array(prop_fw.data)
         src_matrix, sink_matrix = self.pion_channel_pairs[pion_pair_label]
         src_gamma = matrix_on_backend(src_matrix, prop_fw.data)
         sink_gamma = matrix_on_backend(sink_matrix, prop_fw.data)
         gamma5 = matrix_on_backend(G5, prop_fw.data)
-        prop_fw_phase = self.apply_phase(prop_fw, [-pion_mom[0], -pion_mom[1], -pion_mom[2]], 1)
-        prop_fw_t = prop_fw_phase.lexico(False)
-        prop_bw_bar = xp.einsum("ij,tzyxmlca,kl->tzyxkjca", gamma5, prop_bw.lexico(False).conj(), gamma5, optimize=True)
-        prop_bw_src_sink = xp.einsum("ik,tzyxklca,ln->tzyxinca", src_gamma, prop_bw_bar, sink_gamma, optimize=True)
-        corr_local = xp.einsum("tzyxjiab,tzyxilba->tzyx", prop_bw_src_sink, prop_fw_t, optimize=True)
-        corr_t = xp.einsum("tzyx->t", corr_local, optimize=True)
-        return _reduce_spatial_projected(array_to_numpy(corr_t))
+        forward = self.apply_phase(prop_fw, [-p for p in quark_mom_fw], 1)
+        backward = self.apply_phase(prop_bw, quark_mom_bw, 1)
+        local_sums = xp.stack([
+            xp.einsum("tzyxijab->ijabt", prop.lexico(False), optimize=True)
+            for prop in (forward, backward)
+        ])
+        summed = _reduce_spatial_projected(array_to_numpy(local_sums))
+        if latt_info.mpi_rank != 0:
+            return None
+        # Reduce the open matrices before multiplying, retaining cross-rank terms.
+        fw, bw = summed.transpose(0, 5, 1, 3, 2, 4).reshape(2, -1, 12, 12)
+        src12, sink12, g512 = [
+            np.kron(array_to_numpy(matrix), np.eye(3))
+            for matrix in (src_gamma, sink_gamma, gamma5)
+        ]
+        bar = g512 @ bw.conj().swapaxes(-1, -2) @ g512
+        return np.trace(src12 @ bar @ sink12 @ fw, axis1=-2, axis2=-1)
 
     def contract_tmdwf_check(self, latt_info, prop_fw, prop_bw, pion_mom, pion_pair_label):
+        """Return GPT SP traces as [sink_gamma, separation, global_time]."""
         xp = _get_xp_from_array(prop_fw.data)
         src_matrix, _ = self.pion_channel_pairs[pion_pair_label]
         src_gamma = matrix_on_backend(src_matrix, prop_fw.data)
         gamma5 = matrix_on_backend(G5, prop_fw.data)
         prop_fw_phase = self.apply_phase(prop_fw, [-pion_mom[0], -pion_mom[1], -pion_mom[2]], 1)
-        left_c, forward_c = _tmdwf_components(
-            prop_fw_phase.lexico(False), prop_bw.lexico(False), src_gamma, gamma5)
-        local_shape = (len(self.bT_dir), self.bT_length + 1, self.bz_length + 1, latt_info.size[3])
+        sink_gammas = matrix_stack_on_backend(list(_raw_gamma_by_label.values()), prop_fw.data)
+        prepared = _prepare_soft_factor_left(prop_fw_phase.lexico(False), src_gamma[None], gamma5)
+        local_shape = (len(GAMMA_LABELS), len(self.bT_dir), self.bT_length + 1, self.bz_length + 1, latt_info.size[3])
         corr_local_collect = zeros_on_backend(local_shape, prop_fw.data.dtype, xp, prop_fw.data)
         for idir, bT_dir in enumerate(self.bT_dir):
-            for bT, shifted_bw in enumerate(_shifted_lexico_array(left_c, self.bT_length, bT_dir)):
+            for bT, shifted_bw in enumerate(_shifted_lexico(prop_bw, self.bT_length, bT_dir)):
                 for bz, shifted in enumerate(_shifted_lexico_array(shifted_bw, self.bz_length, 2)):
-                    corr_t = xp.einsum("tzyxab,tzyxab->t", shifted, forward_c, optimize=True)
-                    corr_local_collect[idir, bT, bz] = corr_t
+                    block = _soft_factor_block_from_left(prepared, shifted.conj())[0]
+                    corr_local_collect[:, idir, bT, bz] = xp.einsum(
+                        "tzyxjiaa,gij->gt", block, sink_gammas, optimize=True)
         corr_global = _reduce_spatial_projected(array_to_numpy(corr_local_collect))
-        return corr_global.reshape(-1, latt_info.global_size[3]) if latt_info.mpi_rank == 0 else None
+        return corr_global.reshape(len(GAMMA_LABELS), -1, latt_info.global_size[3]) if latt_info.mpi_rank == 0 else None
 
     def contract_soft_factor(self, latt_info, prop_fw, prop_bw_src, prop_sink_bw, prop_sink_fw, pion_mom):
         xp = _get_xp_from_array(prop_fw.data)
@@ -380,7 +386,7 @@ class pion_soft_factor:
                 tmp_1 = _soft_factor_block_from_left(source_left, source_shift.conj())
                 tmp_2 = _soft_factor_block_from_right(sink_shift, sink_right)
                 for isrc in range(len(pion_pair_labels)):
-                    color_spin = xp.einsum("tzyxjiba,tzyxklba->tjikl", tmp_1[isrc], tmp_2[isrc], optimize=True)
+                    color_spin = xp.einsum("tzyxjiba,tzyxklab->tjikl", tmp_1[isrc], tmp_2[isrc], optimize=True)
                     corr_by_gamma = xp.einsum("tjikl,gik,glj->gt", color_spin, gamma2_ls, gamma1_ls, optimize=True)
                     corr_local_collect[isrc, :, idir, bT] = corr_by_gamma
                     mpi_print(latt_info, f"Contract pion soft factor bT={bT} dir={bT_dir} pion_pair={pion_pair_labels[isrc]} gamma_pairs={len(gamma_pair_labels)}")

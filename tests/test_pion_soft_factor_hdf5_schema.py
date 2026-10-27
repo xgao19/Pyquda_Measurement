@@ -73,7 +73,8 @@ def test_pion_soft_factor_4pt_hdf5_schema(tmp_path):
     )
 
     with h5py.File(tag + ".h5", "r") as h5:
-        assert h5.attrs["soft_factor_schema"] == "paired_channels_v2"
+        assert h5.attrs["soft_factor_schema"] == "full_spin_color_v3"
+        assert h5.attrs["correlator_definition"] == "sum_x_trace_A_Gamma2_B_Gamma1"
         assert h5.attrs["gamma_convention"] == "canonical_raw_pyquda"
         path = "pion_pair/Z5-X5__Z5-X5/gamma_pair/5__5/bX_0/ts2"
         assert path in h5
@@ -92,22 +93,33 @@ def test_pion_soft_factor_diagnostic_c2pt_and_qtmdwf_schema(tmp_path):
 
     c2 = np.arange(8, dtype=np.float64).astype(np.complex128)
     pair_label = "Z5-X5__Z5-X5"
-    save_pion_soft_factor_c2pt_hdf5_noRoll(c2, c2_tag, pair_label, momentum, DummyLatticeInfo())
+    kf, kb = [0, 0, 3], [0, 0, -1]
+    save_pion_soft_factor_c2pt_hdf5_noRoll(c2, c2_tag, pair_label, kf, kb, DummyLatticeInfo())
 
     with h5py.File(c2_tag + ".h5", "r") as h5:
         path = f"SS/pion_pair/{pair_label}/PX0PY0PZ2"
         assert path in h5
         np.testing.assert_array_equal(h5[path][...], c2)
+        assert h5.attrs["soft_factor_schema"] == "full_spin_color_v3"
+        assert h5.attrs["correlator_definition"] == "SS_trace_product_of_separately_projected_spatial_sums"
+        np.testing.assert_array_equal(h5.attrs["quark_momentum_fw"], kf)
+        np.testing.assert_array_equal(h5.attrs["quark_momentum_bw"], kb)
 
     bT_dir = [0, 1]
     bT_length = 1
     bz_length = 2
     corr_count = len(bT_dir) * (bT_length + 1) * (bz_length + 1)
-    qtmdwf = np.arange(corr_count * 8, dtype=np.float64).reshape(corr_count, 8).astype(np.complex128)
+    qtmdwf = np.arange(16 * corr_count * 8, dtype=np.float64).reshape(16, corr_count, 8).astype(np.complex128)
     save_pion_soft_factor_qTMDWF_hdf5_noRoll(qtmdwf, qtmdwf_tag, pair_label, momentum, bT_dir, bT_length, bz_length, DummyLatticeInfo())
 
     with h5py.File(qtmdwf_tag + ".h5", "r") as h5:
-        prefix = f"SP/pion_pair/{pair_label}/PX0PY0PZ2"
-        assert f"{prefix}/b_X/bT0/bz0" in h5
-        assert f"{prefix}/b_Y/bT1/bz2" in h5
-        np.testing.assert_array_equal(h5[f"{prefix}/b_X/bT0/bz0"][...], qtmdwf[0])
+        prefix = f"SP/pion_pair/{pair_label}/PX0PY0PZ2/gamma"
+        assert h5.attrs["soft_factor_schema"] == "full_spin_color_v3"
+        assert list(h5["sink_gamma_labels"].asstr()[...]) == list(GAMMA_LABELS)
+        assert h5.attrs["correlator_definition"] == "SP_sum_x_trace_source_bar_backward_sink_forward"
+        assert "physical_from_pyquda" in h5
+        for i, label in enumerate(GAMMA_LABELS):
+            assert f"{prefix}/{label}/b_X/bT0/bz0" in h5
+            assert f"{prefix}/{label}/b_Y/bT1/bz2" in h5
+            np.testing.assert_array_equal(h5[f"{prefix}/{label}/b_X/bT0/bz0"][...], qtmdwf[i, 0])
+            np.testing.assert_array_equal(h5[f"{prefix}/{label}/b_Y/bT1/bz2"][...], qtmdwf[i, -1])

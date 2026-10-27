@@ -1821,3 +1821,69 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   No full production submission, runtime data, profiles, tuning caches or
   LaTeX intermediates are included. SESSION_MEMORY.md changes only the
   reusable first-interval convention.
+
+## 2026-10-27: Repair pion soft-factor traces and align diagnostics with native GPT
+
+- Audited the historical explicit-einsum workflow against native GPT matrix
+  multiplication. Corrected the C4 color connection to `ba,ab` and formed
+  spin-color adjoints before the final gamma5 multiplication in both prepared
+  block paths. Removed the invalid nine-component TMDWF factorization and
+  its old-formula equivalence test; retained one full-field halo walker.
+- Aligned SS C2 with native GPT: phase each wall line using its own quark
+  momentum, reduce both open matrices globally, then trace their product on
+  rank zero. This preserves cross-site and cross-rank contributions. SP
+  qTMDWF now scans all 16 canonical raw sink matrices using the shifted full
+  backward propagator and the total-momentum phase on the forward line.
+- Updated the application and HDF5 writers together. Corrected correlators
+  record `full_spin_color_v3`, their SS/SP/C4 definitions, basis conversion
+  and shift convention. SP has one explicit sink-Gamma hierarchy, and SS
+  records both quark momenta. There is no old schema or contraction fallback.
+  Wall-propagator generation and storage are unchanged.
+- Replaced circular algebra references with one independent dense-matrix
+  reference that copies spin/color entries explicitly. Tests cover three
+  random seeds, arbitrary complex interpolators, ordered insertion pairs,
+  nonzero momenta, asymmetric volumes, positive shifts/wraps, all 16 sinks,
+  exact norm/color counterexamples, global color invariance, SS cross-rank
+  products, root ownership, changing inputs and HDF5 output identity.
+- CPU/mock regression passed 305 tests; 17 additional bookkeeping, phase,
+  tag and shared-structure tests passed. The test environment uses real
+  PyQUDA Gamma definitions with explicit GPU/MPI stubs. Updated the physics
+  note and PDF, test instructions and stable convention memory.
+- Real distributed GPU execution and production recontraction remain manual
+  checks. No existing propagator or production correlator data was changed.
+
+## 2026-10-27: Compare corrected SS/SP/C4 channels with native GPT CPU tensors
+
+- Added `tests/check_pion_soft_factor_gpt_cpu.py`, a single reproducible
+  source-based comparison against native GPT tensor/object-type/Gamma code
+  and unmodified contraction expressions from gpt-run's Aurora contract
+  script. PyQUDA uses its real checkerboard conversions, MomentumPhase and
+  production contraction methods. The native GPT phase method is also run.
+- The local GPT tree has no compiled cgpt extension. Python site loops bind
+  periodic shifts, spatial sums and the source-checked slice_trDA kernel
+  loop; all spin/color products, adjoints and traces execute GPT's native
+  NumPy tensor operators. No compiled cgpt, MPI, GPU or inversion validation
+  is claimed. The script records this boundary and source-file hashes.
+- Three independent random seeds, each with four complex wall fields at zero and nonzero momenta,
+  cover 51 SS source/sink pairs, 48 SP source/sink pairs, and 88 C4 pairs.
+  The lattice is [t,z,y,x]=[2,2,3,4], directions x/y/z, bT=0..3 and bz=0..2.
+  C4 includes all 16 diagonal insertion pairs and six ordered off-diagonal
+  pairs. Raw axial signs are explicitly converted before native comparison.
+- All 1122 channel-case checks / 34020 complex values passed at rtol=1e-11,
+  atol=1e-10. Maximum channel relative L2 errors were 1.418e-15 (SS),
+  1.244e-15 (SP), and 9.276e-16 (C4); maximum absolute errors were 4.118e-12,
+  1.596e-12, and 4.602e-11 respectively. Saved paired arrays were reloaded and
+  checked independently for finiteness and agreement.
+- Full CSV/JSON channel tables, raw/physical paired NPZ arrays and hashes are
+  outside the repository at /private/tmp/soft-factor-gpt-channel-comparison.
+  Test instructions document the command. Production code and data were not
+  changed in this comparison.
+- Pre-commit review reran all 305 default CPU/mock tests, 17 additional
+  bookkeeping/phase/tag/shared-structure checks, and the complete native GPT
+  CPU tensor comparison; all passed with the same reported channel errors.
+  All 11 changed Python files passed syntax checks and Git diff hygiene.
+  LaTeX compilation passed without overfull boxes or undefined references;
+  the tracked PDF matches all nine freshly compiled text pages. The remote
+  main branch was synchronized before committing. Generated paired data,
+  reports and LaTeX intermediates remain outside Git. Real cgpt/MPI/GPU and
+  production recontraction remain separate manual checks.

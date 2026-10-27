@@ -105,7 +105,7 @@ for tslice in tslice_list:
             for pion_pair_label in pion_pair_labels:
                 t0 = time.time()
                 c2pt = measurement.contract_wall_2pt(
-                    latt_info, prop_fw, prop_bw_src, meson_mom, pion_pair_label
+                    latt_info, prop_fw, prop_bw_src, quark_mom_fw, quark_mom_bw, pion_pair_label
                 )
                 qTMDWF = measurement.contract_tmdwf_check(
                     latt_info, prop_fw, prop_bw_src, meson_mom, pion_pair_label
@@ -134,7 +134,7 @@ for tslice in tslice_list:
                         [-quark_mom_bw[0], -quark_mom_bw[1], -quark_mom_bw[2]],
                     )
                     save_pion_soft_factor_c2pt_hdf5_noRoll(
-                        c2pt, c2pt_tag, pion_pair_label, meson_mom, latt_info
+                        c2pt, c2pt_tag, pion_pair_label, quark_mom_fw, quark_mom_bw, latt_info
                     )
                     save_pion_soft_factor_qTMDWF_hdf5_noRoll(
                         qTMDWF,
