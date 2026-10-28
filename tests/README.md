@@ -31,8 +31,16 @@ python tests/run_probing_cpu_tests.py --pyquda-root ../LQCD/PyQUDA \
   tests/test_pion_soft_factor_contraction_algebra.py \
   tests/test_pion_soft_factor_optimized.py \
   tests/test_pion_soft_factor_shifts.py \
-  tests/test_pion_soft_factor_hdf5_schema.py -q
+  tests/test_pion_soft_factor_hdf5_schema.py \
+  tests/test_pion_soft_factor_dense_application.py \
+  tests/test_io_tag_helpers.py -q
 ```
+
+The current storage tests cover dense C4/SP/SS collection axes, canonical
+metadata and distinct ordered quark pairs with equal meson momenta. The saved-
+propagator application test also exercises temporal wrap, multiple transverse
+directions and nonzero bz using CPU stubs. No hierarchical-writer compatibility
+mode is tested or supplied.
 
 Adjust `--pyquda-root` to the installed PyQUDA source tree. This runner loads
 the real Gamma definitions but explicitly stubs GPU/MPI calls; neighbor and

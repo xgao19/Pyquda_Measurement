@@ -13,6 +13,8 @@ from pyquda_measurement_utils.io_corr import (
     get_pion_EMFF_file_tag,
     get_pion_channel_tag,
     get_pion_soft_factor_file_tag,
+    get_pion_soft_factor_c2pt_file_tag,
+    get_pion_soft_factor_qTMDWF_file_tag,
     get_pion_soft_factor_prop_file_tag,
     get_qTMD_file_tag,
     get_qTMDWF_file_tag,
@@ -61,15 +63,26 @@ def test_standard_measurement_tag_helpers_are_deterministic():
     assert get_pion_EMFF_file_tag("/data", "lat", 7, "EMFF", src, "sm") == "/data/pion_EMFF/lat.pion_EMFF.7.EMFF.x1y2z3t4.sm"
 
 
-def test_soft_factor_tag_helpers_preserve_forward_backward_momenta():
-    src = [0, 0, 0, 5]
-    fw = [0, 0, 2]
-    bw = [0, 0, -2]
-
-    assert get_pion_soft_factor_file_tag("/data", "lat", 8, "CG.wall", src, "sm", fw, bw).endswith(
-        "/pion_soft_factor/lat.pion_soft_factor.8.CG.wall.x0y0z0t5.sm.fw_qx0qy0qz2.bw_qx0qy0qz-2"
+def test_soft_factor_tags_use_wall_time_quark_set_cfg_and_single_tsep():
+    tag = get_pion_soft_factor_file_tag("/data", "lat", 8, 0, 5, "sm", [5, 4], 6)
+    assert tag == "/data/pion_soft_factor/8/lat.pion_soft_factor.8.0.wallt5.sm.qz4_5.dt6"
+    assert get_pion_soft_factor_c2pt_file_tag("/data", "lat", 8, 0, 5, "sm", [4, 5]) == (
+        "/data/pion_soft_factor_c2pt/8/lat.pion_soft_factor_c2pt.8.0.wallt5.sm.qz4_5"
     )
-    assert get_pion_soft_factor_prop_file_tag("/data", "lat", 8, "CG.wall", src, "sm", fw).endswith(
+    assert get_pion_soft_factor_qTMDWF_file_tag("/data", "lat", 8, 0, 5, "sm", [4, 5]) == (
+        "/data/pion_soft_factor_qTMDWF/8/lat.pion_soft_factor_qTMDWF.8.0.wallt5.sm.qz4_5"
+    )
+    for bad in ([4, 4], [], [4.5, 5]):
+        with pytest.raises(ValueError):
+            get_pion_soft_factor_file_tag("/data", "lat", 8, 0, 5, "sm", bad, 6)
+    with pytest.raises(ValueError):
+        get_pion_soft_factor_file_tag("/data", "lat", 8, 0, [0, 0, 0, 5], "sm", [4, 5], 6)
+    with pytest.raises(ValueError):
+        get_pion_soft_factor_file_tag("/data", "lat", 8, 0, 5, "sm", [4, 5], [6, 8])
+
+
+def test_saved_prop_tag_is_independent_of_correlator_collection_names():
+    assert get_pion_soft_factor_prop_file_tag("/data", "lat", 8, "CG.wall", [0, 0, 0, 5], "sm", [0, 0, 2]).endswith(
         "/pion_soft_factor_prop/lat.pion_soft_factor_prop.8.CG.wall.x0y0z0t5.sm.qx0qy0qz2"
     )
 

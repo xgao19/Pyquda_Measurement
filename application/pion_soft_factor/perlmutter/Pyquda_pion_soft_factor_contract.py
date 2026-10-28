@@ -85,6 +85,14 @@ t_count = Lt if args.t_count <= 0 else args.t_count
 tslice_list = [(args.t_start + dt) % Lt for dt in range(t_count)]
 
 for tslice in tslice_list:
+    ss_values, sp_values = [], []
+    c4_values = {dt: [] for dt in tsep_list}
+    quark_pairs = np.asarray([[fw, bw] for fw in quark_mom for bw in quark_mom], dtype=np.int32)
+    if len(measurement.pion_channel_pairs) != 1:
+        raise ValueError("Dense C4 output requires one fixed pion source/sink channel")
+    pair_label = next(iter(measurement.pion_channel_pairs))
+    source_label, sink_label = pair_label.split("__")
+    source_matrix = measurement.pion_channel_pairs[pair_label][0]
     pos = [0, 0, 0, tslice]
     for quark_mom_fw in quark_mom:
         for quark_mom_bw in quark_mom:
@@ -102,6 +110,7 @@ for tslice in tslice_list:
             prop_bw_src = measurement.load_wall_propagator(prop_bw_src_tag)
 
             pion_pair_labels = list(measurement.pion_channel_pairs)
+            pair_ss = []
             for pion_pair_label in pion_pair_labels:
                 t0 = time.time()
                 c2pt = measurement.contract_wall_2pt(
@@ -113,42 +122,12 @@ for tslice in tslice_list:
                 if latt_info.mpi_rank == 0:
                     c2pt = np.roll(c2pt, -tslice, axis=-1)
                     qTMDWF = np.roll(qTMDWF, -tslice, axis=-1)
-                    c2pt_tag = get_pion_soft_factor_c2pt_file_tag(
-                        str(data_dir),
-                        lat_tag,
-                        conf,
-                        "CG.wall",
-                        pos,
-                        sm_tag + ".pion_pair" + pion_pair_label,
-                        quark_mom_fw,
-                        [-quark_mom_bw[0], -quark_mom_bw[1], -quark_mom_bw[2]],
-                    )
-                    qTMDWF_tag = get_pion_soft_factor_qTMDWF_file_tag(
-                        str(data_dir),
-                        lat_tag,
-                        conf,
-                        "CG.wall",
-                        pos,
-                        sm_tag + ".pion_pair" + pion_pair_label,
-                        quark_mom_fw,
-                        [-quark_mom_bw[0], -quark_mom_bw[1], -quark_mom_bw[2]],
-                    )
-                    save_pion_soft_factor_c2pt_hdf5_noRoll(
-                        c2pt, c2pt_tag, pion_pair_label, quark_mom_fw, quark_mom_bw, latt_info
-                    )
-                    save_pion_soft_factor_qTMDWF_hdf5_noRoll(
-                        qTMDWF,
-                        qTMDWF_tag,
-                        pion_pair_label,
-                        meson_mom,
-                        bT_dir,
-                        args.bT_length,
-                        args.bz_length,
-                        latt_info,
-                    )
+                    pair_ss.append(c2pt)
+                    sp_values.append(qTMDWF)
                 mpi_print(latt_info, f"DONE diagnostic c2pt/qTMDWF pion_pair={pion_pair_label} time={time.time() - t0}s")
 
-            tsep_corrs = []
+            if latt_info.mpi_rank == 0:
+                ss_values.append(np.asarray(pair_ss))
             for tsep in tsep_list:
                 sink_t = (tslice + tsep) % Lt
                 sink_pos = [0, 0, 0, sink_t]
@@ -166,29 +145,39 @@ for tslice in tslice_list:
                 )
                 if latt_info.mpi_rank == 0:
                     corr = np.roll(corr, -tslice, axis=-1)
-                    tsep_corrs.append(corr)
+                    c4_values[tsep].append(corr[0].reshape(
+                        len(measurement.gamma_channel_pairs), -1, Lt))
                 mpi_print(latt_info, f"DONE tsep={tsep}")
 
-            if latt_info.mpi_rank == 0:
-                corr_all = np.asarray(tsep_corrs)
-                tag = get_pion_soft_factor_file_tag(
-                    str(data_dir),
-                    lat_tag,
-                    conf,
-                    "CG.wall",
-                    pos,
-                    sm_tag,
-                    quark_mom_fw,
-                    [-quark_mom_bw[0], -quark_mom_bw[1], -quark_mom_bw[2]],
-                )
-                save_pion_soft_factor_hdf5_noRoll(
-                    corr_all,
-                    tag,
-                    measurement.pion_channel_pairs,
-                    measurement.gamma_channel_pairs,
-                    bT_dir,
-                    args.bT_length,
-                    tsep_list,
-                    latt_info,
-                )
             mpi_print(latt_info, f"DONE pion soft factor pair time={time.time() - t0_pair}s")
+
+    if latt_info.mpi_rank == 0:
+        qz = [mom[2] for mom in quark_mom]
+        channel_tag = sm_tag + ".src" + source_label.replace("-", "m").replace("+", "p")
+        c4_channel_tag = channel_tag + ".sink" + sink_label.replace("-", "m").replace("+", "p")
+        attrs = {"config_num": conf, "source_time": tslice,
+                 "lattice": latt_info.global_size, "gauge_path": gauge_path.format(conf=conf)}
+        def displacements(sp=False):
+            result = []
+            for direction in bT_dir:
+                for b in range(args.bT_length + 1):
+                    for z in range((args.bz_length if sp else 0) + 1):
+                        vector = [0, 0, 0]
+                        vector[direction] += b
+                        vector[2] += z
+                        result.append(vector)
+            return result
+        c2pt_tag = get_pion_soft_factor_c2pt_file_tag(
+            data_dir, lat_tag, conf, 0, tslice, channel_tag, qz)
+        qTMDWF_tag = get_pion_soft_factor_qTMDWF_file_tag(
+            data_dir, lat_tag, conf, 0, tslice, channel_tag, qz)
+        save_pion_soft_factor_c2pt_hdf5_noRoll(
+            np.asarray(ss_values), c2pt_tag, quark_pairs, measurement.pion_channel_pairs, attrs=attrs)
+        save_pion_soft_factor_qTMDWF_hdf5_noRoll(
+            np.asarray(sp_values), qTMDWF_tag, quark_pairs,
+            source_label, source_matrix, displacements(sp=True), attrs=attrs)
+        for tsep in tsep_list:
+            tag = get_pion_soft_factor_file_tag(data_dir, lat_tag, conf, 0, tslice, c4_channel_tag, qz, tsep)
+            save_pion_soft_factor_hdf5_noRoll(
+                np.asarray(c4_values[tsep]), tag, quark_pairs, measurement.pion_channel_pairs,
+                measurement.gamma_channel_pairs, displacements(), tsep, attrs=attrs)

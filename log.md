@@ -1887,3 +1887,20 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
   main branch was synchronized before committing. Generated paired data,
   reports and LaTeX intermediates remain outside Git. Real cgpt/MPI/GPU and
   production recontraction remain separate manual checks.
+
+## 2026-10-27: Aurora soft-factor contraction after HDF5 reload
+
+- Fix wall-propagator reload to transfer host HDF5 data to the configured device.
+- Explicitly copy dpnp small matrices to host before backend conversion when required, including mismatched SYCL queues.
+- Add regressions for forbidden implicit dpnp-to-NumPy conversion and device transfer on reload.
+- Validation: 41 targeted CPU/mock backend, contraction algebra, halo and HDF5 tests passed; these do not validate GPU kernels. The external benchmark adds a real 64-rank GPU HDF5/SS/SP/C4 smoke gate before contraction-only continuation with existing propagators.
+
+## 2026-10-28: Dense soft-factor collection I/O
+
+- Replace the soft-factor correlator tag/writer APIs directly with quark-set collection tags and dense C4/SP/SS datasets; no legacy writer adapter.
+- Keep the full_spin_color_v3 contraction/Gamma conventions while declaring pion_soft_factor_dense_v1 storage; record explicit ordered quark pairs, meson momenta, displacements, time coordinates and source/sink matrices.
+- Migrate the active Perlmutter contract caller and tests, and synchronize the HDF5 section of the physics note and its compiled PDF. Aurora production writes 384 collections per cfg and checkpoints SS, SP and each C4 tsep independently; propagators remain device-only with a pending-consumer last-use cache.
+- Preserve historical benchmark data using their existing frozen measurement snapshots. External Aurora production now resumes solely from sample_log, without correlator readback or a standalone validator; production scripts and job data remain outside this repository.
+- Pre-commit verification: 84 targeted library CPU/mock tests passed, covering dense I/O, the migrated caller, contraction algebra, shifts, tag helpers, backend conversion, device reload and application bookkeeping. Five external production CPU tests also passed. A storage-only round trip checked 3368 time series/215552 complex values in six files with exact equality.
+- External 64-rank Aurora resume job 8978164 completed cfg1056 with all 384 dense collections across 64 source times and four separations. Its 60 regenerated propagators/720 RHS and cache peak of 28 matched the pending-consumer plan; no propagator I/O occurred. The 148-cfg production job 8978686 was submitted separately with 3-hour walltime. Completion coverage is sample-log based; no production HDF5 readback is claimed.
+- The physics-note source and compiled PDF describe the dense layout; syntax and Git diff hygiene checks passed.

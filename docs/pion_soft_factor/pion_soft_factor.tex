@@ -690,34 +690,49 @@ root-only reduction for SP and C4.
 
 
 \section{HDF5 Output Structure}
+\begin{sloppypar}
 
-Propagator files are unchanged and can be reused for corrected contractions.
-Every new correlator file records the following metadata:
-\begin{itemize}[nosep]
-  \item \walltag{soft\_factor\_schema}: \walltag{full\_spin\_color\_v3}.
-  \item \walltag{correlator\_definition} and axis names.
-  \item The positive-shift convention and canonical raw basis metadata.
-  \item \walltag{physical\_from\_pyquda} for the Gamma convention conversion.
-\end{itemize}
-Old correlator files do not satisfy this schema and must be recontracted;
-there is no legacy contraction mode or duplicate output hierarchy.
-
+Saved propagator files are unchanged. Correlators use dense collection writers
+without a hierarchical-writer compatibility layer. The contraction convention
+remains \walltag{full\_spin\_color\_v3}; the storage schema is
+\walltag{pion\_soft\_factor\_dense\_v1}.
+Each file contains one complex128 correlator dataset with the following axes:
 \begin{verbatim}
-SS:
-  /SS/pion_pair/{pair}/PX{px}PY{py}PZ{pz}
-SP:
-  /SP/pion_pair/{pair}/PX{px}PY{py}PZ{pz}/gamma/{sink}/b_X/bT{b}/bz{z}
-C4:
-  /pion_pair/{pair}/gamma_pair/{gpair}/bX_{b}/ts{tsep}
+SS: /SS [quark_pair, pion_pair, time]
+SP: /SP [quark_pair, sink_gamma, displacement, time]
+C4: /C4 [quark_pair, gamma_pair, displacement, time]
 \end{verbatim}
-Each leaf is one complex global-time array, already rolled by the application.
-SP writes all 16 sink labels in \walltag{sink\_gamma\_labels}; transverse
-directions also include \walltag{b\_Y}/\walltag{b\_Z}. SS records both
-\walltag{quark\_momentum\_fw} and \walltag{quark\_momentum\_bw}; its displayed
-pion momentum is their sum. C4 retains the paired source/sink and insertion
-labels and explicit source/sink matrices.
+The application writes one SS file and one SP file per source time, and one
+C4 file per source time and source--sink separation. Arrays contain the full
+source-relative time axis, already rolled by the application; the writers do
+not roll, normalize or average them.
 
+Every file stores ordered \walltag{quark\_momentum\_pairs}, their sums in
+\walltag{meson\_momentum\_list}, explicit time coordinates, axis definitions,
+the canonical raw Gamma basis and \walltag{physical\_from\_pyquda}.
+SP and C4 store \walltag{displacement\_vectors} in $(x,y,z)$ order.
+SS and C4 record pion source/sink labels and matrices; SP records its source
+matrix and all 16 \walltag{sink\_gamma\_labels}. C4 also records the two
+insertion labels and matrices. Different ordered quark pairs with the same
+meson momentum remain separate rows.
 
+Directories follow \walltag{data/measurement\_type/cfg/}. Names identify the
+ensemble, measurement type, cfg, AMA slot, wall-source time, setup,
+interpolators, quark momentum set and, for C4, the separation. For example:
+\begin{verbatim}
+data/pion_soft_factor/1050/
+  l64c64a076.pion_soft_factor.1050.0.wallt0.1HYP_WSRC.
+    srcZ5mX5.sinkZ5mX5.qz4_5.dt6.h5
+\end{verbatim}
+The displayed line break is only for readability. The tag
+\walltag{qz4\_5} denotes the quark momentum set. Its four ordered pairs
+$(4,4),(4,5),(5,4),(5,5)$ have meson momenta $8,9,9,10$.
+For the current $64^4$ production with 64 source times, separations
+$6,8,10,12$ and 21 displacements, C4 has shape $(4,6,21,64)$, SP has
+shape $(4,16,21,64)$ and SS has shape $(4,2,64)$. This gives
+256 C4, 64 SP and 64 SS files per configuration.
+
+\end{sloppypar}
 
 \section{Comparison with Native GPT and Validation}
 

@@ -1,6 +1,6 @@
 # PyQUDA Measurement Session Memory
 
-Last updated: 2026-10-27
+Last updated: 2026-10-28
 
 This file contains only reusable environment facts, stable conventions, and
 pitfalls that are easy to repeat.  Commit history and completed-work summaries
@@ -40,6 +40,9 @@ belong in `log.md` and Git history.
 - FLAT production uses `ZE_FLAT_DEVICE_HIERARCHY=FLAT`,
   `ONEAPI_DEVICE_SELECTOR=level_zero:gpu`, integer tile affinity,
   `QUDA_ENABLE_P2P=0`, and `QUDA_ENABLE_TUNING=1`.
+- PyQUDA `LatticePropagator.loadH5()` returns host NumPy data even after dpnp
+  initialization. Call `toDevice()` before GPU contractions; dpnp Gamma arrays
+  require explicit `dpnp.asnumpy()` when used with a host NumPy reference.
 
 ### Smoke Inputs
 
@@ -183,6 +186,11 @@ belong in `log.md` and Git history.
   bases may be extended without changing measurement identity.
 
 ## qTMD Conventions And Pitfalls
+
+- Soft-factor HDF5 storage is `pion_soft_factor_dense_v1`, separate from the
+  unchanged `full_spin_color_v3` contraction definition. Correlator tag/writer
+  APIs accept quark-pair collections and wall source times; no old group-tree
+  adapter remains. Preserve ordered (4,5)/(5,4) rows even when total Pz agrees.
 
 - Pion soft-factor contractions use `full_spin_color_v3`. SS C2 phases and
   globally sums each open wall line before multiplication; local products

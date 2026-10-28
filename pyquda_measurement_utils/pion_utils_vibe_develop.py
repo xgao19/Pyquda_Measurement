@@ -73,7 +73,9 @@ def matrix_on_backend(value, reference_array):
         reference_queue = getattr(reference_array, "sycl_queue", None)
         if getattr(value, "sycl_queue", None) is reference_queue:
             return value
-    if hasattr(value, "get"):
+    if value_backend == "dpnp":
+        value = array_to_numpy(value)
+    elif hasattr(value, "get"):
         value = value.get()
     return _asarray_on_queue(value, xp, reference_array)
 

@@ -280,7 +280,9 @@ class pion_soft_factor:
                 raise RuntimeError(f"Failed to write wall-propagator attributes: {error}") from root_exception
 
     def load_wall_propagator(self, tag):
-        return core.LatticePropagator.loadH5(tag + ".h5", "propagator")
+        prop = core.LatticePropagator.loadH5(tag + ".h5", "propagator")
+        prop.toDevice()
+        return prop
 
     def apply_phase(self, prop, momentum, sign=1, x0=None):
         x0 = [0, 0, 0, 0] if x0 is None else x0

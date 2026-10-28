@@ -110,46 +110,35 @@ def get_pion_EMFF_file_tag(data_dir, lat, cfg, ama, src, sm):
 # Pion soft-factor tag helpers
 # -----------------------------------------------------------------------------
 
-# Build the pion soft-factor four-point output tag.
-def get_pion_soft_factor_file_tag(data_dir, lat, cfg, ama, src, sm, quarkmom1, quarkmom2):
-
-    cfg_tag = str(cfg)
-    lat_tag = str(lat) + ".pion_soft_factor"
-    ama_tag = str(ama)
-    src_tag = "x"+str(src[0]) + "y"+str(src[1]) + "z"+str(src[2]) + "t"+str(src[3])
-    mom1_tag = "qx"+str(quarkmom1[0]) + "qy"+str(quarkmom1[1]) + "qz"+str(quarkmom1[2])
-    mom2_tag = "qx"+str(quarkmom2[0]) + "qy"+str(quarkmom2[1]) + "qz"+str(quarkmom2[2])
-    sm_tag  = str(sm)
-
-    return data_dir + "/pion_soft_factor/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag + ".fw_" + mom1_tag + ".bw_" + mom2_tag
+def _pion_soft_factor_tag(data_dir, kind, lat, cfg, ama, source_time, sm, quark_momenta_z):
+    qz = np.asarray(quark_momenta_z)
+    if qz.ndim != 1 or not len(qz) or qz.dtype.kind not in "iu" or len(set(qz.tolist())) != len(qz):
+        raise ValueError("quark_momenta_z must be a nonempty list of distinct integers")
+    if not isinstance(source_time, (int, np.integer)) or source_time < 0:
+        raise ValueError("source_time must be a nonnegative integer")
+    qtag = "qz" + "_".join(str(int(q)) for q in sorted(qz))
+    name = f"{lat}.{kind}.{cfg}.{ama}.wallt{source_time}.{sm}.{qtag}"
+    return str(Path(data_dir) / kind / str(cfg) / name)
 
 
-# Build the pion soft-factor qTMDWF diagnostic output tag.
-def get_pion_soft_factor_qTMDWF_file_tag(data_dir, lat, cfg, ama, src, sm, quarkmom1, quarkmom2):
-
-    cfg_tag = str(cfg)
-    lat_tag = str(lat) + ".pion_soft_factor_qTMDWF"
-    ama_tag = str(ama)
-    src_tag = "x"+str(src[0]) + "y"+str(src[1]) + "z"+str(src[2]) + "t"+str(src[3])
-    mom1_tag = "qx"+str(quarkmom1[0]) + "qy"+str(quarkmom1[1]) + "qz"+str(quarkmom1[2])
-    mom2_tag = "qx"+str(quarkmom2[0]) + "qy"+str(quarkmom2[1]) + "qz"+str(quarkmom2[2])
-    sm_tag  = str(sm)
-
-    return data_dir + "/pion_soft_factor_qTMDWF/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag + ".fw_" + mom1_tag + ".bw_" + mom2_tag
+def get_pion_soft_factor_file_tag(data_dir, lat, cfg, ama, source_time, sm, quark_momenta_z, t_sep):
+    """Name one dense four-point file containing all ordered quark pairs."""
+    if not isinstance(t_sep, (int, np.integer)) or t_sep <= 0:
+        raise ValueError("t_sep must be a positive integer")
+    return _pion_soft_factor_tag(data_dir, "pion_soft_factor", lat, cfg, ama,
+                                source_time, sm, quark_momenta_z) + f".dt{t_sep}"
 
 
-# Build the pion soft-factor wall-source two-point diagnostic output tag.
-def get_pion_soft_factor_c2pt_file_tag(data_dir, lat, cfg, ama, src, sm, quarkmom1, quarkmom2):
+def get_pion_soft_factor_qTMDWF_file_tag(data_dir, lat, cfg, ama, source_time, sm, quark_momenta_z):
+    """Name the wall-source SP collection for one source time."""
+    return _pion_soft_factor_tag(data_dir, "pion_soft_factor_qTMDWF", lat, cfg, ama,
+                                source_time, sm, quark_momenta_z)
 
-    cfg_tag = str(cfg)
-    lat_tag = str(lat) + ".pion_soft_factor_c2pt"
-    ama_tag = str(ama)
-    src_tag = "x"+str(src[0]) + "y"+str(src[1]) + "z"+str(src[2]) + "t"+str(src[3])
-    mom1_tag = "qx"+str(quarkmom1[0]) + "qy"+str(quarkmom1[1]) + "qz"+str(quarkmom1[2])
-    mom2_tag = "qx"+str(quarkmom2[0]) + "qy"+str(quarkmom2[1]) + "qz"+str(quarkmom2[2])
-    sm_tag  = str(sm)
 
-    return data_dir + "/pion_soft_factor_c2pt/" + lat_tag + "." + cfg_tag + "." + ama_tag + "." + src_tag + "." + sm_tag + ".fw_" + mom1_tag + ".bw_" + mom2_tag
+def get_pion_soft_factor_c2pt_file_tag(data_dir, lat, cfg, ama, source_time, sm, quark_momenta_z):
+    """Name the wall-source SS collection for one source time."""
+    return _pion_soft_factor_tag(data_dir, "pion_soft_factor_c2pt", lat, cfg, ama,
+                                source_time, sm, quark_momenta_z)
 
 
 # Build the saved wall-source propagator tag for the pion soft-factor workflow.
@@ -449,123 +438,125 @@ def _matrix_for_hdf5(matrix):
     return np.asarray(matrix)
 
 
-def _write_pion_soft_factor_metadata(handle, definition, axes):
-    """Identify corrected contractions and the shared raw Gamma basis."""
+PION_SOFT_FACTOR_STORAGE_SCHEMA = "pion_soft_factor_dense_v1"
+
+
+def _soft_factor_dense_inputs(corr, quark_momentum_pairs, channel_count, displacements=None):
+    pairs = np.asarray(quark_momentum_pairs)
+    if pairs.ndim != 3 or pairs.shape[1:] != (2, 3) or not len(pairs) or pairs.dtype.kind not in "iu":
+        raise ValueError("quark_momentum_pairs must have integer shape [pair,fw_bw,xyz]")
+    if len(np.unique(pairs.reshape(len(pairs), -1), axis=0)) != len(pairs):
+        raise ValueError("Duplicate ordered quark momentum pairs")
+    data = np.asarray(corr, dtype=np.complex128)
+    shape = (len(pairs), channel_count)
+    vectors = None
+    if displacements is not None:
+        vectors = np.asarray(displacements)
+        if vectors.ndim != 2 or vectors.shape[1] != 3 or not len(vectors) or vectors.dtype.kind not in "iu":
+            raise ValueError("displacements must have integer shape [displacement,xyz]")
+        shape += (len(vectors),)
+    if data.ndim != len(shape) + 1 or data.shape[:-1] != shape or data.shape[-1] == 0:
+        raise ValueError(f"Dense correlator shape must be {shape} + (time,), got {data.shape}")
+    if not channel_count or not np.all(np.isfinite(data)):
+        raise ValueError("Dense correlator channels must be nonempty and data finite")
+    return data, pairs.astype(np.int32), None if vectors is None else vectors.astype(np.int32)
+
+
+def _pion_matrix_metadata(pion_channel_pairs):
+    labels = list(pion_channel_pairs)
+    source = np.stack([_matrix_for_hdf5(pion_channel_pairs[label][0]) for label in labels])
+    sink = np.stack([_matrix_for_hdf5(pion_channel_pairs[label][1]) for label in labels])
+    if (source.shape != (len(labels), 4, 4) or sink.shape != source.shape
+            or not np.all(np.isfinite(source)) or not np.all(np.isfinite(sink))):
+        raise ValueError("Pion source and sink matrices must have shape [channel,4,4]")
+    return {"pion_pair_labels": np.asarray(labels, dtype="S"),
+            "pion_source_matrices": source, "pion_sink_matrices": sink}
+
+
+def _write_pion_soft_factor_metadata(handle, definition, axes, pairs, nt, attrs):
+    _write_h5_attrs(handle, attrs)
     _write_h5_attrs(handle, {
         **basis_attrs(),
         "soft_factor_schema": "full_spin_color_v3",
+        "soft_factor_storage_schema": PION_SOFT_FACTOR_STORAGE_SCHEMA,
         "correlator_definition": definition,
         "dataset_axes": axes,
         "gamma_convention": "canonical_raw_pyquda",
         "shift_convention": "positive_displacement_reads_x_plus_b",
+        "time_axis": "source_relative", "time_origin": "relative_to_source",
+        "source_type": "wall", "volume_normalization": "none",
+        "quark_momentum_pair_axes": "pair,fw_bw,xyz",
+        "quark_line_order": "fw,bw", "displacement_columns": "dx,dy,dz",
+        "momentum_units": "2*pi/L", "backward_propagator_momentum": "negative_bw",
     })
+    if "lattice" in handle.attrs and int(handle.attrs["lattice"][3]) != nt:
+        raise ValueError("Time extent differs from lattice metadata")
     for name, values in basis_metadata().items():
         handle.create_dataset(name, data=values)
+    handle.create_dataset("quark_momentum_pairs", data=pairs)
+    handle.create_dataset("meson_momentum_list", data=pairs.sum(axis=1))
+    handle.create_dataset("time", data=np.arange(nt, dtype=np.int32))
 
 
-def save_pion_soft_factor_hdf5_noRoll(
-    corr,
-    tag,
-    pion_channel_pairs,
-    gamma_channel_pairs,
-    bT_dir,
-    bT_length,
-    tseplist,
-    latt_info,
-):
-    save_h5 = tag + ".h5"
-    ensure_parent_dir(save_h5)
-    f = h5py.File(save_h5, 'w')
-    _write_pion_soft_factor_metadata(
-        f, "sum_x_trace_A_Gamma2_B_Gamma1",
-        "tsep,pion_pair,gamma_pair,bT_direction,bT,time")
-
-    pion_pair_labels = list(pion_channel_pairs)
-    gamma_pair_labels = list(gamma_channel_pairs)
-    f.create_dataset("pion_pair_labels", data=np.asarray(pion_pair_labels, dtype="S"))
-    f.create_dataset("gamma_pair_labels", data=np.asarray(gamma_pair_labels, dtype="S"))
-    f.create_dataset(
-        "pion_source_matrices",
-        data=np.stack([_matrix_for_hdf5(pion_channel_pairs[label][0]) for label in pion_pair_labels]),
-    )
-    f.create_dataset(
-        "pion_sink_matrices",
-        data=np.stack([_matrix_for_hdf5(pion_channel_pairs[label][1]) for label in pion_pair_labels]),
-    )
-    f.create_dataset(
-        "gamma1_labels",
-        data=np.asarray([gamma_channel_pairs[label][0] for label in gamma_pair_labels], dtype="S"),
-    )
-    f.create_dataset(
-        "gamma2_labels",
-        data=np.asarray([gamma_channel_pairs[label][1] for label in gamma_pair_labels], dtype="S"),
-    )
-    bT_list = ["bX", "bY", "bZ"]
-    if latt_info.mpi_rank == 0:
-        print(f"no roll")
-        print(f"corr.shape, {np.shape(corr)}")
-    for i, pion_pair_label in enumerate(pion_pair_labels):
-        g_src = f.require_group("pion_pair").require_group(pion_pair_label)
-        for j, gamma_pair_label in enumerate(gamma_pair_labels):
-            g_gm = g_src.require_group("gamma_pair").require_group(gamma_pair_label)
-            for k, direction in enumerate(bT_dir):
-                for bT in range(bT_length + 1):
-                    g_bT = g_gm.require_group(bT_list[direction] + "_" + str(bT))
-                    for its, tsep in enumerate(tseplist):
-                        g_bT.create_dataset("ts" + str(tsep), data=corr[its, i, j, k, bT])
-    f.close()
+def save_pion_soft_factor_hdf5_noRoll(corr, tag, quark_momentum_pairs,
+                                      pion_channel_pairs, gamma_channel_pairs,
+                                      displacements, t_sep, attrs=None):
+    """Write C4[pair,gamma_pair,displacement,time] for exactly one tsep."""
+    if len(pion_channel_pairs) != 1:
+        raise ValueError("A dense C4 file requires one fixed pion source/sink channel")
+    if not isinstance(t_sep, (int, np.integer)) or t_sep <= 0:
+        raise ValueError("t_sep must be a positive integer")
+    data, pairs, vectors = _soft_factor_dense_inputs(
+        corr, quark_momentum_pairs, len(gamma_channel_pairs), displacements)
+    metadata = _pion_matrix_metadata(pion_channel_pairs)
+    gamma_labels = list(gamma_channel_pairs)
+    gamma1 = [gamma_channel_pairs[label][0] for label in gamma_labels]
+    gamma2 = [gamma_channel_pairs[label][1] for label in gamma_labels]
+    if any(label not in GAMMA_LABELS for label in gamma1 + gamma2):
+        raise ValueError("Unknown canonical raw Gamma label")
+    with _prepare_h5_file(str(tag) + ".h5") as handle:
+        _write_pion_soft_factor_metadata(handle, "sum_x_trace_A_Gamma2_B_Gamma1",
+            "quark_pair,gamma_pair,displacement,time", pairs, data.shape[-1], attrs)
+        handle.attrs["t_sep"] = int(t_sep)
+        handle.create_dataset("C4", data=data)
+        handle.create_dataset("displacement_vectors", data=vectors)
+        for name, value in metadata.items():
+            handle.create_dataset(name, data=value)
+        handle.create_dataset("gamma_pair_labels", data=np.asarray(gamma_labels, dtype="S"))
+        handle.create_dataset("gamma1_labels", data=np.asarray(gamma1, dtype="S"))
+        handle.create_dataset("gamma2_labels", data=np.asarray(gamma2, dtype="S"))
 
 
-# Save the wall-source qTMDWF diagnostic used by the pion soft-factor workflow.
-def save_pion_soft_factor_qTMDWF_hdf5_noRoll(corr, tag, pion_pair_label, momentum, bT_dir, bT_length, bz_length, latt_info):
-    save_h5 = tag + ".h5"
-    ensure_parent_dir(save_h5)
-    f = h5py.File(save_h5, 'w')
-
-    bT_list = ["b_X", "b_Y", "b_Z"]
-    if latt_info.mpi_rank == 0:
-        print(f"no roll")
-        print(f"corr.shape, {np.shape(corr)}")
-    _write_pion_soft_factor_metadata(
-        f, "SP_sum_x_trace_source_bar_backward_sink_forward",
-        "sink_gamma,bT_direction,bT,bz,time")
-    f.create_dataset("sink_gamma_labels", data=np.asarray(GAMMA_LABELS, dtype="S"))
-    sm = f.require_group("SP")
-    g_src = sm.require_group("pion_pair").require_group(str(pion_pair_label))
-    p_tag = "PX"+str(momentum[0])+"PY"+str(momentum[1])+"PZ"+str(momentum[2])
-    g_p = g_src.require_group(p_tag)
-    for igamma, label in enumerate(GAMMA_LABELS):
-        g_gamma = g_p.require_group("gamma").require_group(label)
-        idx = 0
-        for direction in bT_dir:
-            g_T = g_gamma.require_group(bT_list[direction])
-            for bT in range(bT_length + 1):
-                g_bT = g_T.require_group("bT" + str(bT))
-                for bz in range(bz_length + 1):
-                    g_bT.create_dataset("bz" + str(bz), data=corr[igamma, idx])
-                    idx += 1
-    f.close()
+def save_pion_soft_factor_qTMDWF_hdf5_noRoll(corr, tag, quark_momentum_pairs,
+                                            source_label, source_matrix,
+                                            displacements, attrs=None):
+    """Write SP[pair,sink_gamma,displacement,time] without an extra time roll."""
+    data, pairs, vectors = _soft_factor_dense_inputs(
+        corr, quark_momentum_pairs, len(GAMMA_LABELS), displacements)
+    matrix = _matrix_for_hdf5(source_matrix)
+    if matrix.shape != (4, 4) or not np.all(np.isfinite(matrix)):
+        raise ValueError("Pion source matrix must have shape [4,4]")
+    with _prepare_h5_file(str(tag) + ".h5") as handle:
+        _write_pion_soft_factor_metadata(handle, "SP_sum_x_trace_source_bar_backward_sink_forward",
+            "quark_pair,sink_gamma,displacement,time", pairs, data.shape[-1], attrs)
+        handle.attrs["source_interpolator"] = str(source_label)
+        handle.create_dataset("SP", data=data)
+        handle.create_dataset("pion_source_matrix", data=matrix)
+        handle.create_dataset("sink_gamma_labels", data=np.asarray(GAMMA_LABELS, dtype="S"))
+        handle.create_dataset("displacement_vectors", data=vectors)
 
 
-# Save the wall-to-wall two-point diagnostic used by the pion soft-factor workflow.
-def save_pion_soft_factor_c2pt_hdf5_noRoll(corr, tag, pion_pair_label, quark_mom_fw, quark_mom_bw, latt_info):
-    save_h5 = tag + ".h5"
-    ensure_parent_dir(save_h5)
-    f = h5py.File(save_h5, 'w')
-
-    if latt_info.mpi_rank == 0:
-        print(f"no roll")
-        print(f"corr.shape, {np.shape(corr)}")
-    _write_pion_soft_factor_metadata(
-        f, "SS_trace_product_of_separately_projected_spatial_sums", "time")
-    f.attrs["quark_momentum_fw"] = np.asarray(quark_mom_fw, dtype=np.int32)
-    f.attrs["quark_momentum_bw"] = np.asarray(quark_mom_bw, dtype=np.int32)
-    momentum = np.asarray(quark_mom_fw) + np.asarray(quark_mom_bw)
-    sm = f.require_group("SS")
-    g_src = sm.require_group("pion_pair").require_group(str(pion_pair_label))
-    p_tag = "PX"+str(momentum[0])+"PY"+str(momentum[1])+"PZ"+str(momentum[2])
-    g_src.create_dataset(p_tag, data=corr)
-    f.close()
+def save_pion_soft_factor_c2pt_hdf5_noRoll(corr, tag, quark_momentum_pairs,
+                                         pion_channel_pairs, attrs=None):
+    """Write SS[pair,pion_pair,time] for all wall sink channels."""
+    data, pairs, _ = _soft_factor_dense_inputs(corr, quark_momentum_pairs, len(pion_channel_pairs))
+    metadata = _pion_matrix_metadata(pion_channel_pairs)
+    with _prepare_h5_file(str(tag) + ".h5") as handle:
+        _write_pion_soft_factor_metadata(handle, "SS_trace_product_of_separately_projected_spatial_sums",
+            "quark_pair,pion_pair,time", pairs, data.shape[-1], attrs)
+        handle.create_dataset("SS", data=data)
+        for name, value in metadata.items():
+            handle.create_dataset(name, data=value)
 
 
 # -----------------------------------------------------------------------------

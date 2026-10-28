@@ -144,6 +144,47 @@ def test_shared_matrix_helpers_follow_reference_backend_and_queue():
     assert matrix_on_backend(same_backend, np.empty(1)) is same_backend
 
 
+def test_matrix_helper_explicitly_copies_dpnp_matrix_to_host(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    class DeviceMatrix:
+        __module__ = "dpnp"
+
+        def __array__(self, *args, **kwargs):
+            raise TypeError("Implicit device-to-host conversion is forbidden")
+
+    value = DeviceMatrix()
+    copied = []
+    expected = np.eye(4, dtype=np.complex128)
+
+    def asnumpy(array):
+        assert array is value
+        copied.append(array)
+        return expected
+
+    monkeypatch.setitem(sys.modules, "dpnp", SimpleNamespace(asnumpy=asnumpy))
+    np.testing.assert_array_equal(matrix_on_backend(value, np.empty(1)), expected)
+    assert copied == [value]
+
+
+def test_loaded_wall_propagator_moves_to_configured_device(monkeypatch):
+    from types import SimpleNamespace
+    import pyquda_measurement_utils.pion_soft_factor_vibe_develop as soft
+
+    calls = []
+    prop = SimpleNamespace(toDevice=lambda: calls.append("toDevice"))
+
+    def load(filename, label):
+        calls.append((filename, label))
+        return prop
+
+    monkeypatch.setattr(soft.core, "LatticePropagator", SimpleNamespace(loadH5=load), raising=False)
+    measurement = object.__new__(soft.pion_soft_factor)
+    assert measurement.load_wall_propagator("wall.t63.pz4") is prop
+    assert calls == [("wall.t63.pz4.h5", "propagator"), "toDevice"]
+
+
 def test_emff_and_soft_factor_have_no_backend_specific_host_conversion():
     emff = (
         REPO_ROOT / "pyquda_measurement_utils/pion_EMFF_vibe_develop.py"
