@@ -40,7 +40,8 @@ def measurement():
 
 
 @pytest.mark.parametrize('local', [True, False])
-def test_shift_walk_matches_pyquda_sign_and_wraparound(monkeypatch, local):
+@pytest.mark.parametrize('sign', [-1, 1])
+def test_shift_walk_matches_pyquda_sign_and_wraparound(monkeypatch, local, sign):
     monkeypatch.setattr(soft, 'getGridSize', lambda: [1, 1, 1, 1] if local else [2, 2, 2, 1])
     monkeypatch.setattr(soft, 'getGridCoord', lambda: [0, 0, 0, 0])
     monkeypatch.setattr(soft, 'getRankFromCoord', lambda coord: 0)
@@ -49,8 +50,8 @@ def test_shift_walk_matches_pyquda_sign_and_wraparound(monkeypatch, local):
     data = np.arange(2 * 3 * 4 * 5).reshape(2, 3, 4, 5)
     for direction in range(3):
         prop = Prop(data.copy())
-        for b, value in enumerate(soft._shifted_lexico(prop, 7, direction)):
-            np.testing.assert_array_equal(value, np.roll(data, -b, axis=3 - direction))
+        for b, value in enumerate(soft._shifted_lexico(prop, 7, (direction, sign))):
+            np.testing.assert_array_equal(value, np.roll(data, -sign * b, axis=3 - direction))
         assert prop.shifts == []
         np.testing.assert_array_equal(prop.data, data)
 

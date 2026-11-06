@@ -1904,3 +1904,9 @@ tips, cluster facts, and repeated pitfalls in `SESSION_MEMORY.md` instead.
 - Pre-commit verification: 84 targeted library CPU/mock tests passed, covering dense I/O, the migrated caller, contraction algebra, shifts, tag helpers, backend conversion, device reload and application bookkeeping. Five external production CPU tests also passed. A storage-only round trip checked 3368 time series/215552 complex values in six files with exact equality.
 - External 64-rank Aurora resume job 8978164 completed cfg1056 with all 384 dense collections across 64 source times and four separations. Its 60 regenerated propagators/720 RHS and cache peak of 28 matched the pending-consumer plan; no propagator I/O occurred. The 148-cfg production job 8978686 was submitted separately with 3-hour walltime. Completion coverage is sample-log based; no production HDF5 readback is claimed.
 - The physics-note source and compiled PDF describe the dense layout; syntax and Git diff hygiene checks passed.
+
+## 2026-11-06: Signed transverse soft-factor shifts
+
+- Extend the optimized transverse shift walk to accept signed spatial axes while retaining the existing positive-axis interface and periodic MPI halo behavior.
+- Cover positive and negative directions in the existing local and mocked distributed shift regression.
+- The earlier a060 four-direction benchmark compared the positive-x contraction with production and exercised the directional rotations; production-scale GPU validation remains separate.

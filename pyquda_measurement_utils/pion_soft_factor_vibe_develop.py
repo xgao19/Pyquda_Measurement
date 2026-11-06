@@ -173,12 +173,18 @@ def _shifted_lexico(prop, length, direction):
 
 
 def _shifted_lexico_array(field, length, direction):
-    """Yield positive shifts with reusable buffers and ordinary periodic halos.
+    """Yield signed shifts with reusable buffers and ordinary periodic halos.
 
     The input is read-only. Later yields are temporary views into two work
     buffers: callers must consume them before advancing this walk again.
     Independent walks own separate buffers, including nested bT/bz walks.
     """
+    if isinstance(direction, tuple):
+        direction, sign = direction
+    else:
+        sign = 1
+    if direction not in (0, 1, 2) or sign not in (-1, 1):
+        raise ValueError("Expected a spatial axis and a shift sign of +1 or -1")
     yield field
     if length == 0:
         return
@@ -188,7 +194,12 @@ def _shifted_lexico_array(field, length, direction):
     first[axis], last[axis] = 0, -1
     first, last = tuple(first), tuple(last)
     interior_dst, interior_src = [slice(None)] * field.ndim, [slice(None)] * field.ndim
-    interior_dst[axis], interior_src[axis] = slice(None, -1), slice(1, None)
+    if sign == 1:
+        interior_dst[axis], interior_src[axis] = slice(None, -1), slice(1, None)
+        send_face, recv_face = first, last
+    else:
+        interior_dst[axis], interior_src[axis] = slice(1, None), slice(None, -1)
+        send_face, recv_face = last, first
     interior_dst, interior_src = tuple(interior_dst), tuple(interior_src)
     buffers = [zeros_on_backend(field.shape, field.dtype, xp, field) for _ in range(min(length, 2))]
     grid = getGridSize()
@@ -196,8 +207,8 @@ def _shifted_lexico_array(field, length, direction):
     if distributed:
         coord = list(getGridCoord())
         dest, source = coord.copy(), coord.copy()
-        dest[direction] = (coord[direction] - 1) % grid[direction]
-        source[direction] = (coord[direction] + 1) % grid[direction]
+        dest[direction] = (coord[direction] - sign) % grid[direction]
+        source[direction] = (coord[direction] + sign) % grid[direction]
         dest, source = getRankFromCoord(dest), getRankFromCoord(source)
         comm = getMPIComm()
         face_shape = field.shape[:axis] + field.shape[axis + 1:]
@@ -208,13 +219,13 @@ def _shifted_lexico_array(field, length, direction):
         out = buffers[(displacement - 1) % len(buffers)]
         out[interior_dst] = current[interior_src]
         if distributed:
-            packed_face[:] = current[first]
+            packed_face[:] = current[send_face]
             sendbuf = np.ascontiguousarray(array_to_numpy(packed_face))
             comm.Sendrecv(sendbuf, dest=dest, recvbuf=recvbuf, source=source)
             incoming = matrix_on_backend(recvbuf, field)
-            out[last] = incoming
+            out[recv_face] = incoming
         else:
-            out[last] = current[first]
+            out[recv_face] = current[send_face]
         current = out
         yield current
 
